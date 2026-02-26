@@ -134,7 +134,6 @@ dmypy.json
 myhost*
 **/plot*
 **/OUT*
-*_INPUT
 *_KPT
 *STRU
 .DS_Store
