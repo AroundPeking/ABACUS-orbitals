@@ -16,6 +16,16 @@ The full name of SIAB is
 Current, the SIAB program choose the minimization methods "PyTorch Gradient with dpsi (**PTG_dpsi**)" to optimize orbitals. 
 The executable files are placed in the "opt_orb_pytorch_dpsi" directory by default.
 
+## ABACUS compatibility
+
+For the currently validated GTH + SOC workflow, use SIAB together with the `ABACUS` baseline
+from `AroundPeking/abacus-develop` commit `2d87d673e4d0c4edcd316abc0e04dc9988b4fe59`.
+
+This SIAB tree already writes `bessel_nao_rcut` into the generated `INPUT`. In addition, the
+`read_istate.py` reader in this branch accepts both the legacy `istate.info` output and the newer
+`eig.txt` output written by newer ABACUS builds, so the same SIAB branch can be reused across
+servers without depending on an old local ABACUS copy.
+
 
 ## HOW TO USE SIAB
 
@@ -77,5 +87,4 @@ $ bsub -q idle -n 8 -oo running.log ./run.sh
  or submit job for SLURM cluster
 $ sbatch example_Si_sbatch.sh
 ```
-
 
