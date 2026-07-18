@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import math
+from collections.abc import Mapping
 
 import torch
 
@@ -53,12 +54,21 @@ def assemble_orbital_coefficients(data, c):
     block_data = []
     labels = []
     seen_keys = set()
+    represented_channels = set()
+    group_m_values = {}
+    atoms_by_element = {}
     n_column = 0
 
     for block in data.blocks:
         if block.key in seen_keys:
             raise ValueError(f"duplicate PrimitiveBlock key: {block.key}")
         seen_keys.add(block.key)
+        represented_channels.add((block.element, block.l))
+        group_key = (block.element, block.atom_index, block.l)
+        group_m_values.setdefault(group_key, []).append(block.m)
+        atoms_by_element.setdefault(block.element, set()).add(
+            block.atom_index
+        )
 
         coefficient = _coefficient_matrix(c, block.element, block.l)
         if coefficient.shape[0] != block.n_primitive:
@@ -79,6 +89,58 @@ def assemble_orbital_coefficients(data, c):
                 )
             )
         n_column += coefficient.shape[1]
+
+    for (element, atom_index, l), m_values in sorted(group_m_values.items()):
+        expected_m = tuple(range(-l, l + 1))
+        actual_m = tuple(sorted(m_values))
+        if actual_m != expected_m:
+            raise ValueError(
+                "incomplete PrimitiveBlock m group for "
+                f"{element}/atom{atom_index}/l{l}: "
+                f"expected {expected_m}, got {actual_m}"
+            )
+
+    missing_channels = []
+    nonempty_channels = []
+    for element, by_l in c.items():
+        if isinstance(by_l, Mapping):
+            channels = by_l.items()
+        else:
+            try:
+                channels = enumerate(by_l)
+            except TypeError as exc:
+                raise ValueError(
+                    f"C[{element!r}] must contain angular channels"
+                ) from exc
+        for l, coefficient in channels:
+            coefficient = _coefficient_matrix(c, element, l)
+            if (
+                coefficient.shape[0] > 0
+                and coefficient.shape[1] > 0
+            ):
+                nonempty_channels.append((element, l))
+                if (element, l) not in represented_channels:
+                    missing_channels.append((element, l))
+    if missing_channels:
+        formatted = ", ".join(
+            f"{element}/{l}" for element, l in sorted(missing_channels)
+        )
+        raise ValueError(
+            "Sternheimer data is missing primitive blocks for C channels: "
+            + formatted
+        )
+
+    missing_groups = []
+    for element, l in nonempty_channels:
+        for atom_index in sorted(atoms_by_element.get(element, ())):
+            if (element, atom_index, l) not in group_m_values:
+                missing_groups.append((element, atom_index, l))
+    if missing_groups:
+        element, atom_index, l = sorted(missing_groups)[0]
+        raise ValueError(
+            "Sternheimer data is missing PrimitiveBlock group for "
+            f"{element}/atom{atom_index}/l{l}"
+        )
 
     assembled = torch.zeros(
         (data.q.shape[1], n_column),

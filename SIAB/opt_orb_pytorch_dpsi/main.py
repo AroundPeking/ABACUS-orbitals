@@ -15,6 +15,7 @@ from optimization_loss import normalize_loss_config
 from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
 
 import numpy as np
+import torch
 import time
 import pprint
 import sys
@@ -72,13 +73,52 @@ def _expand_fixed_orbitals(data, C, freeze_specs):
 			fixed_orbitals.append(column)
 	return tuple(fixed_orbitals)
 
-def main():
-	seed = int(1000*time.time())%(2**32)
+
+def _set_random_seed(info_C_init):
+	if "seed" in info_C_init:
+		seed = info_C_init["seed"]
+		if type(seed) is not int:
+			raise TypeError("seed must be a non-bool integer")
+		if seed < 0 or seed >= 2**32:
+			raise ValueError("seed must satisfy 0 <= seed < 2**32")
+	else:
+		seed = int(1000 * time.time()) % (2**32)
 	np.random.seed(seed)
-	print("seed:",seed)
+	torch.manual_seed(seed)
+	print("numpy seed:", seed)
+	print("torch seed:", seed)
+	return seed
+
+
+def _normalize_initial_coefficients(
+	C, info_element, info_radial, E, freeze_specs=None
+):
+	frozen_columns = {}
+	if freeze_specs is not None:
+		freeze_indices = validate_freeze_orbitals(freeze_specs, C)
+		frozen_columns = {
+			index: C[index[0]][index[1]][:, index[2]].detach().clone()
+			for index in freeze_indices
+		}
+
+	orbital.normalize(
+		orbital.generate_orbital(info_element, info_radial, C, E),
+		info_radial["dr"],
+		C,
+		flag_norm_C=True,
+	)
+
+	if frozen_columns:
+		with torch.no_grad():
+			for (element, l, zeta), column in frozen_columns.items():
+				C[element][l][:, zeta].copy_(column)
+
+
+def main():
 	time_start = time.time()
 
 	file_list, info_true, info_weight, info_optimize, info_C_init, info_V, info_radial = IO.read_json.read_json("INPUT")
+	_set_random_seed(info_C_init)
 	sternheimer_data, sternheimer_stages = _load_sternheimer_data(
 		file_list, info_optimize
 	)
@@ -106,10 +146,14 @@ def main():
 	else:
 		C = IO.func_C.random_C_init(info_element)
 	E = orbital.set_E(info_element, info_radial["Rcut"])
-	orbital.normalize(
-		orbital.generate_orbital(info_element, info_radial, C, E),
-		info_radial["dr"],
-		C, flag_norm_C=True)
+	freeze_specs = (
+		info_C_init["freeze_orbitals"]
+		if "freeze_orbitals" in info_C_init
+		else None
+	)
+	_normalize_initial_coefficients(
+		C, info_element, info_radial, E, freeze_specs
+	)
 
 	sternheimer_spillage = None
 	if sternheimer_data is not None:

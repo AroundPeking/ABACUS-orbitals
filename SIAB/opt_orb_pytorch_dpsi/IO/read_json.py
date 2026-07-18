@@ -9,6 +9,11 @@ def read_json(file_name):
 	with open(file_name,"r") as file:
 		input = file.read()
 	input = json.loads(input)
+	if (
+		isinstance(input.get("C_init_info"), dict)
+		and "seed" in input["C_init_info"]
+	):
+		raise ValueError("seed must be specified at top-level only")
 
 	input_default =	{
 		"element":{
@@ -38,6 +43,13 @@ def read_json(file_name):
 	}
 	util.set_dict_default(input, input_default)
 	util.set_dict_default_elements(input["radial"], input["element"]["Nt_all"])
+	if "seed" in input:
+		seed = input["seed"]
+		if type(seed) is not int:
+			raise TypeError("seed must be a non-bool integer")
+		if seed < 0 or seed >= 2**32:
+			raise ValueError("seed must satisfy 0 <= seed < 2**32")
+		input["C_init_info"]["seed"] = seed
 	if "freeze_orbitals" in input:
 		input["C_init_info"]["freeze_orbitals"] = copy.deepcopy(input["freeze_orbitals"])
 	if "loss" in input:

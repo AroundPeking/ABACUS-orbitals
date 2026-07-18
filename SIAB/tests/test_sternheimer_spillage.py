@@ -115,6 +115,109 @@ class SternheimerSpillageTest(unittest.TestCase):
             atol=1.0e-14,
         )
 
+    def test_rejects_missing_nonempty_coefficient_channel(self):
+        data = make_sternheimer_data(
+            [h_s_block(3)],
+            [0.6, 0.64, 0.48],
+        )
+        c = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                ),
+                torch.tensor(
+                    [[1.0], [0.0]],
+                    dtype=torch.float64,
+                ),
+            ]
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Sternheimer data is missing primitive blocks for C channels: H/1",
+        ):
+            assemble_orbital_coefficients(data, c)
+
+    def test_rejects_incomplete_p_m_group(self):
+        data = make_sternheimer_data(
+            [PrimitiveBlock("H", 0, 1, 0, 2, 0)],
+            torch.zeros(2),
+        )
+        c = {
+            "H": {
+                1: torch.tensor(
+                    [[1.0], [0.0]], dtype=torch.float64
+                )
+            }
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"incomplete PrimitiveBlock m group for H/atom0/l1: "
+            r"expected \(-1, 0, 1\), got \(0,\)",
+        ):
+            assemble_orbital_coefficients(data, c)
+
+    def test_rejects_missing_channel_group_for_actual_atom(self):
+        blocks = (
+            PrimitiveBlock("H", 0, 0, 0, 2, 0),
+            PrimitiveBlock("H", 0, 1, -1, 2, 2),
+            PrimitiveBlock("H", 0, 1, 0, 2, 4),
+            PrimitiveBlock("H", 0, 1, 1, 2, 6),
+            PrimitiveBlock("H", 1, 0, 0, 2, 8),
+        )
+        data = make_sternheimer_data(blocks, torch.zeros(10))
+        c = {
+            "H": [
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+            ]
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Sternheimer data is missing PrimitiveBlock group for "
+            r"H/atom1/l1",
+        ):
+            assemble_orbital_coefficients(data, c)
+
+    def test_complete_s_and_p_m_groups_assemble(self):
+        blocks = (
+            PrimitiveBlock("H", 0, 0, 0, 2, 0),
+            PrimitiveBlock("H", 0, 1, -1, 2, 2),
+            PrimitiveBlock("H", 0, 1, 0, 2, 4),
+            PrimitiveBlock("H", 0, 1, 1, 2, 6),
+        )
+        data = make_sternheimer_data(blocks, torch.zeros(8))
+        c = {
+            "H": [
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float64
+                ),
+            ]
+        }
+
+        assembled, labels = assemble_orbital_coefficients(data, c)
+
+        self.assertEqual(assembled.shape, (8, 7))
+        self.assertEqual(len(labels), 7)
+
+    def test_zero_zeta_channel_does_not_require_a_block_group(self):
+        data = make_sternheimer_data([h_s_block(2)], torch.zeros(2))
+        c = {
+            "H": [
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+            ]
+        }
+
+        assembled, labels = assemble_orbital_coefficients(data, c)
+
+        self.assertEqual(assembled.shape, (2, 1))
+        self.assertEqual(labels, (OrbitalColumn("H", 0, 0, 0, 1),))
+
     def test_fixed_space_phase_invariance(self):
         c = {
             "H": [

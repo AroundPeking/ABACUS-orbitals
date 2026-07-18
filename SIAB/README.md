@@ -79,3 +79,16 @@ $ sbatch example_Si_sbatch.sh
 ```
 
 
+## Opt-in Sternheimer optimization
+
+The Sternheimer path is opt-in. Existing JSON inputs without `file_list.sternheimer`, `loss`, `freeze_orbitals`, or `seed` retain the legacy DFT+dpsi behavior and the seven-value `read_json` interface.
+
+New runs provide one versioned Sternheimer matrix and select one of two loss modes:
+
+- `st_only` minimizes the projected first-order-wavefunction loss.
+- `st_constrained` minimizes the same loss while enforcing the configured DFT and dpsi baseline tolerances.
+
+An explicit top-level `freeze_orbitals` list takes precedence over the legacy `C_read_index` freeze behavior. Its `zeta` values are one-based. A top-level integer `seed` makes NumPy and PyTorch initialization reproducible; omitting it retains the legacy time-based seed.
+
+See [`example_H_sternheimer`](example_H_sternheimer/README.md) for the H-TZDP configurations, exact data contract, provenance gate, and run commands. These example inputs do not include producer data and do not claim physics validation.
+
