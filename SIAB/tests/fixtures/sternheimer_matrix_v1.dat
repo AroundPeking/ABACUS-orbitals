@@ -46,5 +46,5 @@ H 0 1 0 2 2
 1.0 0.0
 </OVERLAP_S>
 <PROVENANCE_JSON>
-{"abacus_commit":"19ab21e01d02cc805604ed77a6e269af698fdd1d","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,20.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
+{"abacus_commit":"19ab21e01d02cc805604ed77a6e269af698fdd1d","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,0.0,0.0,0.0,20.0,0.0,0.0,0.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
 </PROVENANCE_JSON>

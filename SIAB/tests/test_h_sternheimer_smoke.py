@@ -110,7 +110,7 @@ def _provenance():
     return {
         "abacus_commit": "synthetic-smoke",
         "auxiliary_basis_sha256": "synthetic-smoke",
-        "cell_bohr": [1.0, 1.0, 1.0],
+        "cell_bohr": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         "ecut_ry": 1.0,
         "kernel": "none",
         "orbital_sha256": "synthetic-smoke",

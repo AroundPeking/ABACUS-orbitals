@@ -46,6 +46,10 @@ class ReadSternheimerTest(unittest.TestCase):
         )
         self.assertEqual(data.blocks[1].key, ("H", 0, 1, 0))
         self.assertEqual(data.provenance["kernel"], "full_coulomb")
+        self.assertEqual(
+            data.provenance["cell_bohr"],
+            [20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0],
+        )
         self.assertEqual(data.occupied_state.dtype, torch.int64)
         self.assertEqual(data.auxiliary_channel.dtype, torch.int64)
         for field in (
@@ -185,6 +189,47 @@ class ReadSternheimerTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "missing provenance key: kernel"):
             read_sternheimer(path)
+
+    def test_rejects_incomplete_or_singular_cell_provenance(self):
+        for cell, message in (
+            ([20.0, 20.0, 20.0], "nine row-major lattice components"),
+            (
+                [1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                "lattice must be nonsingular",
+            ),
+        ):
+            with self.subTest(cell=cell):
+                def replace_cell(lines):
+                    provenance = json.loads(lines[0])
+                    provenance["cell_bohr"] = cell
+                    return [json.dumps(provenance, separators=(",", ":"))]
+
+                path = self.write_variant(
+                    replace_section_body(
+                        self.fixture_text,
+                        "PROVENANCE_JSON",
+                        replace_cell,
+                    )
+                )
+                with self.assertRaisesRegex(ValueError, message):
+                    read_sternheimer(path)
+
+    def test_accepts_nonorthogonal_cell_with_negative_components(self):
+        cell = [20.0, 1.0, -2.0, 0.0, 19.0, 3.0, -1.0, 0.0, 18.0]
+
+        def replace_cell(lines):
+            provenance = json.loads(lines[0])
+            provenance["cell_bohr"] = cell
+            return [json.dumps(provenance, separators=(",", ":"))]
+
+        path = self.write_variant(
+            replace_section_body(
+                self.fixture_text,
+                "PROVENANCE_JSON",
+                replace_cell,
+            )
+        )
+        self.assertEqual(read_sternheimer(path).provenance["cell_bohr"], cell)
 
     def test_rejects_duplicate_provenance_key(self):
         path = self.write_variant(

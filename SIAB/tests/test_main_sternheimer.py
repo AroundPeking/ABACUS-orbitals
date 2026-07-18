@@ -60,7 +60,7 @@ def provenance():
     return {
         "abacus_commit": "a" * 40,
         "auxiliary_basis_sha256": "b" * 64,
-        "cell_bohr": [20.0, 20.0, 20.0],
+        "cell_bohr": [20.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0],
         "ecut_ry": 25.0,
         "kernel": "full_coulomb",
         "orbital_sha256": "c" * 64,

@@ -168,6 +168,7 @@ class SternheimerData:
         for key in _PROVENANCE_KEYS:
             if key not in self.provenance:
                 raise ValueError(f"missing provenance key: {key}")
+        self._validate_cell(self.provenance["cell_bohr"])
 
     @staticmethod
     def _validate_tensor(field, value, dtype, rank):
@@ -179,6 +180,26 @@ class SternheimerData:
             raise ValueError(f"{field} must be on CPU")
         if value.ndim != rank:
             raise ValueError(f"{field} must have rank {rank}, got {value.ndim}")
+
+    @staticmethod
+    def _validate_cell(cell):
+        if not isinstance(cell, (list, tuple)) or len(cell) != 9:
+            raise ValueError(
+                "provenance cell_bohr must contain nine row-major lattice components"
+            )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in cell
+        ):
+            raise ValueError("provenance cell_bohr components must be finite numbers")
+        a, b, c, d, e, f, g, h, i = (float(value) for value in cell)
+        determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (
+            d * h - e * g
+        )
+        if not math.isfinite(determinant) or determinant == 0.0:
+            raise ValueError("provenance cell_bohr lattice must be nonsingular")
 
     def _validate_block_coverage(self, n_primitive):
         expected_offset = 0

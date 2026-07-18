@@ -93,7 +93,7 @@ H 0 1 0 2 2
 1.0 0.0
 </OVERLAP_S>
 <PROVENANCE_JSON>
-{"abacus_commit":"19ab21e01d02cc805604ed77a6e269af698fdd1d","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,20.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
+{"abacus_commit":"19ab21e01d02cc805604ed77a6e269af698fdd1d","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,0.0,0.0,0.0,20.0,0.0,0.0,0.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
 </PROVENANCE_JSON>
 ```
 
@@ -266,7 +266,7 @@ class SternheimerData:
         return self.occupation * self.frequency_weight
 ```
 
-Validation in `SternheimerData` must require complex128 `q/overlap`, float64 reference arrays, contiguous non-overlapping block offsets covering exactly `n_primitive`, positive norms, nonnegative weights, Hermitian `overlap` within `1e-10`, and these provenance keys: `abacus_commit`, `auxiliary_basis_sha256`, `cell_bohr`, `ecut_ry`, `kernel`, `orbital_sha256`, `pseudopotential_sha256`, `spin_convention`.
+Validation in `SternheimerData` must require complex128 `q/overlap`, float64 reference arrays, contiguous non-overlapping block offsets covering exactly `n_primitive`, positive norms, nonnegative weights, Hermitian `overlap` within `1e-10`, and these provenance keys: `abacus_commit`, `auxiliary_basis_sha256`, `cell_bohr`, `ecut_ry`, `kernel`, `orbital_sha256`, `pseudopotential_sha256`, `spin_convention`. `cell_bohr` is exactly nine finite row-major lattice-vector components and must define a nonsingular cell; zero and negative components are valid.
 
 - [ ] **Step 4: Implement a strict section parser**
 

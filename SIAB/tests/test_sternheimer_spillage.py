@@ -56,7 +56,7 @@ def make_sternheimer_data(
         provenance={
             "abacus_commit": "synthetic",
             "auxiliary_basis_sha256": "synthetic",
-            "cell_bohr": [1.0, 1.0, 1.0],
+            "cell_bohr": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             "ecut_ry": 1.0,
             "kernel": "none",
             "orbital_sha256": "synthetic",
