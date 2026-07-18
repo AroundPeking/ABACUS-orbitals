@@ -1,7 +1,10 @@
 from util import ND_list
 import numpy as np
 from scipy.special import spherical_jn
-from scipy.integrate import simps
+try:
+	from scipy.integrate import simpson as simps
+except ImportError:
+	from scipy.integrate import simps
 from scipy.optimize import fsolve
 import functools
 import torch
@@ -100,7 +103,7 @@ def find_eigenvalue(Nl, Ne):
 	for il in range(1,Nl):
 		jl = functools.partial(spherical_jn,il)
 		for ie in range(1,Ne+Nl+1-il):
-			E[il,ie] = fsolve( jl, (E[il-1,ie]+E[il-1,ie+1])/2 )
+			E[il,ie] = float(fsolve(jl, (E[il-1,ie]+E[il-1,ie+1])/2)[0])
 	return E[:,1:Ne+1]
 
 def set_E(info_element, Rcut):

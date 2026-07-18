@@ -5,7 +5,8 @@ This directory defines the first H-TZDP Sternheimer-supervised SIAB experiment. 
 ## Provenance status
 
 - The H atom Sternheimer matrix is the only new supervision.
-- `st_constrained` reuses the historical H dimer/trimer DFT and dpsi matrices at 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
+- `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom Sternheimer matrix and the checked-in TZDP coefficients.
+- `st_constrained` additionally reuses the historical H dimer/trimer DFT and dpsi matrices at 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
 - H2 RPA is held out from optimization and is reserved for the final transfer test.
 - The initial basis is the existing H TZDP basis at 8 Bohr. Its level-1 `1s` radial orbital is fixed exactly; the remaining `s` and `p` orbitals are optimized.
 - The spherical-Bessel representation is the original SIAB one: 100 Ry, 8 Bohr, with the 0.1-Bohr cutoff smoothing used to generate the checked-in H-TZDP orbital.
@@ -33,6 +34,6 @@ Both inputs use seed `20260718`. The optimizer must report that value for both N
 
 The exact converged H-atom ABACUS producer input and `normal`-partition job
 script are under `producer/`.  Stage the checked-in H-TZDP `.orb` and the
-Dojo-NC-SR H pseudopotential beside those files before submitting.  The job
+Dojo-NC-SR `Pseudopotential/H.upf` beside those files before submitting.  The job
 uses one 30-thread MPI rank for each of the 16 minimax frequencies and refuses
 to run if the immutable ABACUS executable hash changes.

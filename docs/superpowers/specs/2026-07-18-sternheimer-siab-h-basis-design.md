@@ -61,6 +61,13 @@ Sternheimer target and variable orbital set. It is a diagnostic, not the
 default production basis, because it does not prevent DFT quality from
 degrading away from the initial TZDP optimum.
 
+The executable option-1 path is intentionally independent of the historical
+SIAB matrices: `file_list` contains only `sternheimer`, and `info_element.Ne`
+is derived by cross-checking the requested `Nu` channels against the primitive
+blocks in the versioned target.  DFT and dpsi components are reported as zero
+to mean "not evaluated".  `st_constrained` still requires real `origin` and
+`linear` data and rejects their absence.
+
 ### 3.2 Constrained ST optimization
 
 The production candidate minimizes the same Sternheimer loss while retaining

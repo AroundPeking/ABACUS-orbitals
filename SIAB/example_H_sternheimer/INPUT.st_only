@@ -1,16 +1,6 @@
 {
   "seed": 20260718,
   "file_list": {
-    "origin": [
-      "data/OUT.H-STRU2-8-0.7/orb_matrix.0.dat",
-      "data/OUT.H-STRU2-8-0.9/orb_matrix.0.dat",
-      "data/OUT.H-STRU2-8-1.3/orb_matrix.0.dat"
-    ],
-    "linear": [[
-      "data/OUT.H-STRU2-8-0.7/orb_matrix.1.dat",
-      "data/OUT.H-STRU2-8-0.9/orb_matrix.1.dat",
-      "data/OUT.H-STRU2-8-1.3/orb_matrix.1.dat"
-    ]],
     "sternheimer": [
       "data/OUT.H-atom-ST/sternheimer_matrix.dat"
     ]
@@ -19,10 +9,7 @@
     "Nt_all": ["H"],
     "Nu": {"H": [3, 2]}
   },
-  "weight": {
-    "stru": [1.0, 1.0, 1.0],
-    "bands_range": [1, 1, 1]
-  },
+  "weight": {},
   "optimize": [
     {
       "optimizer": "Adam",

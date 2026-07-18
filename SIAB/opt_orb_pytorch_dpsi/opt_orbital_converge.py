@@ -46,6 +46,8 @@ class Opt_Orbital_Converge:
 		self.sternheimer_spillage = sternheimer_spillage
 
 	def _make_spillage(self, info_opt):
+		if not hasattr(self, "QI"):
+			raise ValueError("legacy DFT spillage requires origin data")
 		spillage = Opt_Orbital_Spillage(
 			self.info_stru,
 			self.info_element,
@@ -97,10 +99,22 @@ class Opt_Orbital_Converge:
 					"call set_sternheimer_spillage first"
 				)
 			for stage_index in new_stage_indices:
-				baseline_spillage = self._make_spillage(
-					self.info_optimize[stage_index]
-				)
-				baseline_components = baseline_spillage.cal_components(C_initial)
+				loss_config = loss_configs[stage_index]
+				if hasattr(self, "QI"):
+					baseline_spillage = self._make_spillage(
+						self.info_optimize[stage_index]
+					)
+					baseline_components = baseline_spillage.cal_components(C_initial)
+				else:
+					if loss_config["mode"] != "st_only":
+						raise ValueError(
+							"st_constrained requires legacy DFT and dpsi data"
+						)
+					zero = next(iter(C_initial.values()))[0].sum() * 0.0
+					baseline_components = {
+						"dft_origin": zero,
+						"dft_dpsi": zero,
+					}
 				loss_baselines[stage_index] = {
 					"dft_origin": baseline_components["dft_origin"].detach().clone(),
 					"dft_dpsi": baseline_components["dft_dpsi"].detach().clone(),
@@ -128,14 +142,13 @@ class Opt_Orbital_Converge:
 				detail_schema = "legacy"
 
 			opt = optimize.get_optim(info_opt, sum(C.values(), []))
-			spillage = self._make_spillage(info_opt)
+			spillage = self._make_spillage(info_opt) if hasattr(self, "QI") else None
 
 			if new_loss_stage:
 				loss_config = loss_configs[stage_index]
 				loss_baseline = loss_baselines[stage_index]
 
 				def calculate_components():
-					legacy_components = spillage.cal_components(C)
 					st_result = self.sternheimer_spillage.evaluate(C)
 					if not isinstance(st_result, SternheimerLossResult):
 						raise TypeError(
@@ -143,6 +156,14 @@ class Opt_Orbital_Converge:
 						)
 					if not math.isfinite(st_result.max_condition):
 						raise ValueError("max_st_condition must be finite")
+					if spillage is None:
+						zero = torch.zeros_like(st_result.loss)
+						legacy_components = {
+							"dft_origin": zero,
+							"dft_dpsi": zero,
+						}
+					else:
+						legacy_components = spillage.cal_components(C)
 					components = compose_loss(
 						loss_config["mode"],
 						st_result.loss,

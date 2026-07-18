@@ -387,6 +387,57 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
 
 
 class MainIntegrationTest(unittest.TestCase):
+    def test_st_only_main_needs_no_origin_or_linear_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            st_path = path / "sternheimer.dat"
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["file_list"] = {"sternheimer": [str(st_path)]}
+            value["weight"] = {}
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path), mock.patch.object(
+                siab_main.orbital, "normalize", return_value=None
+            ), mock.patch.object(
+                siab_main.orbital, "generate_orbital", return_value={"H": [[]]}
+            ), mock.patch.object(
+                siab_main.orbital, "orth", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "print_orbital", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "plot_orbital", return_value=None
+            ):
+                siab_main.main()
+
+            result_text = (path / "ORBITAL_RESULTS.txt").read_text()
+            self.assertIn("Mode = st_only", result_text)
+            self.assertIn("DFT origin loss = 0.0000000000e+00", result_text)
+            self.assertIn("DFT dpsi loss = 0.0000000000e+00", result_text)
+
+    def test_constrained_main_still_requires_legacy_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            st_path = path / "sternheimer.dat"
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["file_list"] = {"sternheimer": [str(st_path)]}
+            value["weight"] = {}
+            value["loss"]["mode"] = "st_constrained"
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path):
+                with self.assertRaisesRegex(
+                    ValueError, "st_constrained requires origin and dpsi data"
+                ):
+                    siab_main.main()
+
     def test_real_main_reads_once_writes_metadata_and_freezes_level1(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

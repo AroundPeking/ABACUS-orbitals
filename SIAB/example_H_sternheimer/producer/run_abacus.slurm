@@ -42,7 +42,7 @@ actual_sha256=$(sha256sum "$abacus_work" | awk '{print $1}')
 echo "abacus_sha256=$actual_sha256"
 test "$actual_sha256" = "$abacus_sha256"
 sha256sum INPUT STRU KPT fixed_frequency_grid_nfreq16_from_sos20A.dat \
-  H_ONCV_PBE-1.0.upf H_gga_8au_100Ry_3s2p.orb
+  H.upf H_gga_8au_100Ry_3s2p.orb
 
 /usr/bin/time -p mpirun -np "${SLURM_NTASKS:-16}" -ppn 1 "$abacus_work" \
   > "abacus.${SLURM_JOB_ID}.out" 2>&1

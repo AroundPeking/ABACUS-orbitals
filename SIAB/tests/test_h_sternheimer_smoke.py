@@ -514,13 +514,16 @@ class ExplicitFreezeInitializationTest(unittest.TestCase):
 
 
 class ExampleInputTest(unittest.TestCase):
-    def test_inputs_match_exact_campaign_contract_and_only_mode_differs(self):
+    def test_inputs_match_exact_campaign_contract(self):
         st_only = json.loads((EXAMPLE / "INPUT.st_only").read_text())
         constrained = json.loads((EXAMPLE / "INPUT.st_constrained").read_text())
-        constrained_as_st_only = copy.deepcopy(constrained)
-        constrained_as_st_only["loss"]["mode"] = "st_only"
-
-        self.assertEqual(st_only, constrained_as_st_only)
+        self.assertEqual(st_only["file_list"].keys(), {"sternheimer"})
+        self.assertNotIn("origin", st_only["file_list"])
+        self.assertNotIn("linear", st_only["file_list"])
+        self.assertIn("origin", constrained["file_list"])
+        self.assertIn("linear", constrained["file_list"])
+        self.assertEqual(st_only["loss"]["mode"], "st_only")
+        self.assertEqual(constrained["loss"]["mode"], "st_constrained")
         self.assertEqual(st_only["seed"], SEED)
         self.assertEqual(st_only["element"]["Nu"], {"H": [3, 2]})
         self.assertEqual(st_only["radial"]["Rcut"], 8)
@@ -557,16 +560,6 @@ class ExampleInputTest(unittest.TestCase):
         self.assertEqual(
             st_only["file_list"],
             {
-                "origin": [
-                    "data/OUT.H-STRU2-8-0.7/orb_matrix.0.dat",
-                    "data/OUT.H-STRU2-8-0.9/orb_matrix.0.dat",
-                    "data/OUT.H-STRU2-8-1.3/orb_matrix.0.dat",
-                ],
-                "linear": [[
-                    "data/OUT.H-STRU2-8-0.7/orb_matrix.1.dat",
-                    "data/OUT.H-STRU2-8-0.9/orb_matrix.1.dat",
-                    "data/OUT.H-STRU2-8-1.3/orb_matrix.1.dat",
-                ]],
                 "sternheimer": [
                     "data/OUT.H-atom-ST/sternheimer_matrix.dat"
                 ],

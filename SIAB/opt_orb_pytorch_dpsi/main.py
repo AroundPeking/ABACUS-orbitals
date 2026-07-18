@@ -9,6 +9,7 @@ import IO.print_orbital
 import IO.cal_weight
 import IO.change_info
 import orbital
+import addict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from optimization_loss import normalize_loss_config
@@ -74,6 +75,53 @@ def _expand_fixed_orbitals(data, C, freeze_specs):
 	return tuple(fixed_orbitals)
 
 
+def _sternheimer_info_element(data, info_true):
+	elements = tuple(info_true.Nt_all)
+	if len(set(elements)) != len(elements):
+		raise ValueError("element.Nt_all must not contain duplicates")
+	if set(info_true.Nu) != set(elements):
+		raise ValueError("element.Nu keys must match element.Nt_all")
+
+	data_elements = {block.element for block in data.blocks}
+	if data_elements != set(elements):
+		raise ValueError(
+			"Sternheimer primitive elements do not match element.Nt_all: "
+			f"target={sorted(data_elements)!r}, input={sorted(elements)!r}"
+		)
+
+	info_element = addict.Dict()
+	for element_index, element in enumerate(elements):
+		nu = list(info_true.Nu[element])
+		if not nu or any(type(value) is not int or value <= 0 for value in nu):
+			raise ValueError(
+				f"element.Nu[{element!r}] must contain positive integers"
+			)
+		nprimitive_by_l = []
+		for l in range(len(nu)):
+			counts = {
+				block.n_primitive
+				for block in data.blocks
+				if block.element == element and block.l == l
+			}
+			if len(counts) != 1:
+				raise ValueError(
+					"Sternheimer target must define one primitive count for "
+					f"every requested element/l; {element}/{l} has {sorted(counts)!r}"
+				)
+			nprimitive_by_l.append(counts.pop())
+		if len(set(nprimitive_by_l)) != 1:
+			raise ValueError(
+				"SIAB currently requires one radial primitive count per element; "
+				f"{element} has {nprimitive_by_l!r}"
+			)
+
+		info_element[element].index = element_index
+		info_element[element].Nu = nu
+		info_element[element].Nl = len(nu)
+		info_element[element].Ne = nprimitive_by_l[0]
+	return info_element
+
+
 def _set_random_seed(info_C_init):
 	if "seed" in info_C_init:
 		seed = info_C_init["seed"]
@@ -122,24 +170,41 @@ def main():
 	sternheimer_data, sternheimer_stages = _load_sternheimer_data(
 		file_list, info_optimize
 	)
-
-	weight = IO.cal_weight.cal_weight(info_weight, info_V["same_band"], file_list["origin"])
-
-	info_kst = IO.read_QSV.read_file_head(info_true, file_list["origin"])
-
-	info_stru, info_element = IO.change_info.change_info(info_kst, weight, info_V["same_band"])
+	has_legacy_origin = "origin" in file_list
+	if not has_legacy_origin:
+		if sternheimer_data is None or not sternheimer_stages:
+			raise ValueError("SIAB input without origin requires Sternheimer data")
+		if any(stage["mode"] != "st_only" for stage in sternheimer_stages):
+			raise ValueError("st_constrained requires origin and dpsi data")
+		if "linear" in file_list:
+			raise ValueError("linear data requires origin data")
+		info_kst = None
+		info_stru = []
+		info_element = _sternheimer_info_element(sternheimer_data, info_true)
+	else:
+		weight = IO.cal_weight.cal_weight(
+			info_weight, info_V["same_band"], file_list["origin"]
+		)
+		info_kst = IO.read_QSV.read_file_head(info_true, file_list["origin"])
+		info_stru, info_element = IO.change_info.change_info(
+			info_kst, weight, info_V["same_band"]
+		)
 	#info_max = IO.change_info.get_info_max(info_stru, info_element)
 
-	print("info_kst:", pprint.pformat(info_kst), sep="\n", end="\n"*2)
+	if info_kst is not None:
+		print("info_kst:", pprint.pformat(info_kst), sep="\n", end="\n"*2)
 	print("info_element:", pprint.pformat(info_element,width=40), sep="\n", end="\n"*2)
 	print("info_optimize:", pprint.pformat(info_optimize,width=40), sep="\n", end="\n"*2)
 	print("info_radial:", pprint.pformat(info_radial,width=40), sep="\n", end="\n"*2)
 	print("info_stru:", pprint.pformat(info_stru), sep="\n", end="\n"*2)
 	#print("info_max:", pprint.pformat(info_max), sep="\n", end="\n"*2)
 
-	QI,SI,VI_origin = IO.read_QSV.read_QSV(info_stru, info_element, file_list["origin"], info_V)
-	if "linear" in file_list.keys():
-		QI_linear, SI_linear, VI_linear = list(zip(*( IO.read_QSV.read_QSV(info_stru, info_element, file, info_V) for file in file_list["linear"] )))
+	if has_legacy_origin:
+		QI,SI,VI_origin = IO.read_QSV.read_QSV(
+			info_stru, info_element, file_list["origin"], info_V
+		)
+		if "linear" in file_list.keys():
+			QI_linear, SI_linear, VI_linear = list(zip(*( IO.read_QSV.read_QSV(info_stru, info_element, file, info_V) for file in file_list["linear"] )))
 
 	if info_C_init["init_from_file"]:
 		C, C_read_index = IO.func_C.read_C_init( info_C_init["C_init_file"], info_element )
@@ -178,7 +243,8 @@ def main():
 	opt_orb_conv = Opt_Orbital_Converge()
 	opt_orb_conv.set_info(file_list, info_optimize, info_stru, info_C_init, info_V)
 	opt_orb_conv.set_info_element(info_element)
-	opt_orb_conv.set_QSVI(QI, SI, VI_origin)
+	if has_legacy_origin:
+		opt_orb_conv.set_QSVI(QI, SI, VI_origin)
 	if sternheimer_spillage is not None:
 		opt_orb_conv.set_sternheimer_spillage(sternheimer_spillage)
 	if "linear" in file_list.keys():

@@ -343,7 +343,12 @@ git commit --author='Codex <codex@openai.com>' -m 'feat(sternheimer): export MPI
 
 The fully converged real-H comparison used the same two frequencies, PP, H-TZDP 8-au orbital, cell, cutoff, auxiliary basis, and immutable executable. The one-rank run was job `21311121`; the two-frequency-owner run was job `21311122`. Both exited `0:0`, wrote 66 rows and 32 primitives, and reported all response equations converged. Metadata and `S` were exactly equal. The maximum relative differences were `4.43e-12` for `norm`, `2.24e-11` for row-wise phase-aligned `Q`, and `8.11e-12` for the phase-invariant row projector `Q^dagger Q`. The stricter synthetic MPI test remains bitwise identical; the real-run residual reflects upstream SCF/linear-solver floating reductions and KS gauge, not missing or duplicated producer rows.
 
-### Task 5: Regenerate the Historical DFT/dpsi Constraint Data
+### Task 5: Regenerate the Historical DFT/dpsi Constraint Data (Constrained Lane Only)
+
+This task is not a prerequisite for the user-selected option 1.  The `st_only`
+lane must run without `origin` or `linear` files.  Complete this task before
+the later `st_constrained` comparison, not by inserting placeholder legacy
+matrices into the pure Sternheimer run.
 
 **Files:**
 - Use checked-in: `Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/INPUT`
@@ -400,9 +405,9 @@ all provenance hashes
 
 Require matching PP/orbital/ABFS hashes with the intended campaign and `kernel=full_coulomb`.
 
-- [ ] **Step 3: Run ST-only and constrained from byte-identical C0**
+- [ ] **Step 3: Run ST-only from C0, then constrained after Task 5**
 
-Archive the initial coefficient hash before each run and require equality. Run deterministic seeds. If constrained loss ratios exceed `1.05` or `1.10`, multiply only the violated penalty by `10` and restart from C0; test penalties in the sequence `10`, `100`, `1000`. Never restart from an intermediate basis.
+First run option 1 using only `file_list.sternheimer`; no historical DFT/dpsi matrix may be opened.  Archive the initial coefficient hash and the fixed-level1 hash.  After Task 5 is complete, start the constrained comparison from the same byte-identical C0. Run deterministic seeds. If constrained loss ratios exceed `1.05` or `1.10`, multiply only the violated penalty by `10` and restart from C0; test penalties in the sequence `10`, `100`, `1000`. Never restart from an intermediate basis.
 
 - [ ] **Step 4: Produce the optimization comparison**
 
