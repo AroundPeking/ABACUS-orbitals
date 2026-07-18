@@ -21,6 +21,10 @@ DEFAULT_INITIAL = (
     REPO_ROOT
     / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt"
 )
+DEFAULT_REFERENCE_ORBITAL = (
+    REPO_ROOT
+    / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/H_gga_8au_100Ry_3s2p.orb"
+)
 OPTIMIZER = SIAB_DIR / "opt_orb_pytorch_dpsi/main.py"
 
 
@@ -90,6 +94,48 @@ def _float64_bytes(values):
     return b"".join(struct.pack("=d", value) for value in values)
 
 
+def read_orbital(path, l, zeta):
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    mesh = None
+    for line in lines:
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == "Mesh":
+            mesh = int(fields[1])
+            break
+    if mesh is None or mesh <= 0:
+        raise ValueError(f"invalid or missing Mesh in {path}")
+
+    index = 0
+    while index < len(lines):
+        fields = lines[index].split()
+        if fields == ["Type", "L", "N"]:
+            index += 1
+            if index >= len(lines):
+                raise ValueError(f"missing orbital label in {path}")
+            label_fields = lines[index].split()
+            if len(label_fields) != 3:
+                raise ValueError(f"invalid orbital label in {path}")
+            label = (int(label_fields[1]), int(label_fields[2]))
+            values = []
+            index += 1
+            while index < len(lines):
+                value_fields = lines[index].split()
+                if value_fields == ["Type", "L", "N"]:
+                    break
+                for value in value_fields:
+                    values.append(float(value))
+                index += 1
+            if label == (int(l), int(zeta)):
+                if len(values) != mesh:
+                    raise ValueError(
+                        f"orbital {label} has {len(values)} points, expected {mesh}"
+                    )
+                return tuple(values)
+            continue
+        index += 1
+    raise ValueError(f"orbital {(int(l), int(zeta))} not found in {path}")
+
+
 def _read_initial_sternheimer_loss(path):
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     for index, line in enumerate(lines):
@@ -134,19 +180,27 @@ def _read_loss_metadata(path):
 
 
 def summarize_campaign(
-    target, initial_coefficients, output_dir, elapsed_seconds
+    target,
+    initial_coefficients,
+    reference_orbital,
+    output_dir,
+    elapsed_seconds,
 ):
     target = Path(target).resolve()
     initial_coefficients = Path(initial_coefficients).resolve()
+    reference_orbital = Path(reference_orbital).resolve()
     output_dir = Path(output_dir).resolve()
     final_coefficients = output_dir / "ORBITAL_RESULTS.txt"
+    final_orbital = output_dir / "ORBITAL_1U.dat"
     spillage = output_dir / "Spillage.dat"
     input_path = output_dir / "INPUT"
     log_path = output_dir / "run.log"
     required = (
         target,
         initial_coefficients,
+        reference_orbital,
         final_coefficients,
+        final_orbital,
         spillage,
         input_path,
         log_path,
@@ -160,6 +214,29 @@ def summarize_campaign(
     fixed_equal = _float64_bytes(fixed_initial) == _float64_bytes(fixed_final)
     if not fixed_equal:
         raise RuntimeError("fixed H level1 1s coefficient changed")
+
+    radial_reference = read_orbital(reference_orbital, 0, 0)
+    radial_final = read_orbital(final_orbital, 0, 0)
+    if len(radial_reference) != len(radial_final):
+        raise RuntimeError("fixed H level1 1s radial mesh changed")
+    radial_abs_errors = [
+        abs(reference - final)
+        for reference, final in zip(radial_reference, radial_final)
+    ]
+    radial_rel_errors = [
+        error / max(abs(reference), 1.0e-14)
+        for error, reference in zip(radial_abs_errors, radial_reference)
+    ]
+    radial_max_abs = max(radial_abs_errors)
+    radial_max_rel = max(radial_rel_errors)
+    radial_matches = all(
+        error <= 5.0e-13 + 5.0e-13 * abs(reference)
+        for error, reference in zip(radial_abs_errors, radial_reference)
+    )
+    if not radial_matches:
+        raise RuntimeError(
+            "exported H level1 1s radial orbital differs from the TZDP reference"
+        )
 
     initial_loss = _read_initial_sternheimer_loss(spillage)
     final_loss = _read_loss_metadata(final_coefficients)
@@ -183,8 +260,12 @@ def summarize_campaign(
         "target_sha256": sha256(target),
         "initial_coefficients": str(initial_coefficients),
         "initial_coefficients_sha256": sha256(initial_coefficients),
+        "reference_orbital": str(reference_orbital),
+        "reference_orbital_sha256": sha256(reference_orbital),
         "final_coefficients": str(final_coefficients),
         "final_coefficients_sha256": sha256(final_coefficients),
+        "final_orbital": str(final_orbital),
+        "final_orbital_sha256": sha256(final_orbital),
         "input_sha256": sha256(input_path),
         "spillage_sha256": sha256(spillage),
         "initial_sternheimer_loss": initial_loss,
@@ -193,16 +274,34 @@ def summarize_campaign(
         "fixed_level1": {"element": "H", "l": 0, "zeta": 1},
         "fixed_level1_n_coefficients": len(fixed_initial),
         "fixed_level1_bitwise_equal": fixed_equal,
+        "fixed_level1_radial_n_points": len(radial_reference),
+        "fixed_level1_radial_matches_reference": radial_matches,
+        "fixed_level1_radial_max_abs_error": radial_max_abs,
+        "fixed_level1_radial_max_rel_error": radial_max_rel,
         "elapsed_seconds": float(elapsed_seconds),
     }
 
 
-def run_campaign(target, output_dir, template_path, initial_coefficients, python):
+def run_campaign(
+    target,
+    output_dir,
+    template_path,
+    initial_coefficients,
+    reference_orbital,
+    python,
+):
     target = Path(target).resolve()
     output_dir = Path(output_dir).resolve()
     template_path = Path(template_path).resolve()
     initial_coefficients = Path(initial_coefficients).resolve()
-    for path in (target, template_path, initial_coefficients, OPTIMIZER):
+    reference_orbital = Path(reference_orbital).resolve()
+    for path in (
+        target,
+        template_path,
+        initial_coefficients,
+        reference_orbital,
+        OPTIMIZER,
+    ):
         if not path.is_file():
             raise FileNotFoundError(path)
     if output_dir.exists() and any(output_dir.iterdir()):
@@ -243,7 +342,11 @@ def run_campaign(target, output_dir, template_path, initial_coefficients, python
         )
 
     report = summarize_campaign(
-        target, initial_coefficients, output_dir, elapsed
+        target,
+        initial_coefficients,
+        reference_orbital,
+        output_dir,
+        elapsed,
     )
     report["command"] = command
     report_path = output_dir / "campaign_summary.json"
@@ -260,6 +363,9 @@ def parse_args(argv=None):
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE)
     parser.add_argument("--initial", type=Path, default=DEFAULT_INITIAL)
+    parser.add_argument(
+        "--reference-orbital", type=Path, default=DEFAULT_REFERENCE_ORBITAL
+    )
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     return parser.parse_args(argv)
 
@@ -271,6 +377,7 @@ def main(argv=None):
         output_dir=args.output,
         template_path=args.template,
         initial_coefficients=args.initial,
+        reference_orbital=args.reference_orbital,
         python=args.python,
     )
     print(json.dumps(report, indent=2, sort_keys=True))

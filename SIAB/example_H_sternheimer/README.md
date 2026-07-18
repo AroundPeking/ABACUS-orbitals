@@ -29,9 +29,11 @@ The runner materializes an `INPUT` with absolute paths, invokes
 `opt_orb_pytorch_dpsi/main.py`, and writes `campaign_summary.json`. It fails if
 the output directory is nonempty, the optimizer does not report pure
 `st_only`, the final Sternheimer loss is worse than the initial loss, or the
-fixed H level-1 `1s` coefficient changes at the float64 byte level. The summary
-records target, input, initial coefficient, final coefficient, and spillage
-hashes together with the loss ratio and wall time.
+fixed H level-1 `1s` coefficient changes at the float64 byte level. It also
+compares the exported 801-point level-1 radial function with the checked-in
+H-TZDP `.orb` after smoothing and normalization. The summary records target,
+input, initial/final coefficients, reference/final orbitals, and spillage hashes
+together with the loss ratio, radial error, and wall time.
 
 For the constrained lane:
 

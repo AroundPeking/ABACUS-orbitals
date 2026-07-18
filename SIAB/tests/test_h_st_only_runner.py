@@ -74,12 +74,19 @@ class HStOnlyRunnerTest(unittest.TestCase):
             root = Path(directory)
             target = root / "sternheimer_matrix.dat"
             initial = root / "initial.txt"
+            reference_orbital = root / "H_reference.orb"
             output = root / "output"
             output.mkdir()
             target.write_text("target\n", encoding="utf-8")
             initial.write_text(self._coefficient_text(0.25), encoding="utf-8")
+            reference_orbital.write_text(
+                self._orbital_text((0.1, 0.2, 0.3)), encoding="utf-8"
+            )
             (output / "ORBITAL_RESULTS.txt").write_text(
                 self._coefficient_text(0.25, loss=0.2), encoding="utf-8"
+            )
+            (output / "ORBITAL_1U.dat").write_text(
+                self._orbital_text((0.1, 0.2, 0.3)), encoding="utf-8"
             )
             (output / "Spillage.dat").write_text(
                 "istep_big istep_small istep_all dft_origin dft_dpsi "
@@ -97,6 +104,7 @@ class HStOnlyRunnerTest(unittest.TestCase):
             report = self.runner.summarize_campaign(
                 target=target,
                 initial_coefficients=initial,
+                reference_orbital=reference_orbital,
                 output_dir=output,
                 elapsed_seconds=1.5,
             )
@@ -105,6 +113,18 @@ class HStOnlyRunnerTest(unittest.TestCase):
         self.assertEqual(report["initial_sternheimer_loss"], 0.5)
         self.assertEqual(report["final_sternheimer_loss"], 0.2)
         self.assertEqual(report["loss_ratio"], 0.4)
+        self.assertEqual(report["fixed_level1_radial_max_abs_error"], 0.0)
+
+    def test_read_orbital_selects_l_and_zero_based_zeta(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "H.orb"
+            path.write_text(
+                self._orbital_text((0.1, -0.2, 0.3)), encoding="utf-8"
+            )
+
+            value = self.runner.read_orbital(path, 0, 0)
+
+        self.assertEqual(value, (0.1, -0.2, 0.3))
 
     @staticmethod
     def _coefficient_text(value, loss=None):
@@ -130,6 +150,18 @@ class HStOnlyRunnerTest(unittest.TestCase):
             f" {value}\n"
             "</Coefficient>\n"
             + metadata
+        )
+
+    @staticmethod
+    def _orbital_text(values):
+        return (
+            "Element H\n"
+            "Mesh 3\n"
+            "dr 0.01\n"
+            "Type L N\n"
+            "0 0 0\n"
+            + " ".join(str(value) for value in values)
+            + "\n"
         )
 
 
