@@ -49,3 +49,27 @@ script are under `producer/`.  Stage the checked-in H-TZDP `.orb` and the
 Dojo-NC-SR `Pseudopotential/H.upf` beside those files before submitting.  The job
 uses one 30-thread MPI rank for each of the 16 minimax frequencies and refuses
 to run if the immutable ABACUS executable hash changes.
+
+## First formal `st_only` campaign
+
+The first formal producer was df_dcu `normal` job `21311439`. It completed in
+`03:45:04` on 16 nodes and converged all 656 response equations. The canonical
+target has 656 reference rows, 100 primitives in four H `s/p` blocks, and SHA256
+`bed58ebf61cb513da892658b848f881f724feba7f50fe64f7a0b6252bb8e0c8c`.
+Its provenance records ABACUS commit `80a606f57a26`, 50 Ry, 16 frequencies,
+`exx_pca_threshold=1e-6`, the Dojo H pseudopotential, and the checked-in H-TZDP
+orbital hashes.
+
+The deterministic optimization used this target and code commit `a41a9f0e`.
+After 3000 Adam steps, the best Sternheimer loss was
+`0.12535769112573478`, down from `0.15884642225499218` (ratio
+`0.7891754145`). The best projected-overlap condition number was `73.61`.
+The fixed 25-coefficient H level-1 `1s` column is float64-byte identical to the
+input, and its exported 801-point radial function differs from the checked-in
+TZDP `.orb` by at most `1.03e-15`. The final coefficient SHA256 is
+`278694016e5f819f2a79db4b3ddc8c5692d8dd125a908f0003295ab644eb4715`.
+
+These numbers validate the implementation and training loop only. The optimized
+upper orbitals are visibly more oscillatory. Do not promote this basis or call
+it RPA-accurate until the held-out H2 LCAO-SOS/LibRPA calculation is compared
+with the initial TZDP, Sternheimer, and FHI-aims references.
