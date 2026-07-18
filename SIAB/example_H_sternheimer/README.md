@@ -16,12 +16,22 @@ The experiment is **not physics validated** until the exact ABACUS executable/so
 
 ## Run
 
-Run from this directory after placing the real producer files under the exact `data/` paths in the inputs:
+Use the campaign runner for the formal `st_only` lane. Keep the generated
+target and campaign output outside the Git working tree:
 
 ```bash
-cp INPUT.st_only INPUT
-python3 ../opt_orb_pytorch_dpsi/main.py
+python3 run_st_only.py \
+  --target /absolute/path/to/sternheimer_matrix.dat \
+  --output /absolute/path/to/new-empty-campaign-directory
 ```
+
+The runner materializes an `INPUT` with absolute paths, invokes
+`opt_orb_pytorch_dpsi/main.py`, and writes `campaign_summary.json`. It fails if
+the output directory is nonempty, the optimizer does not report pure
+`st_only`, the final Sternheimer loss is worse than the initial loss, or the
+fixed H level-1 `1s` coefficient changes at the float64 byte level. The summary
+records target, input, initial coefficient, final coefficient, and spillage
+hashes together with the loss ratio and wall time.
 
 For the constrained lane:
 
