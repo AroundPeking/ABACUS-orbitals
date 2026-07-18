@@ -226,18 +226,18 @@ git commit --author='Codex <codex@openai.com>' -m 'feat(sternheimer): expose SIA
 - Modify: `source/source_io/module_parameter/input_parameter.h`
 - Modify: `source/source_io/module_parameter/read_input_item_output.cpp`
 
-- [ ] **Step 1: Write the writer golden test**
+- [x] **Step 1: Write the writer golden test**
 
-Construct two `ReferenceRow` values and the four-dimensional fixture from the SIAB plan. Write to a temporary file and assert all seven section tags occur once, row counts are exact, floating output uses `std::setprecision(17)`, provenance JSON is parseable, and the file text matches `SIAB/tests/fixtures/sternheimer_matrix_v1.dat` after replacing only provenance hash values supplied by the test.
+Construct two `ReferenceRow` values and the four-dimensional fixture from the SIAB plan. Write to a temporary file and assert all six tagged sections occur once, row counts are exact, floating output uses deterministic shortest exact round-trip formatting, provenance JSON is valid, and the file text matches `SIAB/tests/fixtures/sternheimer_matrix_v1.dat`. The cell is exactly nine finite row-major Bohr components with nonzero determinant; valid UTF-8 is preserved and malformed UTF-8 is rejected before touching the temporary file.
 
-- [ ] **Step 2: Run and confirm writer failure**
+- [x] **Step 2: Run and confirm writer failure**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_writer
 ctest --test-dir build-sternheimer-siab -R sternheimer_siab_writer --output-on-failure
 ```
 
-- [ ] **Step 3: Implement deterministic writing and atomic replacement**
+- [x] **Step 3: Implement deterministic writing and atomic replacement**
 
 Expose:
 
@@ -253,7 +253,7 @@ void write_v1(
 
 Validate dimensions and Hermiticity before writing. Write `path + ".tmp"`, flush/close successfully, then rename to `path`; rank 0 alone writes after gathered arrays are complete.
 
-- [ ] **Step 4: Register an output-only ABACUS parameter**
+- [x] **Step 4: Register an output-only ABACUS parameter**
 
 Add:
 
@@ -261,9 +261,9 @@ Add:
 out_sternheimer_siab 0
 ```
 
-Allowed values are `0` and `1`. Value `1` requires the Sternheimer calculation path and LCAO basis metadata; invalid combinations stop during input validation. It is independent of the existing `rpa` switch and writes `OUT.ABACUS/sternheimer_matrix.dat`.
+Allowed values are `0` and `1`. Value `1` requires `basis_type=lcao`, the Sternheimer calculation path, and loaded LCAO basis metadata; invalid combinations stop during input validation. It is independent of the existing `rpa` switch and writes `OUT.ABACUS/sternheimer_matrix.dat`.
 
-- [ ] **Step 5: Run writer/input tests and commit**
+- [x] **Step 5: Run writer/input tests and commit**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_writer
