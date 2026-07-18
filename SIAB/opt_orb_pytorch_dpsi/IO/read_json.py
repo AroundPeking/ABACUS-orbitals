@@ -1,6 +1,8 @@
 import util
+import copy
 import json
 import numpy as np
+from optimization_loss import normalize_loss_config
 
 def read_json(file_name):
 
@@ -36,6 +38,12 @@ def read_json(file_name):
 	}
 	util.set_dict_default(input, input_default)
 	util.set_dict_default_elements(input["radial"], input["element"]["Nt_all"])
+	if "freeze_orbitals" in input:
+		input["C_init_info"]["freeze_orbitals"] = copy.deepcopy(input["freeze_orbitals"])
+	if "loss" in input:
+		loss = normalize_loss_config(input["loss"])
+		for stage in input["optimize"]:
+			stage["loss"] = copy.deepcopy(loss)
 
 	info_element = util.Info()
 	for info_attr,info_value in input["element"].items():

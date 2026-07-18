@@ -5,6 +5,7 @@
 
 import opt_orbital_wavefunc
 import VI_norm
+import torch
 
 class Opt_Orbital_Spillage:
 
@@ -31,7 +32,13 @@ class Opt_Orbital_Spillage:
 
 
 	def cal_Spillage(self, C):
-		Spillage = 0
+		components = self.cal_components(C)
+		return 2*components["dft_origin"] + components["dft_dpsi"]
+
+
+	def cal_components(self, C):
+		dft_origin = None
+		dft_dpsi = None
 
 		for ist in range(len(self.info_stru)):
 			opt_orb_wave = opt_orbital_wavefunc.Opt_Orbital_Wavefunc(self.info_stru[ist], self.info_element, self.info_V)
@@ -49,15 +56,21 @@ class Opt_Orbital_Spillage:
 			def cal_delta(VI, V, norm):
 				return ((VI-V)/norm).abs()		# abs or **2?
 
-			Spillage += 2*cal_Spillage(cal_delta(
+			origin = cal_Spillage(cal_delta(
 				self.VI_origin[ist],
 				V_origin,
 				self.norm.get_norm_VI_origin(ist)))
+			dft_origin = origin if dft_origin is None else dft_origin + origin
 			if "linear" in self.file_list.keys():
 				for i_type in range(len(self.file_list["linear"])):
-					Spillage += cal_Spillage(cal_delta(
+					linear = cal_Spillage(cal_delta(
 						self.VI_linear[i_type][ist],
 						V_linear[i_type],
 						self.norm.get_norm_VI_linear(i_type, ist)))
+					dft_dpsi = linear if dft_dpsi is None else dft_dpsi + linear
 
-		return Spillage
+		if dft_origin is None:
+			raise ValueError("info_stru must contain at least one structure")
+		if dft_dpsi is None:
+			dft_dpsi = torch.zeros_like(dft_origin)
+		return {"dft_origin": dft_origin, "dft_dpsi": dft_dpsi}

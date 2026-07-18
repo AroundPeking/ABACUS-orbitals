@@ -1,0 +1,780 @@
+import copy
+import io
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest import mock
+
+import torch
+
+from common import info
+from freeze_orbitals import validate_freeze_orbitals, zero_frozen_gradients
+from IO.read_json import read_json
+from optimization_loss import (
+    LOSS_DEFAULTS,
+    compose_loss,
+    constraints_satisfied,
+    normalize_loss_config,
+)
+from opt_orbital_converge import Opt_Orbital_Converge
+from opt_orbital_spillage import Opt_Orbital_Spillage
+from sternheimer_spillage import SternheimerLossResult
+
+
+def make_legacy_spillage(with_linear=False):
+    info_stru = [info(Na={"H": 1}, Nb_true=1, weight=torch.tensor([1.0]))]
+    info_element = {"H": info(Nl=1, Ne=2, Nu=[1])}
+    q = {"H": [torch.tensor([[0.8, 0.6]], dtype=torch.complex128)]}
+    s = {
+        ("H", "H"): [
+            [torch.eye(2, dtype=torch.complex128).reshape(1, 1, 2, 1, 1, 2)]
+        ]
+    }
+    c = {
+        "H": [
+            torch.tensor(
+                [[1.0], [0.0]], dtype=torch.float64, requires_grad=True
+            )
+        ]
+    }
+    target = [torch.tensor([1.0], dtype=torch.float64)]
+    file_list = {"origin": ["synthetic"]}
+    if with_linear:
+        file_list["linear"] = [["synthetic-linear"]]
+
+    loss = Opt_Orbital_Spillage(
+        info_stru, info_element, {"same_band": True}, "one", file_list
+    )
+    loss.set_QSVI([q], [s], target)
+    if with_linear:
+        q_linear = {
+            "H": [torch.tensor([[0.1, 0.0]], dtype=torch.complex128)]
+        }
+        s_linear = {
+            ("H", "H"): [
+                [torch.zeros((1, 1, 2, 1, 1, 2), dtype=torch.complex128)]
+            ]
+        }
+        loss.set_QSVI_linear(
+            [[q_linear]],
+            [[s_linear]],
+            [[torch.tensor([0.0], dtype=torch.float64)]],
+        )
+    return loss, c
+
+
+def make_converge_case(mode=None, max_steps=8, freeze_specs=None):
+    info_stru = [info(Na={"H": 1}, Nb_true=1, weight=torch.tensor([1.0]))]
+    info_element = {"H": info(Nl=1, Ne=2, Nu=[2])}
+    q = {"H": [torch.tensor([[0.8, 0.6]], dtype=torch.complex128)]}
+    s = {
+        ("H", "H"): [
+            [torch.eye(2, dtype=torch.complex128).reshape(1, 1, 2, 1, 1, 2)]
+        ]
+    }
+    c = {
+        "H": [
+            torch.tensor(
+                [[1.0, 0.0], [0.0, 1.0]],
+                dtype=torch.float64,
+                requires_grad=True,
+            )
+        ]
+    }
+    stage = {
+        "optimizer": "Adam",
+        "kwargs": {"lr": 0.05},
+        "cal_T": False,
+        "norm": "one",
+        "max_steps": max_steps,
+    }
+    if mode is not None:
+        stage["loss"] = normalize_loss_config({"mode": mode})
+    c_init = {"init_from_file": False}
+    if freeze_specs is not None:
+        c_init["freeze_orbitals"] = copy.deepcopy(freeze_specs)
+
+    converge = Opt_Orbital_Converge()
+    converge.set_info(
+        {"origin": ["synthetic"]},
+        [stage],
+        info_stru,
+        c_init,
+        {"same_band": True},
+    )
+    converge.set_info_element(info_element)
+    converge.set_QSVI([q], [s], [torch.tensor([1.0], dtype=torch.float64)])
+    return converge, c
+
+
+def make_single_orbital_converge(max_steps=11):
+    info_stru = [info(Na={"H": 1}, Nb_true=1, weight=torch.tensor([1.0]))]
+    info_element = {"H": info(Nl=1, Ne=2, Nu=[1])}
+    q = {"H": [torch.tensor([[0.8, 0.6]], dtype=torch.complex128)]}
+    s = {
+        ("H", "H"): [
+            [torch.eye(2, dtype=torch.complex128).reshape(1, 1, 2, 1, 1, 2)]
+        ]
+    }
+    c = {
+        "H": [
+            torch.tensor(
+                [[1.0], [0.0]], dtype=torch.float64, requires_grad=True
+            )
+        ]
+    }
+    stage = {
+        "optimizer": "Adam",
+        "kwargs": {"lr": 0.1},
+        "cal_T": False,
+        "norm": "one",
+        "max_steps": max_steps,
+        "loss": normalize_loss_config(
+            {
+                "mode": "st_constrained",
+                "tau_dft": 0.0,
+                "tau_dpsi": 0.0,
+                "constraint_penalty_dft": 0.0,
+                "constraint_penalty_dpsi": 0.0,
+            }
+        ),
+    }
+    converge = Opt_Orbital_Converge()
+    converge.set_info(
+        {"origin": ["synthetic"]},
+        [stage],
+        info_stru,
+        {"init_from_file": False},
+        {"same_band": True},
+    )
+    converge.set_info_element(info_element)
+    converge.set_QSVI([q], [s], [torch.tensor([1.0], dtype=torch.float64)])
+    return converge, c
+
+
+class QuadraticSternheimer:
+    def __init__(self, max_condition=2.0):
+        self.max_condition = max_condition
+
+    def evaluate(self, c):
+        target = torch.tensor(
+            [[0.75, 0.5], [0.25, 0.5]], dtype=c["H"][0].dtype
+        )
+        loss = torch.sum((c["H"][0] - target) ** 2)
+        return SternheimerLossResult(
+            loss=loss,
+            weighted_residual=loss,
+            weighted_norm=torch.ones_like(loss),
+            max_condition=self.max_condition,
+        )
+
+
+class SingleOrbitalSternheimer:
+    def evaluate(self, c):
+        target = torch.tensor([[0.0], [1.0]], dtype=c["H"][0].dtype)
+        loss = torch.sum((c["H"][0] - target) ** 2)
+        return SternheimerLossResult(
+            loss=loss,
+            weighted_residual=loss,
+            weighted_norm=torch.ones_like(loss),
+            max_condition=1.0,
+        )
+
+
+class NamedLegacyComponentsTest(unittest.TestCase):
+    def test_origin_only_named_components_preserve_total(self):
+        loss, c = make_legacy_spillage()
+
+        components = loss.cal_components(c)
+
+        self.assertEqual(set(components), {"dft_origin", "dft_dpsi"})
+        self.assertAlmostEqual(components["dft_origin"].item(), 0.2, places=14)
+        self.assertEqual(components["dft_dpsi"].item(), 0.0)
+        self.assertAlmostEqual(loss.cal_Spillage(c).item(), 0.4, places=14)
+
+    def test_linear_component_and_reconstructed_gradients(self):
+        loss, c = make_legacy_spillage(with_linear=True)
+
+        components = loss.cal_components(c)
+        reconstructed = 2 * components["dft_origin"] + components["dft_dpsi"]
+        total = loss.cal_Spillage(c)
+        grad_total = torch.autograd.grad(total, c["H"][0], retain_graph=True)[0]
+        grad_reconstructed = torch.autograd.grad(reconstructed, c["H"][0])[0]
+
+        self.assertAlmostEqual(components["dft_origin"].item(), 0.2, places=14)
+        self.assertAlmostEqual(components["dft_dpsi"].item(), 0.2, places=14)
+        self.assertAlmostEqual(total.item(), 0.6, places=14)
+        torch.testing.assert_close(grad_total, grad_reconstructed)
+
+
+class FreezeOrbitalsTest(unittest.TestCase):
+    def test_real_adam_step_freezes_exact_radial_column(self):
+        c = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0]],
+                    dtype=torch.float64,
+                    requires_grad=True,
+                )
+            ]
+        }
+        indices = validate_freeze_orbitals(
+            [{"element": "H", "l": 0, "zeta": 1}], c
+        )
+        fixed_before = c["H"][0][:, 0].detach().clone()
+        variable_before = c["H"][0][:, 1].detach().clone()
+        optimizer = torch.optim.Adam(c["H"], lr=0.1)
+
+        optimizer.zero_grad()
+        torch.sum((c["H"][0] - 0.5) ** 2).backward()
+        zero_frozen_gradients(c, indices)
+        optimizer.step()
+
+        self.assertTrue(torch.equal(c["H"][0][:, 0], fixed_before))
+        self.assertFalse(torch.equal(c["H"][0][:, 1], variable_before))
+
+    def test_rejects_invalid_and_duplicate_specs(self):
+        c = {"H": [torch.ones((2, 2), dtype=torch.float64, requires_grad=True)]}
+        invalid_specs = (
+            "not-a-list",
+            [{"element": "He", "l": 0, "zeta": 1}],
+            [{"element": "H", "l": 1, "zeta": 1}],
+            [{"element": "H", "l": 0, "zeta": 0}],
+            [{"element": "H", "l": 0, "zeta": 3}],
+            [{"element": "H", "l": True, "zeta": 1}],
+            [{"element": "H", "l": 0.0, "zeta": 1}],
+            [{"element": "H", "l": 0, "zeta": False}],
+            [{"element": "H", "l": 0, "zeta": 1, "extra": 2}],
+            [{"element": "H", "l": 0}],
+            [
+                {"element": "H", "l": 0, "zeta": 1},
+                {"element": "H", "l": 0, "zeta": 1},
+            ],
+        )
+        for specs in invalid_specs:
+            with self.subTest(specs=specs):
+                with self.assertRaisesRegex((TypeError, ValueError), "invalid|duplicate"):
+                    validate_freeze_orbitals(specs, c)
+
+    def test_rejects_non_string_and_empty_element_labels(self):
+        coefficient = torch.ones(
+            (2, 1), dtype=torch.float64, requires_grad=True
+        )
+        c = {"H": [coefficient], 0: [coefficient], "": [coefficient]}
+
+        for element in ([], 0, ""):
+            spec = {"element": element, "l": 0, "zeta": 1}
+            with self.subTest(spec=spec):
+                with self.assertRaises(ValueError) as context:
+                    validate_freeze_orbitals([spec], c)
+                self.assertIn(repr((element, 0, 1)), str(context.exception))
+
+    def test_rejects_stale_indices_and_missing_gradient(self):
+        c = {"H": [torch.ones((2, 1), dtype=torch.float64, requires_grad=True)]}
+        with self.assertRaisesRegex(ValueError, "invalid.*H.*0.*1"):
+            zero_frozen_gradients(c, frozenset({("H", 0, 1)}))
+        with self.assertRaisesRegex(ValueError, "gradient.*H.*0.*0"):
+            zero_frozen_gradients(c, frozenset({("H", 0, 0)}))
+
+
+class OptimizationLossTest(unittest.TestCase):
+    def test_st_only_returns_st_identity_and_zero_constraints(self):
+        st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
+        result = compose_loss(
+            "st_only",
+            st,
+            torch.tensor(1.2, dtype=torch.float64),
+            torch.tensor(1.3, dtype=torch.float64),
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            normalize_loss_config({"mode": "st_only"}),
+        )
+
+        self.assertIs(result["total"], st)
+        self.assertEqual(result["constraint_dft"].item(), 0.0)
+        self.assertEqual(result["constraint_dpsi"].item(), 0.0)
+        self.assertEqual(
+            set(result),
+            {
+                "dft_origin",
+                "dft_dpsi",
+                "sternheimer",
+                "constraint_dft",
+                "constraint_dpsi",
+                "total",
+            },
+        )
+
+    def test_constrained_hinges_and_gradients(self):
+        st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
+        dft = torch.tensor(1.20, dtype=torch.float64, requires_grad=True)
+        dpsi = torch.tensor(1.25, dtype=torch.float64, requires_grad=True)
+        config = normalize_loss_config(
+            {
+                "mode": "st_constrained",
+                "tau_dft": 0.05,
+                "tau_dpsi": 0.10,
+                "constraint_penalty_dft": 10.0,
+                "constraint_penalty_dpsi": 10.0,
+            }
+        )
+
+        result = compose_loss(
+            "st_constrained",
+            st,
+            dft,
+            dpsi,
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            config,
+        )
+        result["total"].backward()
+
+        self.assertAlmostEqual(result["constraint_dft"].item(), 10 * 0.15**2)
+        self.assertAlmostEqual(result["constraint_dpsi"].item(), 10 * 0.15**2)
+        self.assertIsNotNone(st.grad)
+        self.assertGreater(abs(dft.grad.item()), 0.0)
+        self.assertGreater(abs(dpsi.grad.item()), 0.0)
+
+    def test_constraint_boundaries_are_satisfied(self):
+        config = normalize_loss_config({"mode": "st_constrained"})
+        baseline = {"dft_origin": 2.0, "dft_dpsi": 4.0}
+        self.assertTrue(
+            constraints_satisfied(
+                torch.tensor(2.1), torch.tensor(4.4), baseline, config
+            )
+        )
+        self.assertFalse(
+            constraints_satisfied(
+                torch.tensor(2.1001), torch.tensor(4.4), baseline, config
+            )
+        )
+
+    def test_rejects_invalid_config_mode_tensors_and_baseline(self):
+        invalid_configs = (
+            {},
+            {"mode": "legacy"},
+            {"mode": "st_only", "epsilon": float("nan")},
+            {"mode": "st_only", "condition_limit": 0.5},
+            {"mode": "st_only", "tau_dft": -1.0},
+            {"mode": "st_only", "constraint_penalty_dpsi": float("inf")},
+        )
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises((TypeError, ValueError)):
+                    normalize_loss_config(config)
+
+        config = normalize_loss_config({"mode": "st_only"})
+        valid = torch.tensor(1.0)
+        invalid_tensors = (
+            (torch.tensor([1.0]), valid, valid),
+            (torch.tensor(float("nan")), valid, valid),
+            (torch.tensor(-1.0), valid, valid),
+        )
+        for st, dft, dpsi in invalid_tensors:
+            with self.subTest(st=st):
+                with self.assertRaises((TypeError, ValueError)):
+                    compose_loss(
+                        "st_only",
+                        st,
+                        dft,
+                        dpsi,
+                        {"dft_origin": 1.0, "dft_dpsi": 1.0},
+                        config,
+                    )
+        with self.assertRaises((TypeError, ValueError, KeyError)):
+            compose_loss(
+                "st_only",
+                valid,
+                valid,
+                valid,
+                {"dft_origin": -1.0},
+                config,
+            )
+
+    def test_defaults_are_not_mutated(self):
+        result = normalize_loss_config({"mode": "st_only", "tau_dft": 0.2})
+        self.assertEqual(result["tau_dft"], 0.2)
+        self.assertEqual(LOSS_DEFAULTS["tau_dft"], 0.05)
+
+
+class ReadJsonCompatibilityTest(unittest.TestCase):
+    def write_input(self, value):
+        handle = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        with handle:
+            json.dump(value, handle)
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        return handle.name
+
+    @staticmethod
+    def minimal_input():
+        return {
+            "file_list": {"origin": ["synthetic"]},
+            "element": {"Nt_all": ["H"], "Nu": {"H": [2]}},
+            "weight": {"stru": [1.0]},
+        }
+
+    def test_legacy_input_still_returns_seven_values_without_new_defaults(self):
+        result = read_json(self.write_input(self.minimal_input()))
+
+        self.assertEqual(len(result), 7)
+        self.assertNotIn("loss", result[3][0])
+        self.assertNotIn("freeze_orbitals", result[4])
+
+    def test_new_input_propagates_independent_normalized_stage_configs(self):
+        value = self.minimal_input()
+        value["optimize"] = [{}, {}]
+        value["freeze_orbitals"] = [{"element": "H", "l": 0, "zeta": 1}]
+        value["loss"] = {"mode": "st_constrained"}
+
+        result = read_json(self.write_input(value))
+        stages = result[3]
+
+        self.assertEqual(
+            result[4]["freeze_orbitals"],
+            [{"element": "H", "l": 0, "zeta": 1}],
+        )
+        self.assertEqual(stages[0]["loss"]["mode"], "st_constrained")
+        self.assertEqual(stages[0]["loss"]["epsilon"], LOSS_DEFAULTS["epsilon"])
+        self.assertIsNot(stages[0]["loss"], stages[1]["loss"])
+
+    def test_invalid_loss_is_rejected(self):
+        value = self.minimal_input()
+        value["loss"] = {"mode": "st_constrained", "tau_dft": -0.1}
+        with self.assertRaises(ValueError):
+            read_json(self.write_input(value))
+
+
+class ConvergeIntegrationTest(unittest.TestCase):
+    @staticmethod
+    def files():
+        return io.StringIO(), io.StringIO()
+
+    def test_new_stage_requires_evaluator_and_rejects_kinetic_term(self):
+        converge, c = make_converge_case("st_only", max_steps=1)
+        with self.assertRaisesRegex(ValueError, "Sternheimer.*evaluator"):
+            converge.cal_converge(c, self.files())
+
+        converge, c = make_converge_case("st_only", max_steps=1)
+        converge.info_optimize[0]["cal_T"] = True
+        converge.set_sternheimer_spillage(QuadraticSternheimer())
+        with self.assertRaisesRegex(ValueError, "cal_T"):
+            converge.cal_converge(c, self.files())
+
+    def test_st_only_logs_named_header_and_explicit_freeze_takes_precedence(self):
+        converge, c = make_converge_case(
+            "st_only",
+            freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+        )
+        converge.set_C_read_index({("H", 0, 1)})
+        evaluator = QuadraticSternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+        fixed_before = c["H"][0][:, 0].detach().clone()
+        variable_before = c["H"][0][:, 1].detach().clone()
+        initial_st = evaluator.evaluate(c).loss.item()
+        files = self.files()
+
+        result = converge.cal_converge(c, files)
+
+        expected_header = (
+            "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
+            "sternheimer\tconstraint_dft\tconstraint_dpsi\ttotal\t"
+            "max_st_condition\taccepted"
+        )
+        self.assertEqual(files[1].getvalue().splitlines()[0], expected_header)
+        self.assertTrue(torch.equal(result["C"]["H"][0][:, 0], fixed_before))
+        self.assertFalse(torch.equal(result["C"]["H"][0][:, 1], variable_before))
+        self.assertLess(result["loss_components"]["sternheimer"], initial_st)
+        self.assertEqual(result["loss_mode"], "st_only")
+        self.assertEqual(result["Loss"], result["loss_components"]["total"])
+        self.assertEqual(result["Spillage"], result["loss_components"]["total"])
+        self.assertEqual(result["max_st_condition"], 2.0)
+
+    def test_adam_one_step_selects_post_step_state(self):
+        converge, c = make_converge_case("st_only", max_steps=1)
+        evaluator = QuadraticSternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+        initial_st = evaluator.evaluate(c).loss.item()
+
+        result = converge.cal_converge(c, self.files())
+
+        final_st = evaluator.evaluate(c).loss.item()
+        self.assertLess(final_st, initial_st)
+        self.assertAlmostEqual(
+            result["loss_components"]["sternheimer"], final_st, places=14
+        )
+        self.assertTrue(torch.equal(result["C"]["H"][0], c["H"][0]))
+
+    def test_lbfgs_trial_closure_state_is_not_a_candidate(self):
+        converge, c = make_converge_case("st_only", max_steps=1)
+        converge.info_optimize[0]["optimizer"] = "LBFGS"
+        converge.info_optimize[0]["kwargs"] = {}
+        evaluator = QuadraticSternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+        initial = c["H"][0].detach().clone()
+        transient = torch.tensor(
+            [[0.75, 0.5], [0.25, 0.5]], dtype=torch.float64
+        )
+        final = (initial + transient) / 2
+
+        class TrialPointLBFGS:
+            def zero_grad(self):
+                c["H"][0].grad = None
+
+            def step(self, closure):
+                with torch.no_grad():
+                    c["H"][0].copy_(transient)
+                closure()
+                with torch.no_grad():
+                    c["H"][0].copy_(final)
+
+        files = self.files()
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=TrialPointLBFGS(),
+        ):
+            result = converge.cal_converge(c, files)
+
+        self.assertTrue(torch.equal(result["C"]["H"][0], final))
+        self.assertAlmostEqual(
+            result["loss_components"]["sternheimer"],
+            evaluator.evaluate({"H": [final]}).loss.item(),
+            places=14,
+        )
+        candidate_rows = [
+            line
+            for line in files[1].getvalue().splitlines()
+            if line.split("\t", 1)[0].lstrip("-").isdigit()
+        ]
+        self.assertEqual(len(candidate_rows), 2)
+
+    def test_explicit_freeze_survives_adam_weight_decay_and_state(self):
+        converge, c = make_converge_case(
+            "st_only",
+            max_steps=3,
+            freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+        )
+        converge.info_optimize[0]["kwargs"] = {
+            "lr": 0.05,
+            "weight_decay": 0.4,
+        }
+        converge.set_sternheimer_spillage(QuadraticSternheimer())
+        fixed = c["H"][0][:, 0].detach().clone()
+
+        result = converge.cal_converge(c, self.files())
+
+        self.assertTrue(torch.equal(c["H"][0][:, 0], fixed))
+        self.assertTrue(torch.equal(result["C"]["H"][0][:, 0], fixed))
+
+    def test_condition_limit_rejects_external_evaluator_candidates(self):
+        converge, c = make_converge_case("st_only", max_steps=1)
+        converge.info_optimize[0]["loss"]["condition_limit"] = 1.5
+        converge.set_sternheimer_spillage(
+            QuadraticSternheimer(max_condition=2.0)
+        )
+        files = self.files()
+
+        with self.assertRaisesRegex(RuntimeError, "condition"):
+            converge.cal_converge(c, files)
+
+        candidate_rows = [
+            line.split("\t")
+            for line in files[1].getvalue().splitlines()
+            if line.split("\t", 1)[0].lstrip("-").isdigit()
+        ]
+        self.assertTrue(candidate_rows)
+        self.assertTrue(all(row[-1] == "false" for row in candidate_rows))
+
+    def test_zero_step_no_accepted_diagnostic_is_finite(self):
+        converge, c = make_converge_case("st_only", max_steps=0)
+        converge.info_optimize[0]["loss"]["condition_limit"] = 1.5
+        converge.set_sternheimer_spillage(
+            QuadraticSternheimer(max_condition=2.0)
+        )
+
+        with self.assertRaises(RuntimeError) as context:
+            converge.cal_converge(c, self.files())
+
+        message = str(context.exception)
+        self.assertNotIn("inf", message.lower())
+        self.assertRegex(message, r"dft=.*dpsi=.*condition=")
+
+    def test_stage_norm_baselines_are_independent_and_configs_immutable(self):
+        converge, c = make_converge_case()
+        stages = [
+            {
+                "optimizer": "SGD",
+                "kwargs": {"lr": 0.0},
+                "cal_T": False,
+                "norm": norm,
+                "max_steps": 1,
+                "loss": {
+                    "mode": "st_constrained",
+                    "tau_dft": 0.0,
+                    "tau_dpsi": 0.0,
+                },
+            }
+            for norm in ("element", "one")
+        ]
+        stages_before = copy.deepcopy(stages)
+        converge.info_optimize = stages
+        converge.VI_origin = [torch.tensor([2.0], dtype=torch.float64)]
+        converge.set_sternheimer_spillage(QuadraticSternheimer())
+        files = self.files()
+
+        result = converge.cal_converge(c, files)
+
+        self.assertEqual(stages, stages_before)
+        header = (
+            "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
+            "sternheimer\tconstraint_dft\tconstraint_dpsi\ttotal\t"
+            "max_st_condition\taccepted"
+        )
+        lines = files[1].getvalue().splitlines()
+        self.assertEqual(lines.count(header), 2)
+        candidate_rows = [
+            line.split("\t")
+            for line in lines
+            if line.split("\t", 1)[0].lstrip("-").isdigit()
+        ]
+        self.assertTrue(candidate_rows)
+        self.assertTrue(all(row[-1] == "true" for row in candidate_rows))
+        self.assertAlmostEqual(result["loss_baseline"]["dft_origin"], 0.5)
+
+    def test_constrained_selection_uses_feasible_st_best_not_total_best(self):
+        converge, c = make_single_orbital_converge()
+        evaluator = SingleOrbitalSternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+        files = self.files()
+
+        result = converge.cal_converge(c, files)
+
+        spillage = converge._make_spillage(converge.info_optimize[0])
+        selected_dft = spillage.cal_components(result["C"])["dft_origin"]
+        final_dft = spillage.cal_components(c)["dft_origin"]
+        config = converge.info_optimize[0]["loss"]
+        self.assertTrue(
+            constraints_satisfied(
+                selected_dft,
+                torch.zeros_like(selected_dft),
+                result["loss_baseline"],
+                config,
+            )
+        )
+        self.assertFalse(
+            constraints_satisfied(
+                final_dft,
+                torch.zeros_like(final_dft),
+                result["loss_baseline"],
+                config,
+            )
+        )
+        final_st = evaluator.evaluate(c).loss.item()
+        self.assertGreater(
+            result["loss_components"]["sternheimer"], final_st
+        )
+        candidate_totals = [
+            float(row[8])
+            for row in (
+                line.split("\t") for line in files[1].getvalue().splitlines()
+            )
+            if row[0].lstrip("-").isdigit()
+        ]
+        self.assertAlmostEqual(final_st, min(candidate_totals))
+        accepted_st = [
+            float(row[5])
+            for row in (
+                line.split("\t") for line in files[1].getvalue().splitlines()
+            )
+            if row[0].lstrip("-").isdigit() and row[-1] == "true"
+        ]
+        self.assertAlmostEqual(
+            result["loss_components"]["sternheimer"], min(accepted_st)
+        )
+
+    def test_mixed_new_then_legacy_stages_emit_explicit_schema_headers(self):
+        converge, c = make_converge_case()
+        converge.info_optimize = [
+            {
+                "optimizer": "SGD",
+                "kwargs": {"lr": 0.0},
+                "cal_T": False,
+                "norm": "one",
+                "max_steps": 0,
+                "loss": {"mode": "st_only"},
+            },
+            {
+                "optimizer": "SGD",
+                "kwargs": {"lr": 0.0},
+                "cal_T": False,
+                "norm": "one",
+                "max_steps": 1,
+            },
+        ]
+        converge.set_sternheimer_spillage(QuadraticSternheimer())
+        files = self.files()
+
+        converge.cal_converge(c, files)
+
+        lines = files[1].getvalue().splitlines()
+        legacy_header = "istep_big\tistep_small\tistep_all\tSpillage"
+        self.assertIn(legacy_header, lines)
+        legacy_index = lines.index(legacy_header)
+        self.assertEqual(len(lines[legacy_index + 1].split("\t")), 4)
+
+    def test_constrained_best_point_obeys_thresholds(self):
+        converge, c = make_converge_case("st_constrained", max_steps=4)
+        evaluator = QuadraticSternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+
+        result = converge.cal_converge(c, self.files())
+
+        spillage = Opt_Orbital_Spillage(
+            converge.info_stru,
+            converge.info_element,
+            converge.info_V,
+            "one",
+            converge.file_list,
+        )
+        spillage.set_QSVI(converge.QI, converge.SI, converge.VI_origin)
+        components = spillage.cal_components(result["C"])
+        self.assertTrue(
+            constraints_satisfied(
+                components["dft_origin"],
+                components["dft_dpsi"],
+                result["loss_baseline"],
+                converge.info_optimize[0]["loss"],
+            )
+        )
+
+    def test_legacy_path_retains_task_one_behavior_and_header(self):
+        loss, c = make_legacy_spillage()
+        converge = Opt_Orbital_Converge()
+        converge.set_info(
+            {"origin": ["synthetic"]},
+            [
+                {
+                    "optimizer": "Adam",
+                    "kwargs": {"lr": 0.01},
+                    "cal_T": False,
+                    "norm": "one",
+                    "max_steps": 1,
+                }
+            ],
+            loss.info_stru,
+            {"init_from_file": False},
+            loss.info_V,
+        )
+        converge.set_info_element(loss.info_element)
+        converge.set_QSVI(loss.QI, loss.SI, loss.VI_origin)
+        files = self.files()
+
+        result = converge.cal_converge(c, files)
+
+        self.assertAlmostEqual(result["Spillage"], 0.4, places=14)
+        self.assertNotIn("loss_components", result)
+        self.assertNotIn("sternheimer", files[1].getvalue())
+        self.assertEqual(files[0].getvalue().splitlines()[1], "istep\tSpillage")
+
+
+if __name__ == "__main__":
+    unittest.main()
