@@ -45,7 +45,7 @@
     "Rcut": 8,
     "dr": 0.01,
     "Ecut": 100,
-    "smearing_sigma": 0.0
+    "smearing_sigma": 0.1
   },
   "freeze_orbitals": [
     {"element": "H", "l": 0, "zeta": 1}

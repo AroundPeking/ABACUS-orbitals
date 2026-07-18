@@ -526,6 +526,7 @@ class ExampleInputTest(unittest.TestCase):
         self.assertEqual(st_only["radial"]["Rcut"], 8)
         self.assertEqual(st_only["radial"]["dr"], 0.01)
         self.assertEqual(st_only["radial"]["Ecut"], 100)
+        self.assertEqual(st_only["radial"]["smearing_sigma"], 0.1)
         self.assertEqual(
             st_only["optimize"],
             [

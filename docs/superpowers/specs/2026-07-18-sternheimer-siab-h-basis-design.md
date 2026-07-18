@@ -39,6 +39,13 @@ The optimized basis contains three s and two p radial functions. The first s
 function is SIAB level1 and remains fixed. The variable set is `2s`, `3s`,
 `1p`, and `2p`.
 
+The primitive representation must match the historical producer exactly:
+`bessel_nao_ecut=100 Ry`, `bessel_nao_rcut=8 bohr`,
+`bessel_nao_smooth=true`, and `bessel_nao_sigma=0.1 bohr`.  In particular,
+the final-orbital `smearing_sigma` is not zero; otherwise the optimization
+would evaluate overlaps in the smoothed primitive space but export a
+different unsmoothed orbital.
+
 ## 3. Compared Optimization Modes
 
 ### 3.1 ST-only diagnostic

@@ -351,7 +351,7 @@ The fully converged real-H comparison used the same two frequencies, PP, H-TZDP 
 
 - [ ] **Step 1: Recreate the three historical structures**
 
-Use H dimers at the checked-in bond lengths `0.7`, `0.9`, and `1.3` Angstrom, H Dojo-NC-SR PP, `Rcut=8 bohr`, spherical-Bessel `Ecut=100 Ry`, and the same ABACUS origin/dpsi producer settings. Submit only to `normal`.
+Use H dimers at the checked-in bond lengths `0.7`, `0.9`, and `1.3` Angstrom (the original `SIAB.py` emits `Cartesian_angstrom`), H Dojo-NC-SR PP, `Rcut=8 bohr`, spherical-Bessel `Ecut=100 Ry`, `bessel_nao_smooth=true`, `bessel_nao_sigma=0.1 bohr`, and the same ABACUS origin/dpsi producer settings. Submit only to `normal`.
 
 - [ ] **Step 2: Verify producer integrity before SIAB**
 
