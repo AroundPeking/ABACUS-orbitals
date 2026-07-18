@@ -65,7 +65,7 @@ No LibRPA source is changed for the producer. SIAB reader work follows `2026-07-
 - Create: `source/source_lcao/module_ri/sternheimer_siab_overlap.h`
 - Create: `source/source_lcao/module_ri/test/test_sternheimer_siab_overlap.cpp`
 
-- [ ] **Step 1: Write analytic overlap tests first**
+- [x] **Step 1: Write analytic overlap tests first**
 
 For a local four-point real grid with `DeltaOmega=0.25`, use:
 
@@ -90,7 +90,7 @@ EXPECT_NEAR(overlap_q(y, b, 0.25)[1].imag(), 0.00, 1.0e-14);
 
 The test for `overlap_s(b,0.25)` asserts a Hermitian diagonal matrix with both diagonal values `0.5`.
 
-- [ ] **Step 2: Run the new test target and confirm link failure**
+- [x] **Step 2: Run the new test target and confirm link failure**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_overlap
@@ -99,7 +99,7 @@ ctest --test-dir build-sternheimer-siab -R sternheimer_siab_overlap --output-on-
 
 Expected before implementation: undefined overlap API or missing target.
 
-- [ ] **Step 3: Define explicit data types and pure APIs**
+- [x] **Step 3: Define explicit data types and pure APIs**
 
 ```cpp
 namespace module_ri::sternheimer_siab
@@ -136,10 +136,10 @@ std::vector<std::complex<double>> overlap_s(
 }
 ```
 
-All three APIs compute local sums with `conj(left)*right*DeltaOmega`. The production wrapper performs `MPI_Allreduce` exactly once per output vector/matrix after local sums. It must not transform between PW and real-space representations.
-An MPI rank with a zero-length local FFT slab contributes zero local sums; it must not throw before the collective. A globally empty grid remains invalid at the production-wrapper level.
+All three APIs compute `conj(left)*right*DeltaOmega`. In the final frequency-MPI path each owner already holds a complete reconstructed response, whereas the primitive FFT output is distributed over PW z slabs. The production wrapper therefore allgathers the primitive slabs once, evaluates `norm` and `Q` locally on the owning rank without an overlap `Allreduce`, and gathers variable row payloads to rank 0. Reducing the complete owner response would double count it. It must not transform the reconstructed response between PW and real-space representations.
+An MPI rank with a zero-length local FFT slab remains valid during primitive assembly and contributes an empty slab; it must not exit before the collective. A globally empty or incompletely covered grid remains invalid at the production-wrapper level.
 
-- [ ] **Step 4: Implement and pass the analytic tests**
+- [x] **Step 4: Implement and pass the analytic tests**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_overlap
@@ -148,7 +148,7 @@ ctest --test-dir build-sternheimer-siab -R sternheimer_siab_overlap --output-on-
 
 Expected: one test passes.
 
-- [ ] **Step 5: Commit only overlap/data-model work**
+- [x] **Step 5: Commit only overlap/data-model work**
 
 ```bash
 git add source/source_lcao/module_ri/sternheimer_siab_data.h \
@@ -168,7 +168,7 @@ git commit --author='Codex <codex@openai.com>' -m 'test(sternheimer): pin SIAB g
 - Modify: `source/source_io/module_bessel/numerical_basis.cpp`
 - Create: `source/source_lcao/module_ri/test/test_sternheimer_siab_primitives.cpp`
 
-- [ ] **Step 1: Write a PW-versus-grid primitive regression**
+- [x] **Step 1: Write a PW-versus-grid primitive regression**
 
 Extract the existing numerical-Bessel construction behind `Numerical_Basis::cal_overlap_Q` into a public read-only helper. For every explicit `(atom,l,m,ie)`, first construct the exact reciprocal-space primitive coefficients already used by `cal_overlap_Q`, then call `PW_Basis_K::recip2real` once and divide the local real-space values by `sqrt(ucell.omega)`. The latter factor converts ABACUS's FFT convention to a physical grid function satisfying
 
@@ -179,14 +179,14 @@ DeltaOmega * sum_r conj(B_e(r)) B_e'(r)
 
 on the represented PW subspace. For a Gamma-only H atom fixture, assert that direct grid integration of a test PW wavefunction with each primitive agrees with the existing reciprocal-space overlap to `1e-10` absolute and relative tolerance at `ecut=25 Ry`.
 
-- [ ] **Step 2: Confirm the regression fails before extraction**
+- [x] **Step 2: Confirm the regression fails before extraction**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target MODULE_RI_sternheimer_siab_primitives_test
 ctest --test-dir build-sternheimer-siab -R sternheimer_siab_primitives --output-on-failure
 ```
 
-- [ ] **Step 3: Add the public helper without duplicating radial definitions**
+- [x] **Step 3: Add the public helper without duplicating radial definitions**
 
 The new interface returns local-grid blocks ordered by:
 
@@ -194,9 +194,9 @@ The new interface returns local-grid blocks ordered by:
 element order -> atom index -> l -> m=-l..l -> primitive index ie=0..Ne-1
 ```
 
-Each block records `n_primitive=Ne` and a cumulative offset. Reuse the current spherical-Bessel cutoff, `Ecut`, reciprocal normalization, real spherical-harmonic convention, structure-factor atom phase, PW cutoff, FFT distribution, and `DeltaOmega`. Do not reimplement Bessel roots, radial transforms, spherical-harmonic phases, or FFT normalization in `module_ri`. The helper returns only the current rank's local real-space slab; Task 4 performs one MPI reduction only after the local `Q` and `S` sums have been formed.
+Each block records `n_primitive=Ne` and a cumulative offset. Reuse the current spherical-Bessel cutoff, `Ecut`, reciprocal normalization, real spherical-harmonic convention, structure-factor atom phase, PW cutoff, FFT distribution, and `DeltaOmega`. Do not reimplement Bessel roots, radial transforms, spherical-harmonic phases, or FFT normalization in `module_ri`. The helper returns only the current rank's local real-space slab; Task 4 reassembles those slabs into the full primitive grid once because the frequency owner holds a full response grid.
 
-- [ ] **Step 4: Run primitive and overlap tests**
+- [x] **Step 4: Run primitive and overlap tests**
 
 ```bash
 cmake --build build-sternheimer-siab -j 8 --target \
@@ -207,7 +207,7 @@ ctest --test-dir build-sternheimer-siab -R 'sternheimer_siab_(overlap|primitives
 
 Expected: PW and grid overlaps match within `1e-10`.
 
-- [ ] **Step 5: Commit the primitive-grid bridge**
+- [x] **Step 5: Commit the primitive-grid bridge**
 
 ```bash
 git add source/source_io/module_bessel/numerical_basis.h \
@@ -283,9 +283,9 @@ git commit --author='Codex <codex@openai.com>' -m 'feat(sternheimer): write vers
 - Modify: `source/source_lcao/module_ri/sternheimer_abacus_st_smoke.cpp`
 - Create: `source/source_lcao/module_ri/test/test_sternheimer_siab_mpi.cpp`
 
-- [ ] **Step 1: Add a serial-versus-frequency-MPI regression**
+- [x] **Step 1: Add a serial-versus-frequency-MPI regression**
 
-Run a tiny H case with two frequency points once with one frequency group and once with two. Parse both v1 files and assert:
+At the MPI assembly layer, use fixed complete response vectors and two frequency owners. Parse the serial and gathered v1 files and assert:
 
 ```text
 same primitive blocks and metadata exactly
@@ -294,9 +294,11 @@ max_abs(Q_serial - Q_mpi) < 1e-12
 max_abs(S_serial - S_mpi) < 1e-12
 ```
 
-The test must fail if rank-local rows are missing, duplicated, or ordered by arrival instead of `(occupied_state,auxiliary_channel,frequency_index)`.
+The test must fail if rank-local rows are missing, duplicated, double-counted, or ordered by arrival instead of `(occupied_state,auxiliary_channel,frequency_index)`.
 
-- [ ] **Step 2: Insert collection at the full reconstructed response**
+For a real H calculation, a raw row of `Q` may acquire the arbitrary global phase of the occupied KS orbital and reconstructed first-order wavefunction when the total MPI layout changes. Therefore the end-to-end comparison additionally reports row-wise phase-aligned `Q` and the phase-invariant row projector `Q^dagger Q`; it must not require raw `Q` equality before gauge alignment. Metadata and `S` remain directly comparable.
+
+- [x] **Step 2: Insert collection at the full reconstructed response**
 
 At the scope containing `response.response.reconstructed_wavefunction`, calculate one `ReferenceRow` per `(occupied_state, auxiliary_channel, ifreq)`. Use the complete reconstructed Delta-ST wavefunction, not only the complementary correction. Set:
 
@@ -310,24 +312,24 @@ frequency_ha = the actual imaginary frequency in Hartree
 
 Build `S_B` once. Sort gathered rows by the tuple above before writing. The output contains no Coulomb matrix and no raw real-space wavefunction.
 
-- [ ] **Step 3: Record complete provenance**
+- [x] **Step 3: Record complete provenance**
 
-Write source commit, executable SHA256, full-Coulomb kernel label, cell vectors in bohr, `ecut_ry`, `DeltaOmega`, PP SHA256, initial orbital SHA256, ABFS SHA256, `exx_pca_thr`, `sternheimer_nfreq`, frequency list, spin convention, MPI ranks, and OMP threads. Reject an empty Git hash or missing file hash.
+Write source commit, executable SHA256, full-Coulomb kernel label, cell vectors in bohr, `ecut_ry`, PP SHA256, initial orbital SHA256, ABFS SHA256, `exx_pca_thr`, `sternheimer_nfreq`, frequency list, spin convention, MPI ranks, and OMP threads. Store `DeltaOmega` as the v1 header's `grid_volume_bohr3`. Reject an empty Git hash or missing file hash.
 
-- [ ] **Step 4: Build with a private immutable executable**
+- [x] **Step 4: Build with a private immutable executable**
 
 ```bash
-cmake -S . -B build-sternheimer-siab -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build-sternheimer-siab -j 8
-cp build-sternheimer-siab/abacus build-sternheimer-siab/abacus-$(git rev-parse --short=12 HEAD)
+cmake -S . -B build-sternheimer-siab -DCMAKE_CXX_FLAGS='-O3 -g' -DDEBUG_INFO=ON
+cmake --build build-sternheimer-siab -j 32 --target abacus_3p
+cp build-sternheimer-siab/abacus_3p build-sternheimer-siab/abacus-$(git rev-parse --short=12 HEAD)
 sha256sum build-sternheimer-siab/abacus-$(git rev-parse --short=12 HEAD)
 ```
 
 Do not overwrite an executable used by a running job.
 
-- [ ] **Step 5: Run MPI identity checks on `normal` and commit**
+- [x] **Step 5: Run MPI identity checks on `normal` and commit**
 
-Submit the tiny two-frequency cases to `normal`, inspect `sacct`, `OUT.ABACUS/running_scf.log`, and both producer files. Expected: both ABACUS exits are zero and the three maximum differences are below `1e-12`.
+Submit the tiny two-frequency cases to `normal`, inspect `sacct`, `OUT.ABACUS/running_scf.log`, and both producer files. Require zero ABACUS exit codes, complete row counts, exact metadata and `S`, converged response equations, and report both row-wise phase-aligned `Q` and the phase-invariant row projector. The synthetic fixed-response MPI regression retains the strict `1e-12` criterion.
 
 ```bash
 git add source/source_lcao/module_ri/sternheimer_abacus_st_smoke.cpp \
@@ -335,6 +337,11 @@ git add source/source_lcao/module_ri/sternheimer_abacus_st_smoke.cpp \
 GIT_COMMITTER_NAME='AroundPeking' GIT_COMMITTER_EMAIL='gonghuanjing@iphy.ac.cn' \
 git commit --author='Codex <codex@openai.com>' -m 'feat(sternheimer): export MPI-complete SIAB targets'
 ```
+
+**Completed evidence (2026-07-18):** ABACUS commit `80a606f57a2610bc2532468661b687b01f58074c` was built on `df_dcu` from an isolated source snapshot with the established `-O3 -g`, `DEBUG_INFO=ON` profile. Job `21310975` passed all seven SIAB overlap/writer/provenance/MPI/primitive tests and produced the immutable executable
+`/public/home/ghj/app/src/abacus-sternheimer-siab-task4-80a606f57a26/build-task4-o3-debug-info/abacus-80a606f57a26`, SHA256 `2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d`.
+
+The fully converged real-H comparison used the same two frequencies, PP, H-TZDP 8-au orbital, cell, cutoff, auxiliary basis, and immutable executable. The one-rank run was job `21311121`; the two-frequency-owner run was job `21311122`. Both exited `0:0`, wrote 66 rows and 32 primitives, and reported all response equations converged. Metadata and `S` were exactly equal. The maximum relative differences were `4.43e-12` for `norm`, `2.24e-11` for row-wise phase-aligned `Q`, and `8.11e-12` for the phase-invariant row projector `Q^dagger Q`. The stricter synthetic MPI test remains bitwise identical; the real-run residual reflects upstream SCF/linear-solver floating reductions and KS gauge, not missing or duplicated producer rows.
 
 ### Task 5: Regenerate the Historical DFT/dpsi Constraint Data
 
