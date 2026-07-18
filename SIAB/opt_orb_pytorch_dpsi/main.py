@@ -4,16 +4,73 @@ import IO.read_QSV
 import IO.print_QSV
 import IO.func_C
 import IO.read_json
+import IO.read_sternheimer
 import IO.print_orbital
 import IO.cal_weight
 import IO.change_info
 import orbital
 from opt_orbital_converge import Opt_Orbital_Converge
+from freeze_orbitals import validate_freeze_orbitals
+from optimization_loss import normalize_loss_config
+from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
 
 import numpy as np
 import time
 import pprint
 import sys
+
+
+def _load_sternheimer_data(file_list, info_optimize):
+	stages = [
+		normalize_loss_config(stage["loss"])
+		for stage in info_optimize
+		if "loss" in stage
+	]
+	if "sternheimer" in file_list:
+		paths = file_list["sternheimer"]
+		if not isinstance(paths, (list, tuple)) or len(paths) != 1:
+			raise ValueError(
+				"the first SIAB Sternheimer implementation requires exactly one data file"
+			)
+		if not stages:
+			raise ValueError(
+				"sternheimer data requires a Sternheimer loss stage"
+			)
+		return IO.read_sternheimer.read_sternheimer(paths[0]), stages
+	if stages:
+		raise ValueError("Sternheimer loss stage requires sternheimer data")
+	return None, stages
+
+
+def _expand_fixed_orbitals(data, C, freeze_specs):
+	freeze_indices = validate_freeze_orbitals(freeze_specs, C)
+	if not freeze_indices:
+		raise ValueError(
+			"the first SIAB Sternheimer implementation requires nonempty freeze_orbitals"
+		)
+
+	fixed_orbitals = []
+	seen = set()
+	for spec in freeze_specs:
+		element, l, zeta = spec["element"], int(spec["l"]), int(spec["zeta"])
+		matching_blocks = [
+			block
+			for block in data.blocks
+			if block.element == element and block.l == l
+		]
+		if not matching_blocks:
+			raise ValueError(
+				f"freeze orbital {(element, l, zeta)!r} maps to no primitive blocks"
+			)
+		for block in matching_blocks:
+			column = OrbitalColumn(
+				block.element, block.atom_index, block.l, block.m, zeta
+			)
+			if column in seen:
+				raise ValueError(f"duplicate fixed orbital expansion {column!r}")
+			seen.add(column)
+			fixed_orbitals.append(column)
+	return tuple(fixed_orbitals)
 
 def main():
 	seed = int(1000*time.time())%(2**32)
@@ -22,6 +79,9 @@ def main():
 	time_start = time.time()
 
 	file_list, info_true, info_weight, info_optimize, info_C_init, info_V, info_radial = IO.read_json.read_json("INPUT")
+	sternheimer_data, sternheimer_stages = _load_sternheimer_data(
+		file_list, info_optimize
+	)
 
 	weight = IO.cal_weight.cal_weight(info_weight, info_V["same_band"], file_list["origin"])
 
@@ -51,10 +111,32 @@ def main():
 		info_radial["dr"],
 		C, flag_norm_C=True)
 
+	sternheimer_spillage = None
+	if sternheimer_data is not None:
+		freeze_specs = info_C_init.get("freeze_orbitals")
+		if not freeze_specs:
+			raise ValueError(
+				"the first SIAB Sternheimer implementation requires nonempty freeze_orbitals"
+			)
+		fixed_orbitals = _expand_fixed_orbitals(
+			sternheimer_data, C, freeze_specs
+		)
+		condition_limit = max(
+			stage["condition_limit"] for stage in sternheimer_stages
+		)
+		sternheimer_spillage = SternheimerSpillage(
+			sternheimer_data,
+			C,
+			fixed_orbitals,
+			condition_limit=condition_limit,
+		)
+
 	opt_orb_conv = Opt_Orbital_Converge()
 	opt_orb_conv.set_info(file_list, info_optimize, info_stru, info_C_init, info_V)
 	opt_orb_conv.set_info_element(info_element)
 	opt_orb_conv.set_QSVI(QI, SI, VI_origin)
+	if sternheimer_spillage is not None:
+		opt_orb_conv.set_sternheimer_spillage(sternheimer_spillage)
 	if "linear" in file_list.keys():
 		opt_orb_conv.set_QSVI_linear(QI_linear, SI_linear, VI_linear)
 	if info_C_init["init_from_file"]:
@@ -88,7 +170,13 @@ def main():
 		info_radial["Rcut"],
 		info_radial["dr"])
 
-	IO.func_C.write_C("ORBITAL_RESULTS.txt", data_transmit["C"], data_transmit["Spillage"])
+	IO.func_C.write_C(
+		"ORBITAL_RESULTS.txt",
+		data_transmit["C"],
+		data_transmit["Spillage"],
+		loss_components=data_transmit.get("loss_components"),
+		mode=data_transmit.get("loss_mode"),
+	)
 
 	print("Time (PyTorch):     %s\n"%(time.time()-time_start) )
 

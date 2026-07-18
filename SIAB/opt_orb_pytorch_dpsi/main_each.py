@@ -24,6 +24,8 @@ def main():
 	time_start = time.time()
 
 	file_list, info_true, info_weight, info_optimize, info_C_init, info_V, info_radial = IO.read_json.read_json("INPUT")
+	if "sternheimer" in file_list:
+		raise ValueError("sternheimer input is supported by main.py only")
 	info_each_thr = {"Loss": info_true.Loss_thr, "orb_num": info_true.orb_num}
 
 	weight = IO.cal_weight.cal_weight(info_weight, info_V["same_band"], file_list["origin"])

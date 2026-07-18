@@ -1,6 +1,49 @@
 import util
 import torch
 import numpy as np
+import math
+import numbers
+from collections.abc import Mapping
+
+
+_LOSS_COMPONENTS = (
+	("dft_origin", "DFT origin loss"),
+	("dft_dpsi", "DFT dpsi loss"),
+	("sternheimer", "Sternheimer loss"),
+	("constraint_dft", "DFT constraint loss"),
+	("constraint_dpsi", "dpsi constraint loss"),
+	("total", "Total loss"),
+)
+
+
+def _validate_loss_metadata(loss_components, mode):
+	if loss_components is None and mode is None:
+		return None
+	if loss_components is None or mode is None:
+		raise ValueError("mode and loss_components must be supplied together")
+	if mode not in ("st_only", "st_constrained"):
+		raise ValueError(f"invalid mode {mode!r}")
+	if not isinstance(loss_components, Mapping):
+		raise TypeError("loss_components must be a mapping")
+	expected = {name for name, _ in _LOSS_COMPONENTS}
+	if set(loss_components) != expected:
+		raise ValueError(
+			"loss_components must contain exactly "
+			+ ", ".join(name for name, _ in _LOSS_COMPONENTS)
+		)
+
+	validated = {}
+	for name, _ in _LOSS_COMPONENTS:
+		value = loss_components[name]
+		if (
+			isinstance(value, bool)
+			or not isinstance(value, numbers.Real)
+			or not math.isfinite(value)
+			or value < 0.0
+		):
+			raise ValueError(f"{name} metadata must be finite and nonnegative")
+		validated[name] = float(value)
+	return validated
 
 def random_C_init(info_element):
 	""" C[it][il][ie,iu]	<jY|\phi> """
@@ -55,7 +98,8 @@ def copy_C(C,info_element):
 
 
 
-def write_C(file_name,C,Spillage):
+def write_C(file_name,C,Spillage,loss_components=None,mode=None):
+	loss_components = _validate_loss_metadata(loss_components, mode)
 	with open(file_name,"w") as file:
 		print("<Coefficient>", file=file)
 		#print("\tTotal number of radial orbitals.", file=file)
@@ -77,6 +121,10 @@ def write_C(file_name,C,Spillage):
 		print("</Coefficient>", file=file)
 		print("<Mkb>", file=file)
 		print("Left spillage = %.10e"%Spillage, file=file)
+		if loss_components is not None:
+			print(f"Mode = {mode}", file=file)
+			for name, label in _LOSS_COMPONENTS:
+				print(f"{label} = {loss_components[name]:.10e}", file=file)
 		print("</Mkb>", file=file)
 
 
