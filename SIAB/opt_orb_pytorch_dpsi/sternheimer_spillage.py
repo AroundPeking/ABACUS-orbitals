@@ -1,0 +1,262 @@
+from dataclasses import dataclass
+import math
+
+import torch
+
+
+@dataclass(frozen=True)
+class OrbitalColumn:
+    element: str
+    atom_index: int
+    l: int
+    m: int
+    zeta: int
+
+
+@dataclass(frozen=True)
+class SternheimerLossResult:
+    loss: torch.Tensor
+    weighted_residual: torch.Tensor
+    weighted_norm: torch.Tensor
+    max_condition: float
+
+
+def _orbital_label(column):
+    return (
+        f"{column.element}/{column.atom_index}/{column.l}/{column.m}/"
+        f"zeta{column.zeta}"
+    )
+
+
+def _coefficient_matrix(c, element, l):
+    try:
+        by_l = c[element]
+        coefficient = by_l[l]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"C is missing element/l {element}/{l}") from exc
+    if not isinstance(coefficient, torch.Tensor):
+        raise ValueError(f"C[{element!r}][{l}] must be a torch.Tensor")
+    if coefficient.dtype != torch.float64 or coefficient.is_complex():
+        raise ValueError(f"C[{element!r}][{l}] must be real float64")
+    if coefficient.device.type != "cpu":
+        raise ValueError(f"C[{element!r}][{l}] must be on CPU")
+    if coefficient.ndim != 2:
+        raise ValueError(f"C[{element!r}][{l}] must have rank 2")
+    if not bool(torch.all(torch.isfinite(coefficient))):
+        raise ValueError(
+            f"C[{element!r}][{l}] must contain only finite values"
+        )
+    return coefficient
+
+
+def assemble_orbital_coefficients(data, c):
+    block_data = []
+    labels = []
+    seen_keys = set()
+    n_column = 0
+
+    for block in data.blocks:
+        if block.key in seen_keys:
+            raise ValueError(f"duplicate PrimitiveBlock key: {block.key}")
+        seen_keys.add(block.key)
+
+        coefficient = _coefficient_matrix(c, block.element, block.l)
+        if coefficient.shape[0] != block.n_primitive:
+            raise ValueError(
+                f"C[{block.element!r}][{block.l}] radial row count "
+                f"{coefficient.shape[0]} does not match block.n_primitive "
+                f"{block.n_primitive}"
+            )
+        block_data.append((block, coefficient, n_column))
+        for zeta in range(1, coefficient.shape[1] + 1):
+            labels.append(
+                OrbitalColumn(
+                    block.element,
+                    block.atom_index,
+                    block.l,
+                    block.m,
+                    zeta,
+                )
+            )
+        n_column += coefficient.shape[1]
+
+    assembled = torch.zeros(
+        (data.q.shape[1], n_column),
+        dtype=torch.complex128,
+        device=data.q.device,
+    )
+    for block, coefficient, column_offset in block_data:
+        row_slice = slice(block.offset, block.offset + block.n_primitive)
+        column_slice = slice(column_offset, column_offset + coefficient.shape[1])
+        assembled[row_slice, column_slice] = coefficient.to(torch.complex128)
+
+    return assembled, tuple(labels)
+
+
+def _factor_hermitian(matrix, condition_limit, name, positive_error):
+    hermitian = (matrix + matrix.conj().transpose(0, 1)) / 2.0
+    factor, info = torch.linalg.cholesky_ex(hermitian)
+    if int(info.item()) != 0:
+        raise RuntimeError(positive_error)
+
+    condition = float(torch.linalg.cond(hermitian).item())
+    if not math.isfinite(condition):
+        raise RuntimeError(f"{name} condition number is not finite")
+    if condition > condition_limit:
+        raise RuntimeError(
+            f"{name} condition number {condition:.6g} exceeds "
+            f"condition_limit {condition_limit:.6g}"
+        )
+    return factor, condition
+
+
+def _row_diagonal(q, solve):
+    return torch.sum(q * solve.transpose(0, 1), dim=1)
+
+
+def _clamp_roundoff_negative(values, local_scale, name, detail):
+    tolerance = 1.0e-10 * local_scale
+    negative = values < -tolerance
+    if bool(torch.any(negative)):
+        row = int(torch.nonzero(negative, as_tuple=False)[0].item())
+        raise RuntimeError(
+            f"materially negative {name} at reference {row} "
+            f"({float(values[row].item()):.6g}, "
+            f"tolerance {float(tolerance[row].item()):.6g}); {detail}"
+        )
+    return torch.clamp(values, min=0.0)
+
+
+class SternheimerSpillage:
+    def __init__(
+        self,
+        data,
+        c0,
+        fixed_orbitals,
+        condition_limit=1.0e12,
+    ):
+        try:
+            condition_limit = float(condition_limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "condition_limit must be finite and at least 1"
+            ) from exc
+        if not math.isfinite(condition_limit) or condition_limit < 1.0:
+            raise ValueError("condition_limit must be finite and at least 1")
+
+        assembled, labels = assemble_orbital_coefficients(data, c0)
+        fixed_orbitals = tuple(fixed_orbitals)
+        if not fixed_orbitals:
+            raise ValueError("fixed orbital space must be nonempty")
+        for orbital in fixed_orbitals:
+            if not isinstance(orbital, OrbitalColumn):
+                raise ValueError("fixed orbitals must be OrbitalColumn values")
+            count = labels.count(orbital)
+            if count != 1:
+                raise ValueError(
+                    f"fixed orbital {_orbital_label(orbital)} not found exactly once"
+                )
+        if len(set(fixed_orbitals)) != len(fixed_orbitals):
+            raise ValueError("a fixed orbital was requested more than once")
+
+        fixed_set = set(fixed_orbitals)
+        fixed_indices = tuple(
+            index for index, label in enumerate(labels) if label in fixed_set
+        )
+        variable_indices = tuple(
+            index for index, label in enumerate(labels) if label not in fixed_set
+        )
+        if not variable_indices:
+            raise ValueError("variable orbital space must be nonempty")
+
+        self._data = data
+        self._condition_limit = condition_limit
+        self._labels = labels
+        self._variable_indices = variable_indices
+        self._variable_labels = tuple(labels[index] for index in variable_indices)
+
+        self._a0 = assembled[:, fixed_indices].detach().clone()
+        s00 = self._a0.conj().transpose(0, 1) @ data.overlap @ self._a0
+        self._s00_cholesky, self._fixed_condition = _factor_hermitian(
+            s00,
+            condition_limit,
+            "fixed overlap",
+            "fixed overlap is not positive definite",
+        )
+        self._s00_cholesky = self._s00_cholesky.detach().clone()
+
+        self._q0 = (data.q @ self._a0).detach().clone()
+        self._s00_inverse_q0_h = torch.cholesky_solve(
+            self._q0.conj().transpose(0, 1), self._s00_cholesky
+        ).detach().clone()
+        fixed_represented = _row_diagonal(
+            self._q0, self._s00_inverse_q0_h
+        ).real
+        nbar_scale = torch.maximum(
+            torch.maximum(torch.abs(data.norm), torch.abs(fixed_represented)),
+            torch.ones_like(data.norm),
+        )
+        self._nbar = _clamp_roundoff_negative(
+            data.norm - fixed_represented,
+            nbar_scale,
+            "projected reference norm nbar",
+            "check norm, q, overlap, and the requested fixed orbitals",
+        ).detach().clone()
+
+    def evaluate(self, c):
+        assembled, labels = assemble_orbital_coefficients(self._data, c)
+        if labels != self._labels:
+            raise ValueError("orbital labels changed from the constructor assembly")
+
+        a1 = assembled[:, self._variable_indices]
+        overlap = self._data.overlap
+        s01 = self._a0.conj().transpose(0, 1) @ overlap @ a1
+        s11 = a1.conj().transpose(0, 1) @ overlap @ a1
+        s00_inverse_s01 = torch.cholesky_solve(s01, self._s00_cholesky)
+        q1 = self._data.q @ a1
+        qbar = q1 - self._q0 @ s00_inverse_s01
+        sbar = (
+            s11
+            - s01.conj().transpose(0, 1) @ s00_inverse_s01
+        )
+
+        variable_names = ", ".join(
+            _orbital_label(label) for label in self._variable_labels
+        )
+        sbar_cholesky, variable_condition = _factor_hermitian(
+            sbar,
+            self._condition_limit,
+            "variable overlap",
+            "variable overlap is not positive definite; "
+            f"variable columns: {variable_names}",
+        )
+        sbar_inverse_qbar_h = torch.cholesky_solve(
+            qbar.conj().transpose(0, 1), sbar_cholesky
+        )
+        represented = _row_diagonal(qbar, sbar_inverse_qbar_h).real
+        residual_scale = torch.maximum(
+            torch.maximum(torch.abs(self._nbar), torch.abs(represented)),
+            torch.ones_like(self._nbar),
+        )
+        residual = _clamp_roundoff_negative(
+            self._nbar - represented,
+            residual_scale,
+            "projected residual",
+            "the variable projector represents more than nbar; check q and overlap",
+        )
+
+        weight = self._data.effective_weight
+        weighted_norm = torch.sum(weight * self._nbar)
+        if not bool(torch.isfinite(weighted_norm)) or not bool(weighted_norm > 0.0):
+            raise RuntimeError("weighted projected norm must be positive and finite")
+        weighted_residual = torch.sum(weight * residual)
+        if not bool(torch.isfinite(weighted_residual)):
+            raise RuntimeError("weighted projected residual must be finite")
+        loss = weighted_residual / weighted_norm
+
+        return SternheimerLossResult(
+            loss=loss,
+            weighted_residual=weighted_residual,
+            weighted_norm=weighted_norm,
+            max_condition=max(self._fixed_condition, variable_condition),
+        )
