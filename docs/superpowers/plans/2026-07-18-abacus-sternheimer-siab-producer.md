@@ -6,7 +6,7 @@
 
 **Architecture:** The ABACUS producer is a separate opt-in output path at the point where each reconstructed Delta-ST wavefunction is available. It evaluates `n_rho`, `<Y_rho|B_e>`, and `<B_e|B_e'>` on the existing uniform real-space grid with the same `DeltaOmega`, writes a strict v1 file, and includes complete provenance. Production data and SIAB optimization run on `df_dcu`; LibRPA performs the held-out full-Coulomb SOS-RPA validation.
 
-**Tech Stack:** ABACUS C++17, MPI/OpenMP, GoogleTest, uniform real-space grid, SIAB/PyTorch, LibRPA, SLURM `normal` partition.
+**Tech Stack:** ABACUS C++14, MPI/OpenMP, GoogleTest, uniform real-space grid, SIAB/PyTorch, LibRPA, SLURM `normal` partition.
 
 ---
 
@@ -137,6 +137,7 @@ std::vector<std::complex<double>> overlap_s(
 ```
 
 All three APIs compute local sums with `conj(left)*right*DeltaOmega`. The production wrapper performs `MPI_Allreduce` exactly once per output vector/matrix after local sums. It must not transform between PW and real-space representations.
+An MPI rank with a zero-length local FFT slab contributes zero local sums; it must not throw before the collective. A globally empty grid remains invalid at the production-wrapper level.
 
 - [ ] **Step 4: Implement and pass the analytic tests**
 
@@ -163,35 +164,44 @@ git commit --author='Codex <codex@openai.com>' -m 'test(sternheimer): pin SIAB g
 ### Task 2: Generate the Same Primitive Basis Used by H-TZDP
 
 **Files:**
-- Modify: `source/source_io/numerical_basis.h`
-- Modify: `source/source_io/numerical_basis.cpp`
+- Modify: `source/source_io/module_bessel/numerical_basis.h`
+- Modify: `source/source_io/module_bessel/numerical_basis.cpp`
 - Create: `source/source_lcao/module_ri/test/test_sternheimer_siab_primitives.cpp`
 
 - [ ] **Step 1: Write a PW-versus-grid primitive regression**
 
-Extract the existing numerical-Bessel construction behind `Numerical_Basis::cal_overlap_Q` into a public read-only helper that returns values for explicit `(atom,l,m,ie)` on the current uniform grid. For a Gamma-only H atom fixture, assert that direct grid integration of a test PW wavefunction with each primitive agrees with the existing PW overlap to `1e-10` absolute and relative tolerance at `ecut=25 Ry`.
+Extract the existing numerical-Bessel construction behind `Numerical_Basis::cal_overlap_Q` into a public read-only helper. For every explicit `(atom,l,m,ie)`, first construct the exact reciprocal-space primitive coefficients already used by `cal_overlap_Q`, then call `PW_Basis_K::recip2real` once and divide the local real-space values by `sqrt(ucell.omega)`. The latter factor converts ABACUS's FFT convention to a physical grid function satisfying
+
+```text
+DeltaOmega * sum_r conj(B_e(r)) B_e'(r)
+= sum_G conj(B_e(G)) B_e'(G)
+```
+
+on the represented PW subspace. For a Gamma-only H atom fixture, assert that direct grid integration of a test PW wavefunction with each primitive agrees with the existing reciprocal-space overlap to `1e-10` absolute and relative tolerance at `ecut=25 Ry`.
 
 - [ ] **Step 2: Confirm the regression fails before extraction**
 
 ```bash
-cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_primitives
+cmake --build build-sternheimer-siab -j 8 --target MODULE_RI_sternheimer_siab_primitives_test
 ctest --test-dir build-sternheimer-siab -R sternheimer_siab_primitives --output-on-failure
 ```
 
 - [ ] **Step 3: Add the public helper without duplicating radial definitions**
 
-The new interface returns blocks ordered by:
+The new interface returns local-grid blocks ordered by:
 
 ```text
 element order -> atom index -> l -> m=-l..l -> primitive index ie=0..Ne-1
 ```
 
-Each block records `n_primitive=Ne` and a cumulative offset. Reuse the current spherical-Bessel cutoff, `Ecut`, normalization, real spherical-harmonic convention, atom centers, and periodic grid distances. Do not reimplement Bessel roots or normalization in `module_ri`.
+Each block records `n_primitive=Ne` and a cumulative offset. Reuse the current spherical-Bessel cutoff, `Ecut`, reciprocal normalization, real spherical-harmonic convention, structure-factor atom phase, PW cutoff, FFT distribution, and `DeltaOmega`. Do not reimplement Bessel roots, radial transforms, spherical-harmonic phases, or FFT normalization in `module_ri`. The helper returns only the current rank's local real-space slab; Task 4 performs one MPI reduction only after the local `Q` and `S` sums have been formed.
 
 - [ ] **Step 4: Run primitive and overlap tests**
 
 ```bash
-cmake --build build-sternheimer-siab -j 8 --target test_sternheimer_siab_overlap test_sternheimer_siab_primitives
+cmake --build build-sternheimer-siab -j 8 --target \
+  MODULE_RI_sternheimer_siab_overlap_test \
+  MODULE_RI_sternheimer_siab_primitives_test
 ctest --test-dir build-sternheimer-siab -R 'sternheimer_siab_(overlap|primitives)' --output-on-failure
 ```
 
@@ -200,8 +210,8 @@ Expected: PW and grid overlaps match within `1e-10`.
 - [ ] **Step 5: Commit the primitive-grid bridge**
 
 ```bash
-git add source/source_io/numerical_basis.h \
-        source/source_io/numerical_basis.cpp \
+git add source/source_io/module_bessel/numerical_basis.h \
+        source/source_io/module_bessel/numerical_basis.cpp \
         source/source_lcao/module_ri/test/test_sternheimer_siab_primitives.cpp
 GIT_COMMITTER_NAME='AroundPeking' GIT_COMMITTER_EMAIL='gonghuanjing@iphy.ac.cn' \
 git commit --author='Codex <codex@openai.com>' -m 'feat(sternheimer): expose SIAB primitive grid values'
