@@ -21,7 +21,7 @@ case "${SLURM_ARRAY_TASK_ID:?}" in
   *) echo "invalid array index: ${SLURM_ARRAY_TASK_ID}" >&2; exit 2 ;;
 esac
 
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+script_dir=${SLURM_SUBMIT_DIR:?}
 case_dir="$script_dir/cases/$case_name"
 output_dir="OUT.$case_name"
 abacus_work=/public/home/ghj/app/src/abacus-sternheimer-siab-task4-80a606f57a26/build-task4-o3-debug-info/abacus-80a606f57a26

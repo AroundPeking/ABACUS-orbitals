@@ -653,7 +653,9 @@ class ExampleInputTest(unittest.TestCase):
                 )
 
         self.assertTrue((LEGACY_PRODUCER / "KPT").is_file())
-        self.assertTrue((LEGACY_PRODUCER / "run_abacus.slurm").is_file())
+        run_script = (LEGACY_PRODUCER / "run_abacus.slurm").read_text()
+        self.assertIn('script_dir=${SLURM_SUBMIT_DIR:?}', run_script)
+        self.assertNotIn("BASH_SOURCE", run_script)
 
 
 class AppendedResponseShellTest(unittest.TestCase):
