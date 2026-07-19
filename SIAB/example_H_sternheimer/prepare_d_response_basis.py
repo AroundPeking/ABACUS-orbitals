@@ -97,6 +97,9 @@ def parse_args():
     parser.add_argument("--baseline", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--capture-threshold", type=float, default=0.99)
+    parser.add_argument(
+        "--magnetic-overlap-tolerance", type=float, default=1.0e-4
+    )
     parser.add_argument("--s-shells", type=int, default=4)
     parser.add_argument("--p-shells", type=int, default=3)
     parser.add_argument("--seed", type=int, default=20260719)
@@ -136,6 +139,7 @@ def main():
             element="H",
             atom_index=0,
             l=l,
+            magnetic_overlap_tolerance=args.magnetic_overlap_tolerance,
         )
         for l in range(3)
     ]
@@ -165,6 +169,7 @@ def main():
         "format_version": 1,
         "selection_rule": "atomic fixed-DZP residual spectrum",
         "capture_threshold": args.capture_threshold,
+        "magnetic_overlap_tolerance": args.magnetic_overlap_tolerance,
         "selected_nu": {"H": [args.s_shells, args.p_shells, d_shells]},
         "seed": args.seed,
         "target": str(target),

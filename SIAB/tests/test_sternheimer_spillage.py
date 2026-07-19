@@ -636,6 +636,42 @@ class SternheimerSpillageTest(unittest.TestCase):
                 magnetic_overlap_tolerance=1.0e-12,
             )
 
+    def test_radial_residual_spectrum_reports_accepted_grid_anisotropy(self):
+        data = make_s_and_d_spectrum_data([2.0, 1.0])
+        overlap = data.overlap.clone()
+        first_d = data.blocks[1]
+        first_slice = slice(
+            first_d.offset, first_d.offset + first_d.n_primitive
+        )
+        overlap[first_slice, first_slice] *= 1.0 + 5.0e-5
+        data = make_sternheimer_data(
+            data.blocks,
+            data.q,
+            norm=data.norm,
+            overlap=overlap,
+        )
+        c = {
+            "H": [
+                torch.tensor([[1.0]], dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+            ]
+        }
+
+        spectrum = radial_residual_spectrum(
+            data,
+            c,
+            [self.fixed_h_1s],
+            element="H",
+            atom_index=0,
+            l=2,
+            magnetic_overlap_tolerance=1.0e-4,
+        )
+
+        self.assertGreater(spectrum.overlap_relative_deviation, 0.0)
+        self.assertLess(spectrum.overlap_relative_deviation, 1.0e-4)
+        self.assertEqual(shell_count_for_capture(spectrum, 0.95), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
