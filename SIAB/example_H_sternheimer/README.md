@@ -109,6 +109,12 @@ only when the Sternheimer target contains complete H `l=2`,
 only `s/p` blocks and therefore cannot optimize a `d` response orbital; it must
 be regenerated with `lmax >= 2` first.
 
+`INPUT.st_dpsi_joint_4s3p` is the controlled expanded campaign. Relative to
+the validated `3s2p` joint input, it changes only `Nu.H` from `[3, 2]` to
+`[4, 3]`; training data, seed, DZP freeze list, optimizer, and every loss
+weight remain identical. This keeps H2 held out and tests whether two appended
+same-angular-momentum response functions add transferable Sternheimer space.
+
 The exact converged H-atom ABACUS producer input and `normal`-partition job
 script are under `producer/`.  Stage the checked-in H-TZDP `.orb` and the
 Dojo-NC-SR `Pseudopotential/H.upf` beside those files before submitting.  The job

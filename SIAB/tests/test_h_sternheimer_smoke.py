@@ -547,6 +547,9 @@ class ExampleInputTest(unittest.TestCase):
         expanded = json.loads((EXAMPLE / "INPUT.st_response_4s3p").read_text())
         constrained = json.loads((EXAMPLE / "INPUT.st_constrained").read_text())
         joint = json.loads((EXAMPLE / "INPUT.st_dpsi_joint").read_text())
+        joint_expanded = json.loads(
+            (EXAMPLE / "INPUT.st_dpsi_joint_4s3p").read_text()
+        )
         self.assertEqual(st_only["file_list"].keys(), {"sternheimer"})
         self.assertNotIn("origin", st_only["file_list"])
         self.assertNotIn("linear", st_only["file_list"])
@@ -590,6 +593,16 @@ class ExampleInputTest(unittest.TestCase):
         self.assertEqual(joint["freeze_orbitals"], DZP_FREEZE_SPECS)
         self.assertEqual(joint["file_list"], constrained["file_list"])
         self.assertEqual(joint["element"], constrained["element"])
+        self.assertEqual(joint_expanded["element"]["Nu"], {"H": [4, 3]})
+        self.assertEqual(
+            joint_expanded["freeze_orbitals"], DZP_FREEZE_SPECS
+        )
+        for key in joint:
+            if key != "element":
+                self.assertEqual(joint_expanded[key], joint[key])
+        self.assertEqual(
+            joint_expanded["element"]["Nt_all"], joint["element"]["Nt_all"]
+        )
         self.assertEqual(
             st_only["C_init_info"],
             {
