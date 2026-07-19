@@ -423,3 +423,11 @@ dpsi pairs as `Nl=3`, `Ne=25`, `Nu=[4,3,1]`. At the previous joint `4s3p`
 coefficients plus one deterministic d column, the d-coefficient gradient norms
 are `1.0922811097e-6` for DFT origin and `1.9509412056e-5` for dpsi. Thus both
 real regularizers act directly on d before the ST term is added.
+
+The formal spectrum-and-optimization continuation is normal-partition job
+`21316263`, submitted with `afterok:21315811`. It uses one full node, source
+commit `d37e5570`, the fixed 99% selector, the six recorded H3 matrix hashes,
+and the previous joint `4s3p` hash. The job first writes the spectrum and
+initial d columns, then runs `st_dpsi_joint` and verifies the fixed DZP columns
+bitwise. It deliberately does not submit H2; the atomic ST/DFT/dpsi result must
+be inspected first.

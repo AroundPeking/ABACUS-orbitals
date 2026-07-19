@@ -296,6 +296,13 @@ nonzero d-column gradient norms `1.0922811097e-6` (DFT origin) and
 `1.9509412056e-5` (dpsi). This closes the real-data regularizer gate; it does
 not select `n_d` or use H2.
 
+Normal job `21316263` is pre-submitted with dependency `afterok:21315811`.
+Once the target passes its own 225-column checks, this one-full-node job applies
+the fixed 99% rule, initializes d from the atomic spectrum, and runs the real
+joint optimization from source commit `d37e5570`. It stops before H2 so the
+atomic gates can be reviewed without leaking the held-out result into basis
+selection.
+
 - [ ] **Step 5: Re-run the held-out gate once**
 
 After the atomic ST and DFT/dpsi gates pass, run all H2/H bands with one common
