@@ -227,6 +227,7 @@ D_e = 2 E_RPA@PBE(H) - E_RPA@PBE(H2).
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | initial TZDP | -2.3319033102 | -0.9990938552 | -0.6573650319 | -0.3076354167 | -0.067918272 | -0.016168866 | 106.5360756 |
 | fixed-DZP joint | -2.3320626242 | -0.9990624516 | -0.6572902713 | -0.3076186661 | -0.069145013 | -0.016673657 | 106.7371494 |
+| fixed-DZP joint `4s3p` | -2.3324200613 | -0.9991830132 | -0.6565751969 | -0.3069816006 | -0.071038897 | -0.017573421 | 106.8576364 |
 
 The binding-energy decomposition in kcal/mol is:
 
@@ -234,15 +235,17 @@ The binding-energy decomposition in kcal/mol is:
 | --- | ---: | ---: | ---: | ---: |
 | initial TZDP | 57.7944412 | 26.4145084 | 22.3271259 | 106.5360756 |
 | fixed-DZP joint | 57.8851363 | 26.3886178 | 22.4633953 | 106.7371494 |
+| fixed-DZP joint `4s3p` | 57.5956008 | 26.7394311 | 22.5226046 | 106.8576364 |
 
 The joint basis improves this same-producer held-out value by only
 `0.2010738 kcal/mol`; it remains about `1.98 kcal/mol` below the approximately
 `108.72 kcal/mol` Thesis/FHI-aims reference and is not yet a converged RPA
 basis. At the same PCA threshold the generated auxiliary dimensions are
-H2/H = `68/34` for the initial basis and `66/33` for the joint basis. This test
-therefore evaluates each orbital together with its deterministically regenerated
-product auxiliary basis. A fixed-auxiliary-space cross test is required before
-attributing the change exclusively to the wave-function basis.
+H2/H = `68/34` for the initial basis, `66/33` for the `3s2p` joint basis, and
+`126/63` for the expanded `4s3p` basis. This test therefore evaluates each
+orbital together with its deterministically regenerated product auxiliary
+basis. A fixed-auxiliary-space cross test is required before attributing the
+change exclusively to the wave-function basis.
 
 The old 20-Angstrom result is not a valid initial-basis control. Its same-named
 orbital has SHA256
@@ -284,3 +287,19 @@ a212007b50647c4622a4ff95b359be5ba57b6d7ab6b21d1a4dead73a881fa3fb
 The next held-out calculation must use all `26` H2 and `13` H bands because
 `4s3p` contains 13 AO functions per atom. Reusing the `3s2p` values `18/9`
 would truncate the SOS virtual space and invalidate the basis comparison.
+
+That held-out calculation completed as df_dcu `normal` array job `21315465`.
+H2/H took 2 minutes 30 seconds and 1 minute 59 seconds and both LibRPA tasks
+finished successfully. The resulting binding energy is `106.8576364 kcal/mol`,
+an improvement of `0.1204871 kcal/mol` over the `3s2p` joint basis and
+`0.3215609 kcal/mol` over the checked-in TZDP, but still approximately
+`1.86 kcal/mol` below the Thesis/FHI-aims reference. The RPA correlation
+contribution changes monotonically from `22.3271259` to `22.4633953` to
+`22.5226046 kcal/mol` across initial, `3s2p` joint, and `4s3p` joint bases.
+
+Because the H2/H auxiliary dimensions also increase to `126/63`, this result
+does not isolate wave-function completeness from auxiliary-basis completeness.
+Do not repeatedly choose further shell counts from this H2 value: that would
+turn the held-out molecule into training data. Further expansion requires a
+predeclared atomic/H3 training-space criterion and a fixed-auxiliary cross test
+before one final H2 evaluation.

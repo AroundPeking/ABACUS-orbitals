@@ -17,3 +17,19 @@ Stage the following files beside this README:
 Submit `run_sos.slurm` from a clean campaign copy. Its two array tasks each use
 one full `normal` node and run ABACUS followed by LibRPA. The script verifies
 all immutable hashes and refuses to reuse existing outputs.
+
+## Completed result
+
+df_dcu `normal` array job `21315465` completed both tasks with the immutable
+inputs above. H2/H took 2 minutes 30 seconds and 1 minute 59 seconds. The
+component energies are:
+
+| case | PBE (Ry) | PBE XC (Ry) | EXX (Ha) | RPAc (Ha) |
+| --- | ---: | ---: | ---: | ---: |
+| H2 | -2.3324200613 | -1.3796548090 | -0.6565751969 | -0.071038897 |
+| H | -0.9991830132 | -0.6145848193 | -0.3069816006 | -0.017573421 |
+
+Using `E_RPA@PBE = E_PBE - E_xc^PBE + E_x^EXX + E_c^RPA` gives
+`106.8576364 kcal/mol`. The binding decomposition is `57.5956008` PBE minus
+PBE-XC, `26.7394311` EXX, and `22.5226046` RPAc, all in kcal/mol. The generated
+H2/H auxiliary dimensions are `126/63`.
