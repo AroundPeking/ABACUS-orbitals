@@ -654,6 +654,20 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn('script_dir=${SLURM_SUBMIT_DIR:?}', run_script)
         self.assertNotIn("BASH_SOURCE", run_script)
 
+    def test_joint_campaign_uses_full_normal_node_and_checks_outputs(self):
+        run_script = (EXAMPLE / "run_joint.slurm").read_text()
+
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --ntasks=1", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("module load apps/PyTorch/2.1.0", run_script)
+        self.assertIn("export OMP_NUM_THREADS=30", run_script)
+        self.assertIn("sternheimer_matrix.dat", run_script)
+        self.assertIn("orb_matrix.0.dat", run_script)
+        self.assertIn("orb_matrix.1.dat", run_script)
+        self.assertIn("Mode = st_dpsi_joint", run_script)
+
 
 class AppendedResponseShellTest(unittest.TestCase):
     @staticmethod
