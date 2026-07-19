@@ -211,9 +211,22 @@ df_dcu `normal` array job `21315279` regenerated the three
 used immutable ABACUS commit `80a606f57a26`; the exact six hashes are recorded
 in `SIAB/example_H_sternheimer/README.md`.
 
-- [ ] **Step 5: Run the first physical fixed-DZP joint campaign**
+- [x] **Step 5: Run the first physical fixed-DZP joint campaign**
 
 Evaluate the regenerated DFT/dpsi matrices and the canonical atomic ST target
 from the same initial TZDP coefficients. Then freeze `1s,2s,1p`, optimize only
 `3s,2p` with `lambda_dpsi=0.1`, and reject a result that violates either hard
 DFT/dpsi tolerance. Plot all radial functions before interpreting H2 RPA.
+
+df_dcu `normal` job `21315288` completed from source commit `d41f975e`.
+It reduced ST, DFT, and dpsi losses simultaneously; both hinge penalties stayed
+zero. The joint `3s,2p` orbitals have 2 and 1 radial nodes, compared with 3 and
+10 in the ST-only result. Exact values and output hashes are recorded in the
+example README.
+
+- [ ] **Step 6: Run the held-out H2/H SOS-RPA transfer test**
+
+Replace only the H orbital in the validated 20-Angstrom H2/H SOS producer,
+regenerate the ABFS and full-Coulomb data, and run LibRPA at 16 frequencies.
+Recompute PBE, PBE-xc, EXX, and RPA correlation contributions for both H2 and
+spin-polarized H; do not reuse the original TZDP non-correlation binding term.

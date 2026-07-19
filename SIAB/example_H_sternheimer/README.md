@@ -168,3 +168,33 @@ training loss, but `2p` develops ten nodes and every trainable `4s3p` response
 orbital is oscillatory. Expanding an ST-only space therefore does not address
 the shape problem. The next physical campaign must use `INPUT.st_dpsi_joint`
 after its referenced legacy DFT/dpsi matrices are restored or regenerated.
+
+## First physical `st_dpsi_joint` campaign
+
+df_dcu `normal` job `21315288` used source commit `d41f975e`, one node, 30
+PyTorch CPU threads, and 110610 MB. It completed in 7 minutes 14 seconds; the
+optimizer itself took 6 minutes 56 seconds and reached its best accepted point
+at Adam step 350. The complete DZP core remained bitwise fixed.
+
+| component | initial | best | best/initial |
+| --- | ---: | ---: | ---: |
+| DFT origin | 7.6516808055e-5 | 5.0667853878e-5 | 0.66217940 |
+| DFT dpsi | 9.2278755443e-4 | 5.9172304411e-4 | 0.64123431 |
+| Sternheimer | 0.4428607140 | 0.4054568603 | 0.91554037 |
+| `0.1 * R_dpsi` | 0.1000000000 | 0.0641234314 | 0.64123431 |
+| total | 0.5428607140 | 0.4695802917 | 0.86501064 |
+
+Both hinge penalties are zero at the selected point. The DFT and dpsi losses
+therefore improve rather than merely staying below their 5% and 10% limits.
+The radial node counts for `3s,2p` are `2,1` initially, `3,10` after ST-only,
+and `2,1` after joint optimization. Continuous dpsi supervision removes the
+high-frequency ST-only solution while still reducing the atomic ST loss.
+
+The generated results are stored outside Git under
+`../results/siab_h_joint_d41f975e_21315288`. The final coefficient, orbital,
+and trajectory SHA256 values are, respectively,
+`1340cd11357dea87b67ad2a58a6a8e1ae298c985bf08a66b6e9456c57dbc87df`,
+`30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7`, and
+`476cc96e68da6d1fcdf9160bd8bb9015800f37e69e38958e46420163d91b45a4`.
+This is a training-space result. It is not an RPA-quality claim until the
+held-out H2/H LCAO-SOS and LibRPA binding energy is computed with this orbital.
