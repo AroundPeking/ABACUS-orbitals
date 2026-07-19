@@ -251,3 +251,36 @@ which differs from the checked-in TZDP hash above. Phase-aligned normalized
 radial shape errors for `1s,2s,3s,1p,2p` are approximately
 `0.903,1.030,0.805,0.241,0.262`, respectively. Historical binding energies
 from that file must not be used to assess the joint optimization.
+
+## Expanded `4s3p` joint campaign
+
+df_dcu `normal` job `21315401` used source commit `cb5d3e9d` and the controlled
+`INPUT.st_dpsi_joint_4s3p` expansion. It completed on one full node in 2 minutes
+13 seconds; the optimizer used 1 minute 27 seconds and selected evaluation 568.
+The three fixed DZP columns remain bitwise equal to the input and their maximum
+exported radial error is `1.02e-14`.
+
+| component | initial | best | best/initial |
+| --- | ---: | ---: | ---: |
+| DFT origin | 5.6564793742e-5 | 1.6397651320e-5 | 0.28989147 |
+| DFT dpsi | 8.3932898923e-4 | 2.1487703902e-4 | 0.25601051 |
+| Sternheimer | 0.3777740028 | 0.3287659495 | 0.87027150 |
+| `0.1 * R_dpsi` | 0.1000000000 | 0.0256010506 | 0.25601051 |
+| total | 0.4777740028 | 0.3543670001 | 0.74170423 |
+
+Both hinge penalties are zero. The final `3s,4s,2p` radial functions have
+`2,4,1` nodes. The appended `3p` has three significant nodes and two additional
+sign changes only in its small tail; this is far below the 10--14-node ST-only
+expanded solution, but it is not by itself evidence of transferability.
+
+The final coefficient, orbital, and trajectory SHA256 values are:
+
+```text
+bd1599244787c265c7eee140d3ad6b8938d9295954ca98c2f5119c257cd87536
+b394bb7329754e38341050ca4beb3b242b78e4be50c418b8764c98226bc8f033
+a212007b50647c4622a4ff95b359be5ba57b6d7ab6b21d1a4dead73a881fa3fb
+```
+
+The next held-out calculation must use all `26` H2 and `13` H bands because
+`4s3p` contains 13 AO functions per atom. Reusing the `3s2p` values `18/9`
+would truncate the SOS virtual space and invalidate the basis comparison.
