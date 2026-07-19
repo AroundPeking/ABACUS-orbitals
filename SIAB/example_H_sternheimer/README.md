@@ -446,10 +446,62 @@ finite-grid anisotropy rather than missing or mixed magnetic channels. Commit
 `829bac21` exposes and records a `1e-4` grid tolerance while retaining the
 large-anisotropy rejection; job `21317505` passed 112/112 tests.
 
-Production rerun `21317536` selected `Nu.H=[4,3,3]` and is currently running
-the real joint optimization. Its initial-coefficient and spectrum JSON hashes
-are `1006c7157994a2b65a3a9e60f684e8cee39058a97a954ef8f09c80accd25da42`
-and `05b8011fadb2509a076b49474fc9aa432be22b805e4567c521f1db4b780d2da5`.
-The printed joint objective decreased from `0.0839024` after the first Adam
-step to `0.0378858` at step 100. These are intermediate values, not the final
-atomic gate.
+Production rerun `21317536` selected `Nu.H=[4,3,3]` and completed in 16 minutes
+46 seconds. The fixed DZP columns remained bitwise equal and both constraint
+penalties were zero. Its final ST loss was `0.02600043294`, down 92.09% from
+the d-incomplete joint `4s3p` value `0.3287659495`. However, its `1d,2d,3d`
+radial functions had approximately `20,10,1` significant nodes. The problem
+was already present in the spectrum-derived initial d vectors (`20,12,1`), so
+Adam did not create it.
+
+The generalized eigenproblem itself is correct: the implementation solves
+`K c = lambda S c` by diagonalizing `S^(-1/2) K S^(-1/2)` and maps the result
+back with `c = S^(-1/2) u`. The original relative overlap-rank cutoff `1e-10`
+retained near-null directions that were strongly amplified by `S^(-1/2)`.
+A one-variable audit gave:
+
+| relative rank tolerance | retained rank | 99% d shells | initial d nodes |
+| ---: | ---: | ---: | ---: |
+| 1e-10 | 21 | 3 | 20,12,1 |
+| 1e-8 | 20 | 3 | 9,15,12 |
+| 1e-6 | 19 | 3 | 4,6,8 |
+| 1e-4 | 18 | 3 | 0,1,2 |
+| 1e-3 | 17 | 3 | 0,1,2 |
+
+At `1e-4` the first three d eigenvalues differ from the `1e-10` values by only
+about `1e-5` relative, and their cumulative capture remains `0.9909784`.
+This identifies numerical null-space amplification rather than a change in the
+physical 99% shell-selection rule.
+
+Commit `b2a1685a` makes the production relative-rank cutoff an explicit CLI
+parameter and records it in `response_spectrum.json`. RED job `21317792`
+failed on the missing parameter, focused GREEN job `21317796` passed 2/2, and
+full normal-node regression `21317811` passed 114/114. The successful smooth
+production rerun is job `21317844`, with source commit
+`b2a1685a801a762000762cee78b301abfb9dc96c`.
+
+| component | smooth initial | smooth best | pathological best |
+| --- | ---: | ---: | ---: |
+| DFT origin | 5.4062820e-6 | 1.9754506e-6 | 2.0981731e-6 |
+| DFT dpsi | 6.0241966e-5 | 7.1983892e-6 | 8.9016447e-6 |
+| Sternheimer | 0.0304358669 | 0.0263845301 | 0.0260004329 |
+| `0.1 * R_dpsi` | 0.1000000000 | 0.0119491273 | 0.0118524099 |
+| total | 0.1304358669 | 0.0383336574 | 0.0378528429 |
+| maximum ST condition | 5.6886 | 8.6065 | 382.6418 |
+
+The smooth candidate sacrifices only 1.48% in final ST loss relative to the
+pathological candidate, while the final d node counts become `0,1,2` at the
+1% relative-amplitude criterion (the third d function has one additional sign
+change in its small tail). It finished in 10 minutes 14 seconds. Its coefficient,
+orbital, trajectory, and spectrum JSON SHA256 values are:
+
+```text
+0e6ade7b900ba9649eaf79d8dec1ab682b9f72a2c21a2f01ad9e048f32e022a5
+860f3a23b2d81486a62b48c80992a5610194899e049fe44dacb67b1ef983a7b9
+aed9545d254fe94a9380ebd993dd5d76bb360ccbb7fd2840400b85ad5e1c9f68
+6c37b668f4bcff7e2faa8decee08f12eaa3d0c807341c4a1da008d8865652519
+```
+
+This passes the atomic ST/DFT/dpsi and radial-smoothness gate. It is the only
+`4s3p3d` candidate eligible for the next held-out H2/H all-band SOS-RPA test;
+the `21317536` orbital must not be used in production.

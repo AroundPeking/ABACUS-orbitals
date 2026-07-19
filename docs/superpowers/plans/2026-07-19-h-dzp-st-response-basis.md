@@ -261,9 +261,9 @@ multiplets in both writer and reader tests.
 ABACUS commit `efc128f33531` implements the independent output cutoff. RED job
 `21315686` and GREEN jobs `21315747`/`21315765` verify primitive generation and
 INPUT parsing. The immutable Release build is from job `21315778`; formal H
-target job `21315811` has confirmed 225 primitive columns and is still running.
+target job `21315811` completed all 225 primitive columns in `03:52:39`.
 
-- [ ] **Step 3: Select d shell count from the atomic residual spectrum**
+- [x] **Step 3: Select d shell count from the atomic residual spectrum**
 
 Whiten each angular block with its primitive overlap, diagonalize the weighted
 residual covariance, and choose `n_s,n_p,n_d` from a declared cumulative
@@ -279,7 +279,7 @@ selection threshold is fixed at 99% cumulative d-channel residual weight. The
 analysis will also report 90%, 95%, and 99.9% shell counts, but they are
 diagnostics and must not be substituted after seeing the held-out result.
 
-- [ ] **Step 4: Optimize only with the joint DFT+dpsi path**
+- [x] **Step 4: Optimize only with the joint DFT+dpsi path**
 
 Keep `1s,2s,1p` bitwise fixed. Retain `st_only` only for regression/ablation;
 never use its `.orb` in DFT or RPA production calculations.
@@ -311,11 +311,28 @@ Audit `21317474` localized the deviation to diagonal d blocks
 consistent to numerical precision. The predeclared d counts are `2,2,3,5` at
 `90%,95%,99%,99.9%`, so the production choice is three d shells.
 
-Commit `829bac21` makes the measured finite-grid tolerance `1e-4` explicit in
-the spectrum JSON and keeps the material-anisotropy rejection. Regression job
-`21317505` passed 112/112. Rerun `21317536` selected `Nu.H=[4,3,3]`; its joint
-objective has fallen from `0.0839024` after the first Adam update to
-`0.0378858` at step 100. Final atomic losses remain pending.
+Commit `829bac21` makes the measured finite-grid magnetic-channel tolerance
+`1e-4` explicit in the spectrum JSON and keeps the material-anisotropy
+rejection. Regression job `21317505` passed 112/112. Rerun `21317536` selected
+`Nu.H=[4,3,3]` and reduced the ST loss to `0.02600043`, but its first two d
+radial functions retained `20` and `10` significant nodes.
+
+A relative overlap-rank audit showed that the original `1e-10` cutoff retained
+21 modes and amplified near-null directions through `S^(-1/2)`. Cutoffs
+`1e-8,1e-6,1e-4,1e-3` retained `20,19,18,17` modes; only `1e-4` and `1e-3`
+gave the expected `0,1,2` d-node hierarchy. All choices still selected three d
+shells and changed the leading response eigenvalues by only about `1e-5`
+relative. This leaves the 99% physical selection unchanged.
+
+Commit `b2a1685a` exposes and records the production rank cutoff `1e-4`. RED
+job `21317792`, focused GREEN job `21317796`, and full regression job `21317811`
+established the change; the latter passed 114/114. Formal job `21317844`
+completed in `00:10:14`, kept `1s,2s,1p` bitwise fixed, and returned zero hinge
+penalties. Its final ST, DFT-origin, DFT-dpsi, and weighted dpsi regularization
+losses are `0.02638453`, `1.97545e-6`, `7.19839e-6`, and `0.01194913`.
+The final d functions have `0,1,2` main nodes and the maximum ST condition is
+`8.6065`, compared with `382.6418` in the pathological run. The atomic gate is
+therefore closed with the smooth candidate only.
 
 - [ ] **Step 5: Re-run the held-out gate once**
 
