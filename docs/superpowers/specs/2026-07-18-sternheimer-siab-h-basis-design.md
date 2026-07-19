@@ -2,10 +2,12 @@
 
 ## 1. Goal
 
-Extend SIAB so that an existing H-TZDP basis can be optimized against accurate
-Delta-Sternheimer first-order wavefunctions while retaining its ground-state
-DFT quality. The new Sternheimer supervision is generated only from an
-isolated H atom. The 0.74-A H2 RPA/SOS result is held out from the new loss.
+Extend SIAB from a fixed H-DZP DFT core with response orbitals optimized against
+accurate Delta-Sternheimer first-order wavefunctions. The initial response
+space is the `3s,2p` part that distinguishes TZDP from DZP, and additional
+radial or angular shells may be appended only when the ST residual requires
+them. The new Sternheimer supervision is generated only from an isolated H
+atom. The 0.74-A H2 RPA/SOS result is held out from the new loss.
 
 The physics success criterion is that the H2 LCAO-SOS RPA@PBE binding energy
 moves to within `0.1 kcal/mol` of the converged Delta-ST/FHI-aims reference,
@@ -35,9 +37,8 @@ Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt
 
 The orbital file SHA256 is
 `7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c`.
-The optimized basis contains three s and two p radial functions. The first s
-function is SIAB level1 and remains fixed. The variable set is `2s`, `3s`,
-`1p`, and `2p`.
+The seed basis contains three s and two p radial functions. The checked-in DZP
+subspace `1s,2s,1p` remains fixed. The initial variable response set is `3s,2p`.
 
 The primitive representation must match the historical producer exactly:
 `bessel_nao_ecut=100 Ry`, `bessel_nao_rcut=8 bohr`,
@@ -175,10 +176,10 @@ The ABACUS producer is implemented and committed in the active Sternheimer
 ABACUS repository. This repository owns only the reader, validation, loss,
 optimization, and examples for that interface.
 
-## 5. Removing The Fixed Level1 Space
+## 5. Removing The Fixed DZP Space
 
-Let `B` be the primitive spherical-Bessel basis, `C0` the fixed `1s` column,
-and `C1` the variable upper-orbital columns. Define
+Let `B` be the primitive spherical-Bessel basis, `C0` the fixed DZP columns
+`1s,2s,1p`, and `C1` the variable response-orbital columns. Define
 
 \[
   S_{00}=C_0^\dagger S^B C_0,
@@ -189,7 +190,7 @@ and `C1` the variable upper-orbital columns. Define
 \]
 
 For each Sternheimer reference row `Qrho`, the target and candidate space are
-both projected outside the fixed level1 space without reconstructing a grid
+both projected outside the fixed DZP space without reconstructing a grid
 wavefunction:
 
 \[
@@ -205,7 +206,7 @@ wavefunction:
 \end{split}
 \]
 
-The part represented by the variable upper orbitals is
+The part represented by the variable response orbitals is
 
 \[
   p_\rho
@@ -287,8 +288,9 @@ the mode and baseline-normalized final components.
 
 The ST loss uses PyTorch complex tensors and automatic differentiation. A
 finite-difference test checks selected real coefficient directions. After
-`backward()`, the exact `1s` coefficient column is zeroed by the explicit
-freeze mask. The initial and final fixed columns must be bitwise identical.
+`backward()`, the exact `1s`, `2s`, and `1p` coefficient columns are zeroed by
+the explicit freeze mask. The initial and final fixed columns must be bitwise
+identical.
 
 ## 7. H Training And H2 Validation
 
@@ -328,7 +330,7 @@ The implementation is accepted when:
 
 1. all legacy SIAB unit fixtures reproduce their previous loss and gradients;
 2. the ST loss finite-difference gradient test passes;
-3. the fixed `1s` coefficients remain bitwise unchanged;
+3. the fixed DZP `1s`, `2s`, and `1p` coefficients remain bitwise unchanged;
 4. both optimization modes lower `L_ST` from the common initial point;
 5. the constrained mode satisfies both configured loss constraints;
 6. all generated data report dimensions, kernel, frequency grid, PP, orbital,
@@ -353,7 +355,7 @@ Each stage is committed separately:
 
 1. design document only;
 2. versioned Sternheimer reader, data model, and parser tests;
-3. level1-projected ST loss and finite-difference gradient tests;
+3. DZP-projected ST loss and finite-difference gradient tests;
 4. explicit orbital freeze mask, named loss components, and constrained mode;
 5. H-TZDP-8au example inputs and deterministic optimization smoke test;
 6. H/H2 production results, comparison table, and documentation.
@@ -366,8 +368,9 @@ repository before stage 5 begins.
 
 - No H2 Sternheimer vector or RPA/binding-energy target is used for training;
   the constrained lane may reuse the historical ground-state dimer data.
-- The orbital count and 8-au cutoff are not changed.
-- The fixed `1s` level1 orbital is not reoptimized.
+- The first DZP-core campaign retains the `3s2p` orbital count and 8-au cutoff;
+  later campaigns may append one response shell at a time.
+- The fixed `1s`, `2s`, and `1p` DZP orbitals are not reoptimized.
 - The first experiment does not optimize derivatives of Sternheimer
   wavefunctions with respect to atomic displacement.
 - The first experiment does not require PCA of the ST references.

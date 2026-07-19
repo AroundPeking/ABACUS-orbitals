@@ -52,6 +52,11 @@ LOSS_DEFAULTS = {
     "constraint_penalty_dft": 10.0,
     "constraint_penalty_dpsi": 10.0,
 }
+DZP_FREEZE_SPECS = [
+    {"element": "H", "l": 0, "zeta": 1},
+    {"element": "H", "l": 0, "zeta": 2},
+    {"element": "H", "l": 1, "zeta": 1},
+]
 
 
 def _minimal_input():
@@ -544,8 +549,9 @@ class ExampleInputTest(unittest.TestCase):
         )
         self.assertEqual(
             st_only["freeze_orbitals"],
-            [{"element": "H", "l": 0, "zeta": 1}],
+            DZP_FREEZE_SPECS,
         )
+        self.assertEqual(constrained["freeze_orbitals"], DZP_FREEZE_SPECS)
         self.assertEqual(
             st_only["C_init_info"],
             {
@@ -572,6 +578,56 @@ class ExampleInputTest(unittest.TestCase):
 
 
 class DeterministicOptimizationSmokeTest(unittest.TestCase):
+    def test_dzp_core_is_fixed_while_3s_and_2p_reduce_st_loss(self):
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
+        c = _initial_c()
+        with torch.no_grad():
+            c["H"][0][3, 2] = 0.05
+        initial = tuple(value.detach().clone() for value in c["H"])
+        data = _make_sternheimer_data()
+        fixed_columns = [OrbitalColumn("H", 0, 0, 0, 1)]
+        fixed_columns.append(OrbitalColumn("H", 0, 0, 0, 2))
+        fixed_columns.extend(
+            OrbitalColumn("H", 0, 1, m, 1) for m in (-1, 0, 1)
+        )
+        evaluator = SternheimerSpillage(data, c, fixed_columns)
+        initial_st = evaluator.evaluate(c).loss.item()
+        stage = {
+            "optimizer": "Adam",
+            "kwargs": {"lr": 0.003},
+            "cal_T": False,
+            "norm": "one",
+            "max_steps": 30,
+            "loss": {"mode": "st_only", **LOSS_DEFAULTS},
+        }
+        converge = Opt_Orbital_Converge()
+        converge.set_info(
+            {"sternheimer": ["synthetic"]},
+            [stage],
+            [],
+            {
+                "init_from_file": True,
+                "freeze_orbitals": DZP_FREEZE_SPECS,
+            },
+            {"same_band": True},
+        )
+        converge.set_info_element(
+            {"H": info(Nl=2, Ne=4, Nu=[3, 2])}
+        )
+        converge.set_sternheimer_spillage(evaluator)
+
+        result = converge.cal_converge(
+            c, (io.StringIO(), io.StringIO())
+        )["C"]["H"]
+        final_st = evaluator.evaluate({"H": result}).loss.item()
+
+        self.assertTrue(torch.equal(initial[0][:, :2], result[0][:, :2]))
+        self.assertTrue(torch.equal(initial[1][:, :1], result[1][:, :1]))
+        self.assertFalse(torch.equal(initial[0][:, 2], result[0][:, 2]))
+        self.assertFalse(torch.equal(initial[1][:, 1], result[1][:, 1]))
+        self.assertLess(final_st, initial_st)
+
     def test_both_modes_are_repeatable_and_constraints_change_the_trajectory(self):
         initial = _initial_c()
         self.assertEqual(initial["H"][0].shape, (4, 3))

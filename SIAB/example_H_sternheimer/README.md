@@ -8,7 +8,9 @@ This directory defines the first H-TZDP Sternheimer-supervised SIAB experiment. 
 - `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom Sternheimer matrix and the checked-in TZDP coefficients.
 - `st_constrained` additionally reuses the historical H dimer/trimer DFT and dpsi matrices at 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
 - H2 RPA is held out from optimization and is reserved for the final transfer test.
-- The initial basis is the existing H TZDP basis at 8 Bohr. Its level-1 `1s` radial orbital is fixed exactly; the remaining `s` and `p` orbitals are optimized.
+- The initial basis is the existing H TZDP basis at 8 Bohr. Its complete DZP
+  core (`1s`, `2s`, and `1p`) is fixed exactly; only the TZDP-only `3s` and
+  `2p` response orbitals are optimized.
 - The spherical-Bessel representation is the original SIAB one: 100 Ry, 8 Bohr, with the 0.1-Bohr cutoff smoothing used to generate the checked-in H-TZDP orbital.
 - The first experiment uses every producer reference row. It applies no PCA and no reference-row truncation.
 
@@ -28,9 +30,9 @@ python3 run_st_only.py \
 The runner materializes an `INPUT` with absolute paths, invokes
 `opt_orb_pytorch_dpsi/main.py`, and writes `campaign_summary.json`. It fails if
 the output directory is nonempty, the optimizer does not report pure
-`st_only`, the final Sternheimer loss is worse than the initial loss, or the
-fixed H level-1 `1s` coefficient changes at the float64 byte level. It also
-compares the exported 801-point level-1 radial function with the checked-in
+`st_only`, the final Sternheimer loss is worse than the initial loss, or any
+fixed H-DZP coefficient changes at the float64 byte level. It also compares the
+exported 801-point `1s`, `2s`, and `1p` radial functions with the checked-in
 H-TZDP `.orb` after smoothing and normalization. The summary records target,
 input, initial/final coefficients, reference/final orbitals, and spillage hashes
 together with the loss ratio, radial error, and wall time.
@@ -64,9 +66,10 @@ The deterministic optimization used this target and code commit `a41a9f0e`.
 After 3000 Adam steps, the best Sternheimer loss was
 `0.12535769112573478`, down from `0.15884642225499218` (ratio
 `0.7891754145`). The best projected-overlap condition number was `73.61`.
-The fixed 25-coefficient H level-1 `1s` column is float64-byte identical to the
-input, and its exported 801-point radial function differs from the checked-in
-TZDP `.orb` by at most `1.03e-15`. The final coefficient SHA256 is
+That first campaign fixed only the 25-coefficient H level-1 `1s` column. It is
+retained as an implementation diagnostic, but it is superseded by the DZP-core
+campaign because the optimized upper orbitals were visibly oscillatory. The
+old final coefficient SHA256 is
 `278694016e5f819f2a79db4b3ddc8c5692d8dd125a908f0003295ab644eb4715`.
 
 These numbers validate the implementation and training loop only. The optimized

@@ -26,6 +26,11 @@ DEFAULT_REFERENCE_ORBITAL = (
     / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/H_gga_8au_100Ry_3s2p.orb"
 )
 OPTIMIZER = SIAB_DIR / "opt_orb_pytorch_dpsi/main.py"
+FIXED_DZP_ORBITALS = (
+    {"label": "1s", "element": "H", "l": 0, "zeta": 1},
+    {"label": "2s", "element": "H", "l": 0, "zeta": 2},
+    {"label": "1p", "element": "H", "l": 1, "zeta": 1},
+)
 
 
 def sha256(path):
@@ -209,33 +214,56 @@ def summarize_campaign(
         if not path.is_file():
             raise FileNotFoundError(path)
 
-    fixed_initial = read_coefficient(initial_coefficients, "H", 0, 1)
-    fixed_final = read_coefficient(final_coefficients, "H", 0, 1)
-    fixed_equal = _float64_bytes(fixed_initial) == _float64_bytes(fixed_final)
-    if not fixed_equal:
-        raise RuntimeError("fixed H level1 1s coefficient changed")
+    fixed_dzp_orbitals = []
+    for orbital in FIXED_DZP_ORBITALS:
+        label = orbital["label"]
+        element = orbital["element"]
+        l = orbital["l"]
+        zeta = orbital["zeta"]
+        initial_values = read_coefficient(
+            initial_coefficients, element, l, zeta
+        )
+        final_values = read_coefficient(final_coefficients, element, l, zeta)
+        coefficient_equal = _float64_bytes(initial_values) == _float64_bytes(
+            final_values
+        )
+        if not coefficient_equal:
+            raise RuntimeError(f"fixed H DZP {label} coefficient changed")
 
-    radial_reference = read_orbital(reference_orbital, 0, 0)
-    radial_final = read_orbital(final_orbital, 0, 0)
-    if len(radial_reference) != len(radial_final):
-        raise RuntimeError("fixed H level1 1s radial mesh changed")
-    radial_abs_errors = [
-        abs(reference - final)
-        for reference, final in zip(radial_reference, radial_final)
-    ]
-    radial_rel_errors = [
-        error / max(abs(reference), 1.0e-14)
-        for error, reference in zip(radial_abs_errors, radial_reference)
-    ]
-    radial_max_abs = max(radial_abs_errors)
-    radial_max_rel = max(radial_rel_errors)
-    radial_matches = all(
-        error <= 5.0e-13 + 5.0e-13 * abs(reference)
-        for error, reference in zip(radial_abs_errors, radial_reference)
-    )
-    if not radial_matches:
-        raise RuntimeError(
-            "exported H level1 1s radial orbital differs from the TZDP reference"
+        radial_reference = read_orbital(reference_orbital, l, zeta - 1)
+        radial_final = read_orbital(final_orbital, l, zeta - 1)
+        if len(radial_reference) != len(radial_final):
+            raise RuntimeError(f"fixed H DZP {label} radial mesh changed")
+        radial_abs_errors = [
+            abs(reference - final)
+            for reference, final in zip(radial_reference, radial_final)
+        ]
+        radial_rel_errors = [
+            error / max(abs(reference), 1.0e-14)
+            for error, reference in zip(radial_abs_errors, radial_reference)
+        ]
+        radial_matches = all(
+            error <= 5.0e-13 + 5.0e-13 * abs(reference)
+            for error, reference in zip(radial_abs_errors, radial_reference)
+        )
+        if not radial_matches:
+            raise RuntimeError(
+                f"exported H DZP {label} radial orbital differs from "
+                "the TZDP reference"
+            )
+        fixed_dzp_orbitals.append(
+            {
+                "label": label,
+                "element": element,
+                "l": l,
+                "zeta": zeta,
+                "n_coefficients": len(initial_values),
+                "coefficient_bitwise_equal": coefficient_equal,
+                "radial_n_points": len(radial_reference),
+                "radial_matches_reference": radial_matches,
+                "radial_max_abs_error": max(radial_abs_errors),
+                "radial_max_rel_error": max(radial_rel_errors),
+            }
         )
 
     initial_loss = _read_initial_sternheimer_loss(spillage)
@@ -271,13 +299,13 @@ def summarize_campaign(
         "initial_sternheimer_loss": initial_loss,
         "final_sternheimer_loss": final_loss["sternheimer"],
         "loss_ratio": final_loss["sternheimer"] / initial_loss,
-        "fixed_level1": {"element": "H", "l": 0, "zeta": 1},
-        "fixed_level1_n_coefficients": len(fixed_initial),
-        "fixed_level1_bitwise_equal": fixed_equal,
-        "fixed_level1_radial_n_points": len(radial_reference),
-        "fixed_level1_radial_matches_reference": radial_matches,
-        "fixed_level1_radial_max_abs_error": radial_max_abs,
-        "fixed_level1_radial_max_rel_error": radial_max_rel,
+        "fixed_dzp_orbitals": fixed_dzp_orbitals,
+        "fixed_dzp_all_coefficients_bitwise_equal": all(
+            item["coefficient_bitwise_equal"] for item in fixed_dzp_orbitals
+        ),
+        "fixed_dzp_all_radials_match_reference": all(
+            item["radial_matches_reference"] for item in fixed_dzp_orbitals
+        ),
         "elapsed_seconds": float(elapsed_seconds),
     }
 
