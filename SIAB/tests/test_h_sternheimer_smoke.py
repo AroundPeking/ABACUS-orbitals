@@ -153,6 +153,30 @@ def _make_sternheimer_data():
     )
 
 
+def _make_sternheimer_data_with_d():
+    blocks = list(_make_sternheimer_data().blocks)
+    offset = 16
+    for m in range(-2, 3):
+        blocks.append(PrimitiveBlock("H", 0, 2, m, 4, offset))
+        offset += 4
+    q = torch.zeros((1, offset), dtype=torch.complex128)
+    q[0, 18] = 1.0
+    return SternheimerData(
+        format_version=1,
+        grid_volume_bohr3=1.0,
+        blocks=tuple(blocks),
+        occupied_state=torch.zeros(1, dtype=torch.int64),
+        auxiliary_channel=torch.zeros(1, dtype=torch.int64),
+        frequency_ha=torch.tensor([0.1], dtype=torch.float64),
+        occupation=torch.tensor([2.0], dtype=torch.float64),
+        frequency_weight=torch.ones(1, dtype=torch.float64),
+        norm=torch.ones(1, dtype=torch.float64),
+        q=q,
+        overlap=torch.eye(offset, dtype=torch.complex128),
+        provenance=_provenance(),
+    )
+
+
 def _make_legacy_data():
     info_stru = [
         info(Na={"H": 1}, Nb_true=2, weight=torch.tensor([0.5, 0.5]))
@@ -575,6 +599,113 @@ class ExampleInputTest(unittest.TestCase):
             st_only["loss"], {"mode": "st_only", **LOSS_DEFAULTS}
         )
         self.assertEqual(constrained["loss"]["mode"], "st_constrained")
+
+
+class AppendedResponseShellTest(unittest.TestCase):
+    @staticmethod
+    def _expanded_h_info():
+        return {"H": info(Nl=2, Ne=25, Nu=[4, 3])}
+
+    def _read_expanded(self, seed):
+        np.random.seed(seed)
+        return read_C_init(
+            REAL_H_TZDP,
+            self._expanded_h_info(),
+            return_metadata=True,
+        )
+
+    def test_appended_same_l_shells_are_reported_and_seeded(self):
+        c1, metadata1 = self._read_expanded(SEED)
+        c2, metadata2 = self._read_expanded(SEED)
+        c3, metadata3 = self._read_expanded(SEED + 1)
+        expected_loaded = frozenset(
+            {
+                ("H", 0, 0),
+                ("H", 0, 1),
+                ("H", 0, 2),
+                ("H", 1, 0),
+                ("H", 1, 1),
+            }
+        )
+        expected_appended = frozenset({("H", 0, 3), ("H", 1, 2)})
+
+        self.assertEqual(metadata1.loaded_indices, expected_loaded)
+        self.assertEqual(metadata1.appended_indices, expected_appended)
+        self.assertEqual(metadata1, metadata2)
+        self.assertEqual(metadata1, metadata3)
+        for element, l, zeta in expected_appended:
+            value1 = c1[element][l][:, zeta]
+            value2 = c2[element][l][:, zeta]
+            value3 = c3[element][l][:, zeta]
+            self.assertTrue(torch.all(torch.isfinite(value1)))
+            self.assertGreater(torch.linalg.vector_norm(value1).item(), 0.0)
+            self.assertTrue(torch.equal(value1, value2))
+            self.assertFalse(torch.equal(value1, value3))
+
+    def test_new_angular_channel_requires_matching_target_blocks(self):
+        requested = info(Nt_all=["H"], Nu={"H": [3, 2, 1]})
+        with self.assertRaisesRegex(ValueError, r"H/2.*\[\]"):
+            siab_main._sternheimer_info_element(
+                _make_sternheimer_data(), requested
+            )
+
+        actual = siab_main._sternheimer_info_element(
+            _make_sternheimer_data_with_d(), requested
+        )
+
+        self.assertEqual(actual["H"].Nl, 3)
+        self.assertEqual(actual["H"].Nu, [3, 2, 1])
+        self.assertEqual(actual["H"].Ne, 4)
+
+        c = _initial_c()
+        c["H"].append(
+            torch.tensor(
+                [[0.0], [0.0], [1.0], [0.0]],
+                dtype=torch.float64,
+                requires_grad=True,
+            )
+        )
+        fixed_columns = [
+            OrbitalColumn("H", 0, 0, 0, 1),
+            OrbitalColumn("H", 0, 0, 0, 2),
+            *(OrbitalColumn("H", 0, 1, m, 1) for m in (-1, 0, 1)),
+        ]
+        result = SternheimerSpillage(
+            _make_sternheimer_data_with_d(), c, fixed_columns
+        ).evaluate(c)
+        self.assertTrue(torch.isfinite(result.loss))
+
+    def test_initialization_rejects_duplicate_and_out_of_range_columns(self):
+        info_element = {"H": info(Nl=1, Ne=2, Nu=[2])}
+        cases = (
+            (
+                "duplicate",
+                (("H", 0, 1, (0.1, 0.2)), ("H", 0, 1, (0.3, 0.4))),
+                "duplicate coefficient column",
+            ),
+            (
+                "out-of-range",
+                (("H", 1, 1, (0.1, 0.2)),),
+                "outside requested Nu",
+            ),
+        )
+        for name, columns, message in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "ORBITAL_RESULTS.txt"
+                lines = ["<Coefficient>", " 2 Total number of radial orbitals."]
+                for element, l, zeta, values in columns:
+                    lines.extend(
+                        (
+                            " Type L Zeta-Orbital",
+                            f" {element} {l} {zeta}",
+                            *(f" {value}" for value in values),
+                        )
+                    )
+                lines.append("</Coefficient>")
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, message):
+                    read_C_init(path, info_element, return_metadata=True)
 
 
 class DeterministicOptimizationSmokeTest(unittest.TestCase):

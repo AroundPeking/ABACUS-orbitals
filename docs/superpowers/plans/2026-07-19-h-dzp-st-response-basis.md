@@ -20,11 +20,11 @@
 - Modify: `SIAB/example_H_sternheimer/README.md`
 - Modify: `docs/superpowers/specs/2026-07-18-sternheimer-siab-h-basis-design.md`
 
-- [ ] **Step 1: Write a failing configuration test**
+- [x] **Step 1: Write a failing configuration test**
 
 Require both H inputs to freeze exactly `H/0/1`, `H/0/2`, and `H/1/1`, corresponding to `1s`, `2s`, and `1p`.
 
-- [ ] **Step 2: Run the focused test and verify the old level1-only input fails**
+- [x] **Step 2: Run the focused test and verify the old level1-only input fails**
 
 Run:
 
@@ -34,7 +34,7 @@ python3 -m unittest SIAB.tests.test_h_sternheimer_smoke.ExampleInputTest.test_in
 
 Expected: `FAIL` because the existing inputs contain only the `1s` freeze specification.
 
-- [ ] **Step 3: Update both inputs and campaign validation**
+- [x] **Step 3: Update both inputs and campaign validation**
 
 Use this fixed core in both JSON files:
 
@@ -48,7 +48,7 @@ Use this fixed core in both JSON files:
 
 Change the runner to compare all three coefficient columns bitwise and all three exported radial functions against the checked-in H-TZDP orbital. Record the fixed core as an array in `campaign_summary.json`; reject a campaign if any fixed column or radial function changes.
 
-- [ ] **Step 4: Add an optimization regression test**
+- [x] **Step 4: Add an optimization regression test**
 
 Run a deterministic synthetic optimization with the full DZP freeze set and assert:
 
@@ -60,7 +60,7 @@ not torch.equal(initial_p[:, 1], final_p[:, 1])
 final_st < initial_st
 ```
 
-- [ ] **Step 5: Run the H Sternheimer test module**
+- [x] **Step 5: Run the H Sternheimer test module**
 
 Run:
 
@@ -70,7 +70,7 @@ python3 -m unittest SIAB.tests.test_h_sternheimer_smoke -v
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit the fixed-DZP stage**
+- [x] **Step 6: Commit the fixed-DZP stage**
 
 ```bash
 git add SIAB/tests/test_h_sternheimer_smoke.py \
@@ -93,7 +93,7 @@ git commit -m "feat(siab): preserve H DZP during ST optimization"
 - Modify: `SIAB/opt_orb_pytorch_dpsi/IO/func_C.py`
 - Modify: `SIAB/example_H_sternheimer/README.md`
 
-- [ ] **Step 1: Write failing initialization tests**
+- [x] **Step 1: Write failing initialization tests**
 
 Read the checked-in H-TZDP coefficients into `Nu={"H": [4,3]}` and require:
 
@@ -104,7 +104,7 @@ loaded == {("H", 0, 0), ("H", 0, 1), ("H", 0, 2),
 
 The appended `4s` and `3p` columns must be finite, nonzero, deterministic for a fixed seed, and different for a different seed.
 
-- [ ] **Step 2: Run the tests and verify the missing explicit contract fails**
+- [x] **Step 2: Run the tests and verify the missing explicit contract fails**
 
 Run:
 
@@ -114,15 +114,15 @@ python3 -m unittest SIAB.tests.test_h_sternheimer_smoke.AppendedResponseShellTes
 
 Expected: `FAIL` until the reader exposes and validates which requested columns were absent from the initialization file.
 
-- [ ] **Step 3: Add explicit initialization metadata and validation**
+- [x] **Step 3: Add explicit initialization metadata and validation**
 
 Return a small immutable initialization record containing loaded and appended `(element,l,zeta)` zero-based indices. Reject an initialization file that contains a column outside the requested `Nu`, a duplicate column, or a primitive-count mismatch. Keep existing callers compatible by retaining tuple unpacking as `(C, loaded_indices)` where no appended metadata is requested.
 
-- [ ] **Step 4: Verify angular-channel gating**
+- [x] **Step 4: Verify angular-channel gating**
 
 Add a test requesting `Nu={"H": [3,2,1]}` from an s/p-only target and require `_sternheimer_info_element` to raise an error identifying missing `H/l=2` primitive blocks. Add a matching synthetic d-block target and verify initialization/evaluation succeeds.
 
-- [ ] **Step 5: Run focused and full SIAB tests**
+- [x] **Step 5: Run focused and full SIAB tests**
 
 Run:
 

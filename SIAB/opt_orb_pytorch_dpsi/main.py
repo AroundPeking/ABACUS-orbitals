@@ -207,7 +207,17 @@ def main():
 			QI_linear, SI_linear, VI_linear = list(zip(*( IO.read_QSV.read_QSV(info_stru, info_element, file, info_V) for file in file_list["linear"] )))
 
 	if info_C_init["init_from_file"]:
-		C, C_read_index = IO.func_C.read_C_init( info_C_init["C_init_file"], info_element )
+		C, initialization = IO.func_C.read_C_init(
+			info_C_init["C_init_file"], info_element, return_metadata=True
+		)
+		C_read_index = set(initialization.loaded_indices)
+		def format_indices(indices):
+			return [
+				f"{element}/l{l}/zeta{zeta + 1}"
+				for element, l, zeta in sorted(indices)
+			]
+		print("loaded coefficient columns:", format_indices(initialization.loaded_indices))
+		print("appended response columns:", format_indices(initialization.appended_indices))
 	else:
 		C = IO.func_C.random_C_init(info_element)
 	E = orbital.set_E(info_element, info_radial["Rcut"])

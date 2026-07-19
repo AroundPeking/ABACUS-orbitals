@@ -46,6 +46,25 @@ python3 ../opt_orb_pytorch_dpsi/main.py
 
 Both inputs use seed `20260718`. The optimizer must report that value for both NumPy and PyTorch. Compare the resulting named losses in `Spillage.dat` and `ORBITAL_RESULTS.txt`; do not use the held-out H2 RPA result for parameter fitting.
 
+## Appending response shells
+
+The checked-in TZDP coefficient file can initialize a larger response basis.
+For example, changing `element.Nu.H` from `[3, 2]` to `[4, 3]` preserves the
+loaded `3s2p` columns and deterministically initializes appended `4s` and `3p`
+columns from the top-level seed. The optimizer prints both sets explicitly:
+
+```text
+loaded coefficient columns: [...]
+appended response columns: ['H/l0/zeta4', 'H/l1/zeta3']
+```
+
+The DZP freeze list remains unchanged, so `3s`, `2p`, and all appended columns
+are trainable. A new angular channel such as `Nu.H = [3, 2, 1]` is accepted
+only when the Sternheimer target contains complete H `l=2`,
+`m=-2,-1,0,1,2` primitive blocks. The current canonical producer target has
+only `s/p` blocks and therefore cannot optimize a `d` response orbital; it must
+be regenerated with `lmax >= 2` first.
+
 The exact converged H-atom ABACUS producer input and `normal`-partition job
 script are under `producer/`.  Stage the checked-in H-TZDP `.orb` and the
 Dojo-NC-SR `Pseudopotential/H.upf` beside those files before submitting.  The job

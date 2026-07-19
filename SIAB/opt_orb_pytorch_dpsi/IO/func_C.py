@@ -4,6 +4,7 @@ import numpy as np
 import math
 import numbers
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 
 _LOSS_COMPONENTS = (
@@ -14,6 +15,12 @@ _LOSS_COMPONENTS = (
 	("constraint_dpsi", "dpsi constraint loss"),
 	("total", "Total loss"),
 )
+
+
+@dataclass(frozen=True)
+class CoefficientInitializationMetadata:
+	loaded_indices: frozenset
+	appended_indices: frozenset
 
 
 def _validate_loss_metadata(loss_components, mode):
@@ -56,8 +63,10 @@ def random_C_init(info_element):
 
 
 
-def read_C_init(file_name,info_element):
+def read_C_init(file_name, info_element, return_metadata=False):
 	""" C[it][il][ie,iu]	<jY|\phi> """
+	if not isinstance(return_metadata, bool):
+		raise TypeError("return_metadata must be a bool")
 	C = random_C_init(info_element)
 
 	with open(file_name,"r") as file:
@@ -70,20 +79,90 @@ def read_C_init(file_name,info_element):
 
 		C_read_index = set()
 		while True:
-			line = file.readline().strip()
+			line = file.readline()
+			if not line:
+				raise IOError(
+					"missing </Coefficient> in read_C_init " + file_name
+				)
+			line = line.strip()
+			if not line:
+				continue
 			if line.startswith("Type"):
-				it,il,iu = file.readline().split()
-				il = int(il)
-				iu = int(iu)-1
-				C_read_index.add((it,il,iu))
-				line = file.readline().split()
-				for ie in range(info_element[it].Ne):
-					if not line:	line = file.readline().split()
-					C[it][il].data[ie,iu] = float(line.pop(0))
+				label = file.readline().split()
+				if len(label) != 3:
+					raise IOError(
+						"invalid coefficient label in read_C_init " + file_name
+					)
+				it, il_text, iu_text = label
+				try:
+					il = int(il_text)
+					iu = int(iu_text) - 1
+				except ValueError as exc:
+					raise IOError(
+						"invalid coefficient label in read_C_init " + file_name
+					) from exc
+				index = (it, il, iu)
+				if (
+					it not in info_element
+					or il < 0
+					or il >= info_element[it].Nl
+					or iu < 0
+					or iu >= info_element[it].Nu[il]
+				):
+					raise ValueError(
+						f"coefficient column {index!r} is outside requested Nu"
+					)
+				if index in C_read_index:
+					raise ValueError(f"duplicate coefficient column {index!r}")
+
+				values = []
+				while len(values) < info_element[it].Ne:
+					value_line = file.readline()
+					if not value_line:
+						raise IOError(
+							f"coefficient column {index!r} is incomplete"
+						)
+					fields = value_line.split()
+					if not fields:
+						continue
+					if fields[0] == "Type" or fields[0] == "</Coefficient>":
+						raise IOError(
+							f"coefficient column {index!r} is incomplete"
+						)
+					try:
+						values.extend(float(value) for value in fields)
+					except ValueError as exc:
+						raise IOError(
+							f"invalid value in coefficient column {index!r}"
+						) from exc
+				if len(values) != info_element[it].Ne:
+					raise IOError(
+						f"coefficient column {index!r} has {len(values)} values, "
+						f"expected {info_element[it].Ne}"
+					)
+				with torch.no_grad():
+					C[it][il][:, iu] = torch.tensor(
+						values, dtype=C[it][il].dtype
+					)
+				C_read_index.add(index)
 			elif line.startswith("</Coefficient>"):
 				break
 			else:
 				raise IOError("unknown line in read_C_init "+file_name+"\n"+line)
+
+	requested_indices = frozenset(
+		(it, il, iu)
+		for it in info_element
+		for il in range(info_element[it].Nl)
+		for iu in range(info_element[it].Nu[il])
+	)
+	loaded_indices = frozenset(C_read_index)
+	metadata = CoefficientInitializationMetadata(
+		loaded_indices=loaded_indices,
+		appended_indices=requested_indices - loaded_indices,
+	)
+	if return_metadata:
+		return C, metadata
 	return C, C_read_index
 
 
