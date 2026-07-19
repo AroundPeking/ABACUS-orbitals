@@ -1,6 +1,16 @@
 {
   "seed": 20260718,
   "file_list": {
+    "origin": [
+      "data/OUT.H-STRU2-8-0.7/orb_matrix.0.dat",
+      "data/OUT.H-STRU2-8-0.9/orb_matrix.0.dat",
+      "data/OUT.H-STRU2-8-1.3/orb_matrix.0.dat"
+    ],
+    "linear": [[
+      "data/OUT.H-STRU2-8-0.7/orb_matrix.1.dat",
+      "data/OUT.H-STRU2-8-0.9/orb_matrix.1.dat",
+      "data/OUT.H-STRU2-8-1.3/orb_matrix.1.dat"
+    ]],
     "sternheimer": [
       "data/OUT.H-atom-ST/sternheimer_matrix.dat"
     ]
@@ -9,7 +19,10 @@
     "Nt_all": ["H"],
     "Nu": {"H": [3, 2]}
   },
-  "weight": {},
+  "weight": {
+    "stru": [1.0, 1.0, 1.0],
+    "bands_range": [1, 1, 1]
+  },
   "optimize": [
     {
       "optimizer": "Adam",
@@ -40,13 +53,13 @@
     {"element": "H", "l": 1, "zeta": 1}
   ],
   "loss": {
-    "mode": "st_only",
+    "mode": "st_dpsi_joint",
     "epsilon": 1e-14,
     "condition_limit": 1e12,
     "tau_dft": 0.05,
     "tau_dpsi": 0.10,
     "constraint_penalty_dft": 10.0,
     "constraint_penalty_dpsi": 10.0,
-    "joint_dpsi_weight": 1.0
+    "joint_dpsi_weight": 0.1
   }
 }

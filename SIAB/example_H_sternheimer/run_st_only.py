@@ -163,6 +163,7 @@ def _read_loss_metadata(path):
         "DFT origin loss": "dft_origin",
         "DFT dpsi loss": "dft_dpsi",
         "Sternheimer loss": "sternheimer",
+        "dpsi regularization loss": "regularization_dpsi",
         "DFT constraint loss": "constraint_dft",
         "dpsi constraint loss": "constraint_dpsi",
         "Total loss": "total",
@@ -273,6 +274,7 @@ def summarize_campaign(
     for name in (
         "dft_origin",
         "dft_dpsi",
+        "regularization_dpsi",
         "constraint_dft",
         "constraint_dpsi",
     ):

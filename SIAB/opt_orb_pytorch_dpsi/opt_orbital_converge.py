@@ -7,6 +7,7 @@ from optimization_loss import (
 	compose_loss,
 	constraints_satisfied,
 	normalize_loss_config,
+	selection_component,
 )
 from sternheimer_spillage import SternheimerLossResult
 
@@ -108,7 +109,8 @@ class Opt_Orbital_Converge:
 				else:
 					if loss_config["mode"] != "st_only":
 						raise ValueError(
-							"st_constrained requires legacy DFT and dpsi data"
+							"st_constrained and st_dpsi_joint require legacy "
+							"DFT and dpsi data"
 						)
 					zero = next(iter(C_initial.values()))[0].sum() * 0.0
 					baseline_components = {
@@ -125,8 +127,9 @@ class Opt_Orbital_Converge:
 		detail_schema = None
 		new_header = (
 			"istep_big", "istep_small", "istep_all", "dft_origin",
-			"dft_dpsi", "sternheimer", "constraint_dft", "constraint_dpsi",
-			"total", "max_st_condition", "accepted",
+			"dft_dpsi", "sternheimer", "regularization_dpsi",
+			"constraint_dft", "constraint_dpsi", "total",
+			"max_st_condition", "accepted",
 		)
 		legacy_header = ("istep_big", "istep_small", "istep_all", "Spillage")
 
@@ -233,6 +236,7 @@ class Opt_Orbital_Converge:
 						components["dft_origin"].item(),
 						components["dft_dpsi"].item(),
 						components["sternheimer"].item(),
+						components["regularization_dpsi"].item(),
 						components["constraint_dft"].item(),
 						components["constraint_dpsi"].item(),
 						components["total"].item(),
@@ -249,10 +253,11 @@ class Opt_Orbital_Converge:
 						}
 					)
 
+					selection_name = selection_component(loss_config["mode"])
 					if accepted and (
 						best_accepted is None
-						or components["sternheimer"].item()
-						< best_accepted["loss_components"]["sternheimer"]
+						or components[selection_name].item()
+						< best_accepted["loss_components"][selection_name]
 					):
 						best_accepted = {
 							"C": IO.func_C.copy_C(C, self.info_element),

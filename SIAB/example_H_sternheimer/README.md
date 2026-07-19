@@ -7,6 +7,9 @@ This directory defines the first H-TZDP Sternheimer-supervised SIAB experiment. 
 - The H atom Sternheimer matrix is the only new supervision.
 - `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom Sternheimer matrix and the checked-in TZDP coefficients.
 - `st_constrained` additionally reuses the historical H dimer/trimer DFT and dpsi matrices at 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
+- `st_dpsi_joint` uses the same training data, but keeps the normalized dpsi
+  loss active throughout optimization instead of using dpsi only after a hard
+  threshold is crossed.
 - H2 RPA is held out from optimization and is reserved for the final transfer test.
 - The initial basis is the existing H TZDP basis at 8 Bohr. Its complete DZP
   core (`1s`, `2s`, and `1p`) is fixed exactly; only the TZDP-only `3s` and
@@ -43,6 +46,32 @@ For the constrained lane:
 cp INPUT.st_constrained INPUT
 python3 ../opt_orb_pytorch_dpsi/main.py
 ```
+
+For the continuous dpsi lane:
+
+```bash
+cp INPUT.st_dpsi_joint INPUT
+python3 ../opt_orb_pytorch_dpsi/main.py
+```
+
+Its objective is
+
+```text
+L = L_ST + lambda_dpsi * L_dpsi/L_dpsi_initial
+    + lambda_DFT * max(0, L_DFT/L_DFT_initial - 1 - tau_DFT)^2
+    + lambda_gate * max(0, L_dpsi/L_dpsi_initial - 1 - tau_dpsi)^2.
+```
+
+The checked-in first trial uses `lambda_dpsi=0.1`, `tau_DFT=0.05`, and
+`tau_dpsi=0.10`. Accepted candidates must satisfy both hard tolerances and the
+Sternheimer condition-number limit; among accepted candidates this mode keeps
+the minimum total loss. The older `st_constrained` mode still keeps the minimum
+Sternheimer loss. Do not tune `lambda_dpsi` against the held-out H2 RPA result.
+
+The historical `orb_matrix.0.dat` and `orb_matrix.1.dat` producer files are not
+stored in this checkout. A physical joint campaign therefore requires those
+exact files to be restored or regenerated before this input can run; synthetic
+tests cover the objective, gradients, routing, and selection contract only.
 
 Both inputs use seed `20260718`. The optimizer must report that value for both NumPy and PyTorch. Compare the resulting named losses in `Spillage.dat` and `ORBITAL_RESULTS.txt`; do not use the held-out H2 RPA result for parameter fitting.
 

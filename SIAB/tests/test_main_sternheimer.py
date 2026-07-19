@@ -40,6 +40,7 @@ COMPONENTS = {
     "total": 0.6,
     "constraint_dpsi": 0.05,
     "sternheimer": 0.25,
+    "regularization_dpsi": 0.0,
     "dft_dpsi": 0.2,
     "constraint_dft": 0.1,
     "dft_origin": 0.3,
@@ -359,6 +360,7 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
                 "DFT origin loss = 3.0000000000e-01",
                 "DFT dpsi loss = 2.0000000000e-01",
                 "Sternheimer loss = 2.5000000000e-01",
+                "dpsi regularization loss = 0.0000000000e+00",
                 "DFT constraint loss = 1.0000000000e-01",
                 "dpsi constraint loss = 5.0000000000e-02",
                 "Total loss = 6.0000000000e-01",
@@ -434,7 +436,27 @@ class MainIntegrationTest(unittest.TestCase):
 
             with working_directory(path):
                 with self.assertRaisesRegex(
-                    ValueError, "st_constrained requires origin and dpsi data"
+                    ValueError, "st_constrained and st_dpsi_joint require origin"
+                ):
+                    siab_main.main()
+
+    def test_joint_main_requires_linear_dpsi_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            origin = path / "origin.dat"
+            st_path = path / "sternheimer.dat"
+            write_legacy_origin(origin)
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                origin=str(origin), sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["loss"]["mode"] = "st_dpsi_joint"
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path):
+                with self.assertRaisesRegex(
+                    ValueError, "st_dpsi_joint requires linear dpsi data"
                 ):
                     siab_main.main()
 

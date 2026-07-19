@@ -11,6 +11,7 @@ _LOSS_COMPONENTS = (
 	("dft_origin", "DFT origin loss"),
 	("dft_dpsi", "DFT dpsi loss"),
 	("sternheimer", "Sternheimer loss"),
+	("regularization_dpsi", "dpsi regularization loss"),
 	("constraint_dft", "DFT constraint loss"),
 	("constraint_dpsi", "dpsi constraint loss"),
 	("total", "Total loss"),
@@ -28,7 +29,7 @@ def _validate_loss_metadata(loss_components, mode):
 		return None
 	if loss_components is None or mode is None:
 		raise ValueError("mode and loss_components must be supplied together")
-	if mode not in ("st_only", "st_constrained"):
+	if mode not in ("st_only", "st_constrained", "st_dpsi_joint"):
 		raise ValueError(f"invalid mode {mode!r}")
 	if not isinstance(loss_components, Mapping):
 		raise TypeError("loss_components must be a mapping")

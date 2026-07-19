@@ -59,6 +59,7 @@
     "tau_dft": 0.05,
     "tau_dpsi": 0.10,
     "constraint_penalty_dft": 10.0,
-    "constraint_penalty_dpsi": 10.0
+    "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 1.0
   }
 }

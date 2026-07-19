@@ -133,7 +133,7 @@ python3 -m unittest discover -s SIAB/tests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit the response-shell extension stage**
+- [x] **Step 6: Commit the response-shell extension stage**
 
 ```bash
 git add SIAB/tests/test_h_sternheimer_smoke.py \
@@ -174,3 +174,36 @@ Record the target hash, code commit, initial/final loss, condition number, wall 
 - [ ] **Step 4: Commit the campaign record**
 
 Commit only the concise README/TeX record and plot; keep raw campaign output outside Git.
+
+### Task 4: Keep dpsi active while optimizing the ST response space
+
+**Files:**
+- Modify: `SIAB/opt_orb_pytorch_dpsi/optimization_loss.py`
+- Modify: `SIAB/opt_orb_pytorch_dpsi/opt_orbital_converge.py`
+- Modify: `SIAB/opt_orb_pytorch_dpsi/IO/func_C.py`
+- Modify: `SIAB/opt_orb_pytorch_dpsi/main.py`
+- Create: `SIAB/example_H_sternheimer/INPUT.st_dpsi_joint`
+- Modify: focused tests and this README
+
+- [x] **Step 1: Add a failing differentiable-loss test**
+
+Require a normalized dpsi term to contribute a nonzero gradient even while the
+DFT and dpsi hard constraints are satisfied.
+
+- [x] **Step 2: Implement and validate `st_dpsi_joint`**
+
+Use `joint_dpsi_weight * dpsi/dpsi_initial`, preserve both existing hinge
+constraints, require linear dpsi input data, and select the feasible candidate
+with minimum total loss.
+
+- [x] **Step 3: Propagate named metadata and update campaign contracts**
+
+Write `regularization_dpsi` to both `Spillage.dat` and
+`ORBITAL_RESULTS.txt`. Keep pure-ST validation strict by requiring this value to
+be zero in `st_only` campaigns.
+
+- [ ] **Step 4: Restore or regenerate the historical DFT/dpsi matrices**
+
+The three `orb_matrix.0.dat` and three `orb_matrix.1.dat` files referenced by
+the H input are absent locally. Do not report a physical joint-optimization
+result until their producer provenance is recovered.

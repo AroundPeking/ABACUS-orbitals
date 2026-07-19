@@ -51,6 +51,7 @@ LOSS_DEFAULTS = {
     "tau_dpsi": 0.10,
     "constraint_penalty_dft": 10.0,
     "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 1.0,
 }
 DZP_FREEZE_SPECS = [
     {"element": "H", "l": 0, "zeta": 1},
@@ -545,7 +546,9 @@ class ExplicitFreezeInitializationTest(unittest.TestCase):
 class ExampleInputTest(unittest.TestCase):
     def test_inputs_match_exact_campaign_contract(self):
         st_only = json.loads((EXAMPLE / "INPUT.st_only").read_text())
+        expanded = json.loads((EXAMPLE / "INPUT.st_response_4s3p").read_text())
         constrained = json.loads((EXAMPLE / "INPUT.st_constrained").read_text())
+        joint = json.loads((EXAMPLE / "INPUT.st_dpsi_joint").read_text())
         self.assertEqual(st_only["file_list"].keys(), {"sternheimer"})
         self.assertNotIn("origin", st_only["file_list"])
         self.assertNotIn("linear", st_only["file_list"])
@@ -553,8 +556,17 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("linear", constrained["file_list"])
         self.assertEqual(st_only["loss"]["mode"], "st_only")
         self.assertEqual(constrained["loss"]["mode"], "st_constrained")
+        self.assertEqual(joint["loss"]["mode"], "st_dpsi_joint")
+        self.assertEqual(joint["loss"]["joint_dpsi_weight"], 0.1)
         self.assertEqual(st_only["seed"], SEED)
         self.assertEqual(st_only["element"]["Nu"], {"H": [3, 2]})
+        self.assertEqual(expanded["element"]["Nu"], {"H": [4, 3]})
+        self.assertEqual(expanded["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(expanded["loss"]["mode"], "st_only")
+        self.assertEqual(
+            expanded["C_init_info"]["C_init_file"],
+            st_only["C_init_info"]["C_init_file"],
+        )
         self.assertEqual(st_only["radial"]["Rcut"], 8)
         self.assertEqual(st_only["radial"]["dr"], 0.01)
         self.assertEqual(st_only["radial"]["Ecut"], 100)
@@ -576,6 +588,9 @@ class ExampleInputTest(unittest.TestCase):
             DZP_FREEZE_SPECS,
         )
         self.assertEqual(constrained["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(joint["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(joint["file_list"], constrained["file_list"])
+        self.assertEqual(joint["element"], constrained["element"])
         self.assertEqual(
             st_only["C_init_info"],
             {

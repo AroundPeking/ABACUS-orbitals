@@ -11,14 +11,18 @@ LOSS_DEFAULTS = {
     "tau_dpsi": 0.10,
     "constraint_penalty_dft": 10.0,
     "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 1.0,
 }
 
-_LOSS_MODES = frozenset({"st_only", "st_constrained"})
+_LOSS_MODES = frozenset({"st_only", "st_constrained", "st_dpsi_joint"})
 
 
 def _validate_mode(mode):
     if not isinstance(mode, str) or mode not in _LOSS_MODES:
-        raise ValueError(f"invalid loss mode {mode!r}; expected st_only or st_constrained")
+        raise ValueError(
+            f"invalid loss mode {mode!r}; expected st_only, st_constrained, "
+            "or st_dpsi_joint"
+        )
 
 
 def _validate_real(name, value, minimum, strict=False):
@@ -55,6 +59,7 @@ def normalize_loss_config(config):
     _validate_real(
         "constraint_penalty_dpsi", normalized["constraint_penalty_dpsi"], 0.0
     )
+    _validate_real("joint_dpsi_weight", normalized["joint_dpsi_weight"], 0.0)
     return normalized
 
 
@@ -107,6 +112,7 @@ def compose_loss(mode, st, dft, dpsi, baseline, config):
     _validate_loss_tensor("dft_dpsi", dpsi)
     dft_ratio, dpsi_ratio = _ratios(dft, dpsi, baseline, normalized)
 
+    regularization_dpsi = torch.zeros_like(dpsi)
     if mode == "st_only":
         constraint_dft = torch.zeros_like(dft)
         constraint_dpsi = torch.zeros_like(dpsi)
@@ -118,16 +124,26 @@ def compose_loss(mode, st, dft, dpsi, baseline, config):
         constraint_dpsi = normalized["constraint_penalty_dpsi"] * torch.relu(
             dpsi_ratio - 1.0 - normalized["tau_dpsi"]
         ).square()
-        total = st + constraint_dft + constraint_dpsi
+        if mode == "st_dpsi_joint":
+            regularization_dpsi = normalized["joint_dpsi_weight"] * dpsi_ratio
+        total = (
+            st + regularization_dpsi + constraint_dft + constraint_dpsi
+        )
 
     return {
         "dft_origin": dft,
         "dft_dpsi": dpsi,
         "sternheimer": st,
+        "regularization_dpsi": regularization_dpsi,
         "constraint_dft": constraint_dft,
         "constraint_dpsi": constraint_dpsi,
         "total": total,
     }
+
+
+def selection_component(mode):
+    _validate_mode(mode)
+    return "total" if mode == "st_dpsi_joint" else "sternheimer"
 
 
 def constraints_satisfied(dft, dpsi, baseline, config):

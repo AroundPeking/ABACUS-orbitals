@@ -16,6 +16,7 @@ from optimization_loss import (
     compose_loss,
     constraints_satisfied,
     normalize_loss_config,
+    selection_component,
 )
 from opt_orbital_converge import Opt_Orbital_Converge
 from opt_orbital_spillage import Opt_Orbital_Spillage
@@ -279,6 +280,37 @@ class FreezeOrbitalsTest(unittest.TestCase):
 
 
 class OptimizationLossTest(unittest.TestCase):
+    def test_joint_dpsi_regularization_is_active_inside_hard_gate(self):
+        st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
+        dft = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+        dpsi = torch.tensor(0.9, dtype=torch.float64, requires_grad=True)
+        config = normalize_loss_config(
+            {
+                "mode": "st_dpsi_joint",
+                "joint_dpsi_weight": 0.5,
+                "tau_dft": 0.05,
+                "tau_dpsi": 0.10,
+            }
+        )
+
+        result = compose_loss(
+            "st_dpsi_joint",
+            st,
+            dft,
+            dpsi,
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            config,
+        )
+        result["total"].backward()
+
+        self.assertEqual(result["constraint_dft"].item(), 0.0)
+        self.assertEqual(result["constraint_dpsi"].item(), 0.0)
+        self.assertAlmostEqual(result["regularization_dpsi"].item(), 0.45)
+        self.assertAlmostEqual(result["total"].item(), 0.75)
+        self.assertAlmostEqual(st.grad.item(), 1.0)
+        self.assertEqual(dft.grad.item(), 0.0)
+        self.assertAlmostEqual(dpsi.grad.item(), 0.5)
+
     def test_st_only_returns_st_identity_and_zero_constraints(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
         result = compose_loss(
@@ -293,17 +325,24 @@ class OptimizationLossTest(unittest.TestCase):
         self.assertIs(result["total"], st)
         self.assertEqual(result["constraint_dft"].item(), 0.0)
         self.assertEqual(result["constraint_dpsi"].item(), 0.0)
+        self.assertEqual(result["regularization_dpsi"].item(), 0.0)
         self.assertEqual(
             set(result),
             {
                 "dft_origin",
                 "dft_dpsi",
                 "sternheimer",
+                "regularization_dpsi",
                 "constraint_dft",
                 "constraint_dpsi",
                 "total",
             },
         )
+
+    def test_candidate_selection_matches_loss_mode(self):
+        self.assertEqual(selection_component("st_only"), "sternheimer")
+        self.assertEqual(selection_component("st_constrained"), "sternheimer")
+        self.assertEqual(selection_component("st_dpsi_joint"), "total")
 
     def test_constrained_hinges_and_gradients(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
@@ -477,7 +516,8 @@ class ConvergeIntegrationTest(unittest.TestCase):
 
         expected_header = (
             "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
-            "sternheimer\tconstraint_dft\tconstraint_dpsi\ttotal\t"
+            "sternheimer\tregularization_dpsi\tconstraint_dft\t"
+            "constraint_dpsi\ttotal\t"
             "max_st_condition\taccepted"
         )
         self.assertEqual(files[1].getvalue().splitlines()[0], expected_header)
@@ -626,7 +666,8 @@ class ConvergeIntegrationTest(unittest.TestCase):
         self.assertEqual(stages, stages_before)
         header = (
             "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
-            "sternheimer\tconstraint_dft\tconstraint_dpsi\ttotal\t"
+            "sternheimer\tregularization_dpsi\tconstraint_dft\t"
+            "constraint_dpsi\ttotal\t"
             "max_st_condition\taccepted"
         )
         lines = files[1].getvalue().splitlines()
@@ -673,7 +714,7 @@ class ConvergeIntegrationTest(unittest.TestCase):
             result["loss_components"]["sternheimer"], final_st
         )
         candidate_totals = [
-            float(row[8])
+            float(row[9])
             for row in (
                 line.split("\t") for line in files[1].getvalue().splitlines()
             )

@@ -175,13 +175,20 @@ def main():
 		if sternheimer_data is None or not sternheimer_stages:
 			raise ValueError("SIAB input without origin requires Sternheimer data")
 		if any(stage["mode"] != "st_only" for stage in sternheimer_stages):
-			raise ValueError("st_constrained requires origin and dpsi data")
+			raise ValueError(
+				"st_constrained and st_dpsi_joint require origin and dpsi data"
+			)
 		if "linear" in file_list:
 			raise ValueError("linear data requires origin data")
 		info_kst = None
 		info_stru = []
 		info_element = _sternheimer_info_element(sternheimer_data, info_true)
 	else:
+		if (
+			any(stage["mode"] == "st_dpsi_joint" for stage in sternheimer_stages)
+			and "linear" not in file_list
+		):
+			raise ValueError("st_dpsi_joint requires linear dpsi data")
 		weight = IO.cal_weight.cal_weight(
 			info_weight, info_V["same_band"], file_list["origin"]
 		)

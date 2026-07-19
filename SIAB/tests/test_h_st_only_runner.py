@@ -107,10 +107,11 @@ class HStOnlyRunnerTest(unittest.TestCase):
             )
             (output / "Spillage.dat").write_text(
                 "istep_big istep_small istep_all dft_origin dft_dpsi "
-                "sternheimer constraint_dft constraint_dpsi total "
+                "sternheimer regularization_dpsi constraint_dft "
+                "constraint_dpsi total "
                 "max_st_condition accepted\n"
-                "-1 0 0 0 0 0.5 0 0 0.5 12 true\n"
-                "0 1 1 0 0 0.3 0 0 0.3 15 true\n",
+                "-1 0 0 0 0 0.5 0 0 0 0.5 12 true\n"
+                "0 1 1 0 0 0.3 0 0 0 0.3 15 true\n",
                 encoding="utf-8",
             )
             (output / "INPUT").write_text(
@@ -171,6 +172,7 @@ class HStOnlyRunnerTest(unittest.TestCase):
                 "DFT origin loss = 0.0\n"
                 "DFT dpsi loss = 0.0\n"
                 f"Sternheimer loss = {loss}\n"
+                "dpsi regularization loss = 0.0\n"
                 "DFT constraint loss = 0.0\n"
                 "dpsi constraint loss = 0.0\n"
                 f"Total loss = {loss}\n"
