@@ -83,10 +83,15 @@ $ sbatch example_Si_sbatch.sh
 
 The Sternheimer path is opt-in. Existing JSON inputs without `file_list.sternheimer`, `loss`, `freeze_orbitals`, or `seed` retain the legacy DFT+dpsi behavior and the seven-value `read_json` interface.
 
-New runs provide one versioned Sternheimer matrix and select one of two loss modes:
+New runs provide one versioned Sternheimer matrix and select a loss mode:
 
-- `st_only` minimizes the projected first-order-wavefunction loss.
+- `st_only` minimizes the projected first-order-wavefunction loss. It is kept
+  only for implementation regression and ablation; its optimized orbitals must
+  not be promoted to DFT or RPA production bases.
 - `st_constrained` minimizes the same loss while enforcing the configured DFT and dpsi baseline tolerances.
+- `st_dpsi_joint` keeps normalized dpsi supervision active throughout the
+  optimization while retaining the DFT and dpsi hard gates. This is the current
+  production-candidate path.
 
 `st_only` may omit `origin` and `linear` entirely. In that case SIAB derives
 the radial primitive dimension from the Sternheimer blocks and records the

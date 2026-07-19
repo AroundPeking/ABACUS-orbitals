@@ -224,9 +224,53 @@ zero. The joint `3s,2p` orbitals have 2 and 1 radial nodes, compared with 3 and
 10 in the ST-only result. Exact values and output hashes are recorded in the
 example README.
 
-- [ ] **Step 6: Run the held-out H2/H SOS-RPA transfer test**
+- [x] **Step 6: Run the held-out H2/H SOS-RPA transfer test**
 
 Replace only the H orbital in the validated 20-Angstrom H2/H SOS producer,
 regenerate the ABFS and full-Coulomb data, and run LibRPA at 16 frequencies.
 Recompute PBE, PBE-xc, EXX, and RPA correlation contributions for both H2 and
 spin-polarized H; do not reuse the original TZDP non-correlation binding term.
+
+The same-producer calculations completed for the checked-in TZDP, joint
+`3s2p`, and joint `4s3p` bases. Their H2 RPA@PBE binding energies are
+106.5361, 106.7371, and 106.8576 kcal/mol, respectively. The `4s3p` result is
+still about 1.86 kcal/mol below the Thesis/FHI-aims reference.
+
+### Task 5: Remove the angular-momentum floor before further H2 tuning
+
+**Files:**
+- Modify: the ABACUS Sternheimer-SIAB producer to generate an explicit
+  primitive angular cutoff independent of the input orbital `Lmax`
+- Modify: `SIAB/example_H_sternheimer/README.md`
+- Modify: focused target-contract tests and joint H inputs
+
+- [x] **Step 1: Quantify the current representability floor**
+
+Decompose the fixed-DZP residual by auxiliary perturbation angular momentum.
+The current target carries 8 s, 18 p, and 15 d channels, but has only s/p
+primitive blocks. The joint `4s3p` loss is 0.328766; the complete current s/p
+primitive space can reach only 0.301781. Missing d response contributes
+0.301108 of the total loss.
+
+- [ ] **Step 2: Add complete d primitive blocks to the producer contract**
+
+Generate 25 radial primitives for every `l=2`, `m=-2,-1,0,1,2` block without
+adding those functions to the fixed DFT core. Reject incomplete magnetic
+multiplets in both writer and reader tests.
+
+- [ ] **Step 3: Select d shell count from the atomic residual spectrum**
+
+Whiten each angular block with its primitive overlap, diagonalize the weighted
+residual covariance, and choose `n_s,n_p,n_d` from a declared cumulative
+capture threshold. Do not use the H2 binding energy to select the shell count.
+
+- [ ] **Step 4: Optimize only with the joint DFT+dpsi path**
+
+Keep `1s,2s,1p` bitwise fixed. Retain `st_only` only for regression/ablation;
+never use its `.orb` in DFT or RPA production calculations.
+
+- [ ] **Step 5: Re-run the held-out gate once**
+
+After the atomic ST and DFT/dpsi gates pass, run all H2/H bands with one common
+fixed ABS cross test and the standard regenerated-ABS result. Report both so
+the wavefunction-space improvement is separated from auxiliary-basis change.

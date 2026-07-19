@@ -5,7 +5,10 @@ This directory defines the first H-TZDP Sternheimer-supervised SIAB experiment. 
 ## Provenance status
 
 - The H atom Sternheimer matrix is the only new supervision.
-- `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom Sternheimer matrix and the checked-in TZDP coefficients.
+- `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom
+  Sternheimer matrix and the checked-in TZDP coefficients. It is retained only
+  as an implementation regression/ablation mode. Its optimized orbitals are
+  retired and must not be used as DFT or RPA production inputs.
 - `st_constrained` additionally reuses the historical equilateral H3-trimer DFT and dpsi matrices at side lengths 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
 - `st_dpsi_joint` uses the same training data, but keeps the normalized dpsi
   loss active throughout optimization instead of using dpsi only after a hard
@@ -21,8 +24,9 @@ The experiment is **not physics validated** until the exact ABACUS executable/so
 
 ## Run
 
-Use the campaign runner for the formal `st_only` lane. Keep the generated
-target and campaign output outside the Git working tree:
+The following runner is only for reproducing the retired `st_only`
+implementation diagnostic. Keep the generated target and campaign output
+outside the Git working tree:
 
 ```bash
 python3 run_st_only.py \
@@ -121,7 +125,7 @@ Dojo-NC-SR `Pseudopotential/H.upf` beside those files before submitting.  The jo
 uses one 30-thread MPI rank for each of the 16 minimax frequencies and refuses
 to run if the immutable ABACUS executable hash changes.
 
-## First formal `st_only` campaign
+## Retired `st_only` implementation campaign
 
 The first formal producer was df_dcu `normal` job `21311439`. It completed in
 `03:45:04` on 16 nodes and converged all 656 response equations. The canonical
@@ -136,9 +140,10 @@ After 3000 Adam steps, the best Sternheimer loss was
 `0.12535769112573478`, down from `0.15884642225499218` (ratio
 `0.7891754145`). The best projected-overlap condition number was `73.61`.
 That first campaign fixed only the 25-coefficient H level-1 `1s` column. It is
-retained as an implementation diagnostic, but it is superseded by the DZP-core
-campaign because the optimized upper orbitals were visibly oscillatory. The
-old final coefficient SHA256 is
+retained as an implementation diagnostic, but it is superseded by the
+DZP-core joint campaign because the optimized upper orbitals were visibly
+oscillatory. The optimized `.orb` is retired and must not be used in any
+production DFT/RPA comparison. The old final coefficient SHA256 is
 `278694016e5f819f2a79db4b3ddc8c5692d8dd125a908f0003295ab644eb4715`.
 
 These numbers validate the implementation and training loop only. The optimized
@@ -303,3 +308,53 @@ Do not repeatedly choose further shell counts from this H2 value: that would
 turn the held-out molecule into training data. Further expansion requires a
 predeclared atomic/H3 training-space criterion and a fixed-auxiliary cross test
 before one final H2 evaluation.
+
+## Angular-momentum floor in the current target
+
+The remaining error is not evidence that frequency-dependent first-order
+wavefunction fitting is ineffective. The canonical target contains
+`656 = 41 * 16` response rows. The 41 auxiliary perturbations consist of 8 s,
+18 p, and 15 d channels, but its primitive columns contain only four blocks:
+one s block and three p magnetic blocks, each with 25 radial primitives. There
+is no d primitive block.
+
+For the occupied H 1s state, an auxiliary perturbation with angular momentum
+`L` produces a first-order response with the same angular momentum. Therefore
+all 15 d-channel target rows have nonzero reference norm but exactly zero
+overlap with every current s/p primitive. This is a wavefunction-basis angular
+cutoff, not an auxiliary-basis error: Delta-ST solves these responses on the
+uniform grid, while the current SIAB candidate discards them before
+optimization.
+
+After projecting out the fixed `1s,2s,1p` DZP core, the weighted residual norm
+and loss decompose as follows. The last column is the best possible loss when
+all 92 numerically independent directions of the current 100-column s/p
+primitive space are available.
+
+| response channel | residual-norm share | joint `3s2p` loss in channel | joint `4s3p` loss in channel | complete s/p primitive floor |
+| --- | ---: | ---: | ---: | ---: |
+| s | 0.088949 | 0.212640 | 0.059163 | 0.004525 |
+| p | 0.609943 | 0.140070 | 0.036717 | 0.000444 |
+| d | 0.301108 | 1.000000 | 1.000000 | 1.000000 (missing) |
+| total | 1.000000 | 0.405457 | 0.328766 | 0.301781 |
+
+Thus d response alone contributes `0.301108`, or 91.59% of the final `4s3p`
+ST loss. The remaining s/p loss is only `0.027658`. Relative to the maximum
+response fraction capturable by the current s/p primitives, the `4s3p` joint
+basis already captures 96.14%. Adding more s or p zeta functions cannot lower
+the total loss below approximately `0.301781`.
+
+The next producer target must therefore expose complete `l=2`,
+`m=-2,-1,0,1,2` spherical-Bessel primitive blocks without changing the fixed
+DZP orbitals. The response-basis size is then chosen from the weighted
+eigenvalue spectrum of the residual covariance separately in s, p, and d,
+rather than from H2 binding-energy tuning. The first candidate will keep the
+joint DFT+dpsi objective and append the number of d radial functions required
+by that spectrum. Only after the atomic training-space gate passes is one new
+all-band H2/H SOS-RPA held-out calculation allowed.
+
+This angular decomposition does not prove that the missing d channel equals
+the full `1.86 kcal/mol` binding-energy gap: RPA energy is nonlinear and H/H2
+errors can cancel. It identifies a hard, quantified training-space floor that
+must be removed before auxiliary-basis thresholds, the 50-Ry atomic target
+grid, or smaller residual effects can be interpreted.

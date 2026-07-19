@@ -49,7 +49,7 @@ different unsmoothed orbital.
 
 ## 3. Compared Optimization Modes
 
-### 3.1 ST-only diagnostic
+### 3.1 Retired ST-only diagnostic
 
 Minimize only the Sternheimer residual spillage:
 
@@ -57,10 +57,10 @@ Minimize only the Sternheimer residual spillage:
   \min_C \widehat L_{\mathrm{ST}}(C).
 \]
 
-This lane measures the maximum RPA improvement available from the chosen
-Sternheimer target and variable orbital set. It is a diagnostic, not the
-default production basis, because it does not prevent DFT quality from
-degrading away from the initial TZDP optimum.
+This lane measures the unconstrained behavior of the chosen Sternheimer target
+and variable orbital set. The resulting H orbitals are retired: they became
+strongly oscillatory and are not valid DFT or RPA production inputs. The mode
+remains in the code only for implementation regression and ablation.
 
 The executable option-1 path is intentionally independent of the historical
 SIAB matrices: `file_list` contains only `sternheimer`, and `info_element.Ne`
@@ -315,14 +315,14 @@ pseudopotential and a version-recorded ABACUS executable. The regenerated
 baseline must reproduce the checked-in `ORBITAL_RESULTS.txt` loss before it is
 used as a constraint.
 
-Two runs start from the same `C0`:
+Two diagnostic runs start from the same `C0`:
 
 1. `st_only`;
 2. `st_constrained` with the DFT-origin and dpsi constraints active.
 
-The ST-only lane sees no molecular data. The constrained lane sees only the
-historical DFT-origin/dpsi regularizer described above; it does not see the H2
-RPA validation observable.
+The ST-only lane sees no molecular data, but its output is not a production
+candidate. The joint DFT+dpsi lane sees only the historical regularizer
+described above; it does not see the H2 RPA validation observable.
 
 ### 7.2 Engineering acceptance
 
@@ -338,16 +338,49 @@ The implementation is accepted when:
 
 ### 7.3 Physics comparison
 
-For the initial TZDP, ST-only result, and constrained result, run the same H
-and H2 workflow and report the DFT-origin loss, dpsi loss, ST loss, H and H2
-PBE+EXX energies, H and H2 RPA correlation energies, H2 SOS RPA@PBE binding
-energy, and its difference from Delta-ST.
+For the initial TZDP and joint DFT+dpsi result, run the same H and H2 workflow
+and report the DFT-origin loss, dpsi loss, ST loss, H and H2 PBE+EXX energies,
+H and H2 RPA correlation energies, H2 SOS RPA@PBE binding energy, and its
+difference from Delta-ST. ST-only orbitals are excluded from this production
+comparison.
 
 These cells are populated only from completed calculations. The preferred
-basis is the constrained result if it reaches the `0.1 kcal/mol` RPA target.
-If only ST-only reaches the target, the result is diagnostic evidence that the
-fixed DFT tolerances or variable orbital set must be revised; it is not
-automatically promoted as the production basis.
+basis is the joint result if it reaches the `0.1 kcal/mol` RPA target while
+satisfying the DFT/dpsi gates. ST-only is never promoted even if an isolated
+held-out observable happens to improve.
+
+### 7.4 Angular-completeness gate added after the first H2 result
+
+The canonical target has 656 rows: 41 auxiliary perturbations at 16
+frequencies. The perturbations contain 8 s, 18 p, and 15 d channels, while the
+SIAB primitive matrix contains only one s and three p magnetic blocks. For the
+H 1s occupied state, every d perturbation generates a d first-order
+wavefunction, so its overlap with all current s/p primitives is exactly zero.
+
+After the fixed DZP core is removed, the s, p, and d channels carry
+`0.088949`, `0.609943`, and `0.301108` of the weighted residual norm. The joint
+`4s3p` within-channel losses are `0.059163`, `0.036717`, and `1.0`, giving the
+observed total `0.328766`. A rank-92 pseudoinverse over the entire current s/p
+primitive space gives a best possible total loss of `0.301781`. Therefore the
+joint `4s3p` basis captures 96.14% of all response that the current s/p
+primitive space can represent, and 91.59% of its remaining loss is the absent
+d channel.
+
+The revised expansion gate is:
+
+1. regenerate the atomic target with complete `l=2`, `m=-2,...,2` primitive
+   blocks while retaining the same Delta-ST responses and fixed DZP core;
+2. diagonalize the weighted residual covariance independently in each angular
+   channel and choose radial shell counts by cumulative captured weight;
+3. optimize those response shells only with the joint DFT+dpsi objective;
+4. require the atomic ST residual and DFT/dpsi gates to pass before running one
+   new all-band H2/H held-out calculation;
+5. keep a fixed-ABS cross test so wavefunction and auxiliary-basis changes are
+   not conflated.
+
+The missing d channel is a proven training-space floor, but it is not assigned
+directly to the full `1.86 kcal/mol` H2 binding-energy gap because the RPA
+functional is nonlinear and atomic/molecular errors can cancel.
 
 ## 8. Commit Boundaries
 
