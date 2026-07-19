@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-import types
 import unittest
 from unittest import mock
 
@@ -14,22 +13,9 @@ import torch
 from common import info
 
 
-class _AddictDict(dict):
-    __getattr__ = dict.__getitem__
-    __setattr__ = dict.__setitem__
-
-    def __missing__(self, key):
-        value = type(self)()
-        self[key] = value
-        return value
-
-
-if "addict" not in sys.modules:
-    sys.modules["addict"] = types.SimpleNamespace(Dict=_AddictDict)
-
-
 from IO.func_C import read_C_init
 from IO.read_json import read_json
+from attribute_dict import AttributeDict
 import main as siab_main
 import orbital as siab_orbital
 from opt_orbital_converge import Opt_Orbital_Converge
@@ -59,6 +45,16 @@ DZP_FREEZE_SPECS = [
     {"element": "H", "l": 0, "zeta": 2},
     {"element": "H", "l": 1, "zeta": 1},
 ]
+
+
+class AttributeDictTest(unittest.TestCase):
+    def test_nested_key_and_attribute_access_share_storage(self):
+        value = AttributeDict()
+        value["H"].Nu = [3, 2]
+        value.H.Ne = 25
+
+        self.assertEqual(value.H.Nu, [3, 2])
+        self.assertEqual(value["H"]["Ne"], 25)
 
 
 def _minimal_input():

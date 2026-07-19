@@ -1,11 +1,11 @@
-import addict
+from attribute_dict import AttributeDict
 import util
 import itertools
 
 def change_info(info_old, weight_old, flag_same_band):
 	info_stru = [None] * info_old.Nst
 	for ist in range(len(info_stru)):
-		info_stru[ist] = addict.Dict()
+		info_stru[ist] = AttributeDict()
 		info_stru[ist].Na = info_old.Na[ist]
 		info_stru[ist].Nl = info_old.Nl[ist]
 	for ist,weight in enumerate(weight_old):
@@ -24,7 +24,7 @@ def change_info(info_old, weight_old, flag_same_band):
 			return 0
 		info_stru[ist].Nb_true = get_Nb_true()
 
-	info_element = addict.Dict()
+	info_element = AttributeDict()
 	for it_index,it in enumerate(info_old.Nt_all):
 		info_element[it].index = it_index
 	for it,Nu in info_old.Nu.items():
@@ -99,7 +99,7 @@ def get_info_max(info_stru, info_element):
 	info_max = [None] * len(info_stru)
 	for ist in range(len(info_stru)):
 		Nt = info_stru[ist].Na.keys()
-		info_max[ist] = addict.Dict()
+		info_max[ist] = AttributeDict()
 		info_max[ist].Nt = len(Nt)
 		info_max[ist].Na = max((info_stru[ist].Na[it] for it in Nt))
 		info_max[ist].Nl = max([info_element[it].Nl for it in Nt])

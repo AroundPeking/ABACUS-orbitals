@@ -9,7 +9,7 @@ import IO.print_orbital
 import IO.cal_weight
 import IO.change_info
 import orbital
-import addict
+from attribute_dict import AttributeDict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from optimization_loss import normalize_loss_config
@@ -89,7 +89,7 @@ def _sternheimer_info_element(data, info_true):
 			f"target={sorted(data_elements)!r}, input={sorted(elements)!r}"
 		)
 
-	info_element = addict.Dict()
+	info_element = AttributeDict()
 	for element_index, element in enumerate(elements):
 		nu = list(info_true.Nu[element])
 		if not nu or any(type(value) is not int or value <= 0 for value in nu):
