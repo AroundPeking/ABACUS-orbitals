@@ -22,6 +22,19 @@ class SternheimerLossResult:
     max_condition: float
 
 
+@dataclass(frozen=True)
+class RadialResidualSpectrum:
+    element: str
+    atom_index: int
+    l: int
+    magnetic_channels: tuple
+    numerical_rank: int
+    eigenvalues: torch.Tensor
+    cumulative_capture: torch.Tensor
+    coefficients: torch.Tensor
+    overlap_relative_deviation: float
+
+
 def _orbital_label(column):
     return (
         f"{column.element}/{column.atom_index}/{column.l}/{column.m}/"
@@ -187,6 +200,199 @@ def _clamp_roundoff_negative(values, local_scale, name, detail):
             f"tolerance {float(tolerance[row].item()):.6g}); {detail}"
         )
     return torch.clamp(values, min=0.0)
+
+
+def radial_residual_spectrum(
+    data,
+    c0,
+    fixed_orbitals,
+    element,
+    atom_index,
+    l,
+    relative_rank_tolerance=1.0e-10,
+    magnetic_overlap_tolerance=1.0e-8,
+    condition_limit=1.0e12,
+):
+    """Return the optimal shared radial response spectrum for one l channel."""
+    for name, value in (
+        ("relative_rank_tolerance", relative_rank_tolerance),
+        ("magnetic_overlap_tolerance", magnetic_overlap_tolerance),
+    ):
+        try:
+            value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be finite and positive") from exc
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and positive")
+        if name == "relative_rank_tolerance":
+            relative_rank_tolerance = value
+        else:
+            magnetic_overlap_tolerance = value
+
+    assembled, labels = assemble_orbital_coefficients(data, c0)
+    fixed_orbitals = tuple(fixed_orbitals)
+    if not fixed_orbitals:
+        raise ValueError("fixed orbital space must be nonempty")
+    if len(set(fixed_orbitals)) != len(fixed_orbitals):
+        raise ValueError("a fixed orbital was requested more than once")
+    for orbital in fixed_orbitals:
+        if not isinstance(orbital, OrbitalColumn):
+            raise ValueError("fixed orbitals must be OrbitalColumn values")
+        if labels.count(orbital) != 1:
+            raise ValueError(
+                f"fixed orbital {_orbital_label(orbital)} not found exactly once"
+            )
+    fixed_set = set(fixed_orbitals)
+    fixed_indices = tuple(
+        index for index, label in enumerate(labels) if label in fixed_set
+    )
+    a0 = assembled[:, fixed_indices]
+    overlap = data.overlap
+    s00 = a0.conj().transpose(0, 1) @ overlap @ a0
+    s00_cholesky, _ = _factor_hermitian(
+        s00,
+        condition_limit,
+        "fixed overlap",
+        "fixed overlap is not positive definite",
+    )
+    q0 = data.q @ a0
+
+    blocks = sorted(
+        (
+            block
+            for block in data.blocks
+            if block.element == element
+            and block.atom_index == atom_index
+            and block.l == l
+        ),
+        key=lambda block: block.m,
+    )
+    expected_m = tuple(range(-l, l + 1))
+    actual_m = tuple(block.m for block in blocks)
+    if actual_m != expected_m:
+        raise ValueError(
+            "incomplete PrimitiveBlock m group for "
+            f"{element}/atom{atom_index}/l{l}: "
+            f"expected {expected_m}, got {actual_m}"
+        )
+    primitive_counts = {block.n_primitive for block in blocks}
+    if len(primitive_counts) != 1:
+        raise ValueError(
+            "magnetic PrimitiveBlock channels must share one radial count"
+        )
+
+    projected_overlaps = []
+    covariance = None
+    weight = data.effective_weight.to(torch.complex128).unsqueeze(1)
+    for block in blocks:
+        block_slice = slice(block.offset, block.offset + block.n_primitive)
+        s0m = a0.conj().transpose(0, 1) @ overlap[:, block_slice]
+        s00_inverse_s0m = torch.cholesky_solve(s0m, s00_cholesky)
+        qbar = data.q[:, block_slice] - q0 @ s00_inverse_s0m
+        sbar = (
+            overlap[block_slice, block_slice]
+            - s0m.conj().transpose(0, 1) @ s00_inverse_s0m
+        )
+        sbar = (sbar + sbar.conj().transpose(0, 1)) / 2.0
+        imaginary_scale = max(float(torch.linalg.norm(sbar.real).item()), 1.0)
+        if (
+            float(torch.linalg.norm(sbar.imag).item())
+            > 1.0e-10 * imaginary_scale
+        ):
+            raise RuntimeError(
+                "projected primitive overlap has a material imaginary part"
+            )
+        projected_overlaps.append(sbar.real)
+
+        block_covariance = qbar.conj().transpose(0, 1) @ (weight * qbar)
+        covariance = (
+            block_covariance
+            if covariance is None
+            else covariance + block_covariance
+        )
+
+    average_overlap = sum(projected_overlaps) / len(projected_overlaps)
+    overlap_scale = max(float(torch.linalg.norm(average_overlap).item()), 1.0)
+    overlap_relative_deviation = max(
+        float(torch.linalg.norm(value - average_overlap).item()) / overlap_scale
+        for value in projected_overlaps
+    )
+    if overlap_relative_deviation > magnetic_overlap_tolerance:
+        raise RuntimeError(
+            "magnetic-channel projected overlaps disagree: "
+            f"relative deviation {overlap_relative_deviation:.6g} exceeds "
+            f"{magnetic_overlap_tolerance:.6g}"
+        )
+
+    average_overlap = (average_overlap + average_overlap.transpose(0, 1)) / 2.0
+    overlap_eigenvalues, overlap_eigenvectors = torch.linalg.eigh(
+        average_overlap
+    )
+    largest_overlap = float(torch.max(overlap_eigenvalues).item())
+    if not math.isfinite(largest_overlap) or largest_overlap <= 0.0:
+        raise RuntimeError("projected primitive overlap has no positive modes")
+    rank_cutoff = relative_rank_tolerance * largest_overlap
+    if float(torch.min(overlap_eigenvalues).item()) < -rank_cutoff:
+        raise RuntimeError("projected primitive overlap is materially indefinite")
+    keep = overlap_eigenvalues > rank_cutoff
+    numerical_rank = int(torch.count_nonzero(keep).item())
+    if numerical_rank == 0:
+        raise RuntimeError("projected primitive overlap has numerical rank zero")
+    whitener = overlap_eigenvectors[:, keep] / torch.sqrt(
+        overlap_eigenvalues[keep]
+    ).unsqueeze(0)
+
+    covariance = (covariance + covariance.conj().transpose(0, 1)) / 2.0
+    real_covariance = covariance.real
+    whitened_covariance = (
+        whitener.transpose(0, 1) @ real_covariance @ whitener
+    )
+    whitened_covariance = (
+        whitened_covariance + whitened_covariance.transpose(0, 1)
+    ) / 2.0
+    eigenvalues, eigenvectors = torch.linalg.eigh(whitened_covariance)
+    order = torch.argsort(eigenvalues, descending=True)
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+    eigenvalue_scale = max(float(torch.max(torch.abs(eigenvalues)).item()), 1.0)
+    if float(torch.min(eigenvalues).item()) < -1.0e-10 * eigenvalue_scale:
+        raise RuntimeError("radial residual covariance is materially indefinite")
+    eigenvalues = torch.clamp(eigenvalues, min=0.0)
+    coefficients = whitener @ eigenvectors
+    total_capture = torch.sum(eigenvalues)
+    if bool(total_capture > 0.0):
+        cumulative_capture = torch.cumsum(eigenvalues, dim=0) / total_capture
+    else:
+        cumulative_capture = torch.zeros_like(eigenvalues)
+
+    return RadialResidualSpectrum(
+        element=element,
+        atom_index=atom_index,
+        l=l,
+        magnetic_channels=actual_m,
+        numerical_rank=numerical_rank,
+        eigenvalues=eigenvalues,
+        cumulative_capture=cumulative_capture,
+        coefficients=coefficients,
+        overlap_relative_deviation=overlap_relative_deviation,
+    )
+
+
+def shell_count_for_capture(spectrum, threshold):
+    if not isinstance(spectrum, RadialResidualSpectrum):
+        raise TypeError("spectrum must be a RadialResidualSpectrum")
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("threshold must satisfy 0 < threshold <= 1") from exc
+    if not math.isfinite(threshold) or not 0.0 < threshold <= 1.0:
+        raise ValueError("threshold must satisfy 0 < threshold <= 1")
+    if not bool(torch.any(spectrum.eigenvalues > 0.0)):
+        raise RuntimeError("radial residual spectrum has zero captured weight")
+    for index, value in enumerate(spectrum.cumulative_capture):
+        if float(value.item()) >= threshold:
+            return index + 1
+    return spectrum.numerical_rank
 
 
 class SternheimerSpillage:

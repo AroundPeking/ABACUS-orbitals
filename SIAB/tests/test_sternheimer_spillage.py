@@ -8,6 +8,8 @@ from sternheimer_spillage import (
     OrbitalColumn,
     SternheimerSpillage,
     assemble_orbital_coefficients,
+    radial_residual_spectrum,
+    shell_count_for_capture,
 )
 
 
@@ -75,6 +77,36 @@ def h_s_block(n_primitive):
         n_primitive=n_primitive,
         offset=0,
     )
+
+
+def make_s_and_d_spectrum_data(d_eigenvalues):
+    d_eigenvalues = torch.as_tensor(d_eigenvalues, dtype=torch.float64)
+    n_primitive = d_eigenvalues.numel()
+    blocks = [h_s_block(1)]
+    for magnetic_offset, m in enumerate(range(-2, 3)):
+        blocks.append(
+            PrimitiveBlock(
+                "H",
+                0,
+                2,
+                m,
+                n_primitive,
+                1 + magnetic_offset * n_primitive,
+            )
+        )
+
+    q = torch.zeros(
+        (5 * n_primitive, 1 + 5 * n_primitive),
+        dtype=torch.complex128,
+    )
+    row = 0
+    for block in blocks[1:]:
+        for radial_index, eigenvalue in enumerate(d_eigenvalues):
+            q[row, block.offset + radial_index] = torch.sqrt(
+                eigenvalue / 5.0
+            )
+            row += 1
+    return make_sternheimer_data(blocks, q, norm=torch.ones(q.shape[0]))
 
 
 class SternheimerSpillageTest(unittest.TestCase):
@@ -522,6 +554,87 @@ class SternheimerSpillageTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate PrimitiveBlock key"):
             assemble_orbital_coefficients(data, c)
+
+    def test_radial_residual_spectrum_recovers_shared_d_eigenvalues(self):
+        data = make_s_and_d_spectrum_data([9.0, 4.0, 1.0])
+        c = {
+            "H": [
+                torch.tensor([[1.0]], dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.tensor([[1.0], [0.0], [0.0]], dtype=torch.float64),
+            ]
+        }
+
+        spectrum = radial_residual_spectrum(
+            data,
+            c,
+            [self.fixed_h_1s],
+            element="H",
+            atom_index=0,
+            l=2,
+        )
+
+        self.assertEqual(spectrum.magnetic_channels, (-2, -1, 0, 1, 2))
+        self.assertEqual(spectrum.numerical_rank, 3)
+        torch.testing.assert_close(
+            spectrum.eigenvalues,
+            torch.tensor([9.0, 4.0, 1.0], dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-13,
+        )
+        torch.testing.assert_close(
+            spectrum.cumulative_capture,
+            torch.tensor(
+                [9.0 / 14.0, 13.0 / 14.0, 1.0], dtype=torch.float64
+            ),
+            rtol=0.0,
+            atol=1.0e-13,
+        )
+        self.assertEqual(shell_count_for_capture(spectrum, 0.90), 2)
+        self.assertEqual(shell_count_for_capture(spectrum, 0.95), 3)
+        torch.testing.assert_close(
+            spectrum.coefficients.transpose(0, 1)
+            @ spectrum.coefficients,
+            torch.eye(3, dtype=torch.float64),
+            rtol=0.0,
+            atol=1.0e-13,
+        )
+
+    def test_radial_residual_spectrum_rejects_m_dependent_overlap(self):
+        data = make_s_and_d_spectrum_data([2.0, 1.0])
+        overlap = data.overlap.clone()
+        first_d = data.blocks[1]
+        first_slice = slice(
+            first_d.offset, first_d.offset + first_d.n_primitive
+        )
+        overlap[first_slice, first_slice] *= 2.0
+        data = make_sternheimer_data(
+            data.blocks,
+            data.q,
+            norm=data.norm,
+            overlap=overlap,
+        )
+        c = {
+            "H": [
+                torch.tensor([[1.0]], dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+            ]
+        }
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "magnetic-channel projected overlaps disagree",
+        ):
+            radial_residual_spectrum(
+                data,
+                c,
+                [self.fixed_h_1s],
+                element="H",
+                atom_index=0,
+                l=2,
+                magnetic_overlap_tolerance=1.0e-12,
+            )
 
 
 if __name__ == "__main__":

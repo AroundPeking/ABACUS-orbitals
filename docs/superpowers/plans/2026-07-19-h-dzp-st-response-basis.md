@@ -252,17 +252,27 @@ primitive blocks. The joint `4s3p` loss is 0.328766; the complete current s/p
 primitive space can reach only 0.301781. Missing d response contributes
 0.301108 of the total loss.
 
-- [ ] **Step 2: Add complete d primitive blocks to the producer contract**
+- [x] **Step 2: Add complete d primitive blocks to the producer contract**
 
 Generate 25 radial primitives for every `l=2`, `m=-2,-1,0,1,2` block without
 adding those functions to the fixed DFT core. Reject incomplete magnetic
 multiplets in both writer and reader tests.
+
+ABACUS commit `efc128f33531` implements the independent output cutoff. RED job
+`21315686` and GREEN jobs `21315747`/`21315765` verify primitive generation and
+INPUT parsing. The immutable Release build is from job `21315778`; formal H
+target job `21315811` has confirmed 225 primitive columns and is still running.
 
 - [ ] **Step 3: Select d shell count from the atomic residual spectrum**
 
 Whiten each angular block with its primitive overlap, diagonalize the weighted
 residual covariance, and choose `n_s,n_p,n_d` from a declared cumulative
 capture threshold. Do not use the H2 binding energy to select the shell count.
+
+The overlap-whitened shared-radial eigensolver and threshold selector are
+implemented and passed 107/107 SIAB tests in job `21315899`. This checklist
+item remains open until the completed 225-column atomic target is analyzed and
+the numerical `n_d` is recorded.
 
 - [ ] **Step 4: Optimize only with the joint DFT+dpsi path**
 

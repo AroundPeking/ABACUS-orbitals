@@ -358,3 +358,46 @@ the full `1.86 kcal/mol` binding-energy gap: RPA energy is nonlinear and H/H2
 errors can cancel. It identifies a hard, quantified training-space floor that
 must be removed before auxiliary-basis thresholds, the 50-Ry atomic target
 grid, or smaller residual effects can be interpreted.
+
+## d-channel implementation status
+
+ABACUS commit `efc128f335319114dad6f6e35bd07ceaa8bd15af` adds the output-only
+input `sternheimer_siab_lmax`. Setting it to `2` leaves the loaded H `3s2p`
+LCAO space and Delta-ST fixed subspace unchanged, but exports one s, three p,
+and five d primitive blocks. The TDD RED job `21315686` failed because the
+input and primitive parameters did not yet expose `lmax`; GREEN job `21315747`
+passed all seven SIAB producer tests, and input-parser job `21315765` passed.
+Release build job `21315778` staged immutable executable
+`abacus-efc128f33531` with SHA256
+`96ffed27de8256214f6d32ad545925e78ab7f40adae19310fb7041399642cdae`.
+
+The exact 16-frequency, 50-Ry H producer was resubmitted as normal-partition
+job `21315811`. All old physical inputs have identical hashes; its INPUT
+diff contains only the suffix and `sternheimer_siab_lmax 2`. Its live progress
+record has already confirmed `nprimitive=225`, i.e. nine complete 25-column
+blocks. The final target hash and residual spectrum remain pending until that
+job completes.
+
+The joint objective also needs d-resolved DFT/dpsi matrices; reusing the old
+`lmaxmax 1` H3 files would leave d orbitals controlled only by ST. Normal array
+job `21315842` regenerated the same 0.7, 0.9, and 1.3 Angstrom H3 references
+with only `lmaxmax` changed to 2. The `(origin,dpsi)` matrix SHA256 pairs are:
+
+```text
+0.7 A  82419e037258253c2bcca4ba9e74e738d717964ca905d22c96f3152d66f44988
+       6c192a8aa7390d3cdd10a31baf3d833ea91c8113853f3eb4297bf1638966849e
+0.9 A  e71cdc61f19d253e50d86fe2125f4a1e17e4981d57458254c96e656059f7d804
+       051f3ccd888e7913393d2d6fdca9c9a33e2cc2dfbc773e814bd91a101d65ee76
+1.3 A  a1bacb3f1ff59317de82c3e82191cda107e30aba040988d088bfb9a6c86bf670
+       22f51f9a4d8fdd22ac1c3308a1e917a2e4d7b33e853930231763a0d0694831e4
+```
+
+The optimizer now computes a radial residual spectrum after projecting the
+fixed DZP core. For each `l`, it checks that all `m` channels have the same
+projected primitive overlap, sums their weighted response covariances, whitens
+by the numerical-rank overlap, and diagonalizes the resulting real symmetric
+matrix. The returned eigenvectors are valid real SIAB radial coefficients;
+the cumulative eigenvalues determine the shell count without consulting H2.
+Focused GREEN job `21315892` passed both analytic spectrum tests, and full
+normal-node regression job `21315899` passed all 107 SIAB tests. The real d
+shell count is intentionally not declared before job `21315811` finishes.
