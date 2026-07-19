@@ -354,9 +354,9 @@ matrices into the pure Sternheimer run.
 - Use checked-in: `Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/INPUT`
 - Create in the campaign result directory: `baseline_manifest.json`
 
-- [ ] **Step 1: Recreate the three historical structures**
+- [x] **Step 1: Recreate the three historical structures**
 
-Use H dimers at the checked-in bond lengths `0.7`, `0.9`, and `1.3` Angstrom (the original `SIAB.py` emits `Cartesian_angstrom`), H Dojo-NC-SR PP, `Rcut=8 bohr`, spherical-Bessel `Ecut=100 Ry`, `bessel_nao_smooth=true`, `bessel_nao_sigma=0.1 bohr`, and the same ABACUS origin/dpsi producer settings. Submit only to `normal`.
+Use the equilateral H3 trimers at the checked-in side lengths `0.7`, `0.9`, and `1.3` Angstrom. The original `H_TZDP/info/10/SIAB_INPUT` explicitly defines `STRU2 trimer` and level 3 uses `STRU2`; the previous word "dimers" here was incorrect. Use `Cartesian_angstrom`, H Dojo-NC-SR PP, `Rcut=8 bohr`, spherical-Bessel `Ecut=100 Ry`, `bessel_nao_smooth=true`, `bessel_nao_sigma=0.1 bohr`, and the same ABACUS origin/dpsi producer settings. Submit only to `normal`.
 
 - [ ] **Step 2: Verify producer integrity before SIAB**
 

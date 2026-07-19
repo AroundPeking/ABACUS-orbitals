@@ -39,6 +39,7 @@ from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "example_H_sternheimer"
+LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 REAL_H_TZDP = (
     ROOT.parent
     / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt"
@@ -556,6 +557,7 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("linear", constrained["file_list"])
         self.assertEqual(st_only["loss"]["mode"], "st_only")
         self.assertEqual(constrained["loss"]["mode"], "st_constrained")
+
         self.assertEqual(joint["loss"]["mode"], "st_dpsi_joint")
         self.assertEqual(joint["loss"]["joint_dpsi_weight"], 0.1)
         self.assertEqual(st_only["seed"], SEED)
@@ -614,6 +616,44 @@ class ExampleInputTest(unittest.TestCase):
             st_only["loss"], {"mode": "st_only", **LOSS_DEFAULTS}
         )
         self.assertEqual(constrained["loss"]["mode"], "st_constrained")
+
+    def test_legacy_dpsi_producer_matches_original_h3_contract(self):
+        cases = {
+            "0.7": ("0.606221", "0.350000"),
+            "0.9": ("0.779427", "0.450000"),
+            "1.3": ("1.125839", "0.650000"),
+        }
+        for bond, (triangle_y, triangle_z) in cases.items():
+            with self.subTest(bond=bond):
+                case = LEGACY_PRODUCER / "cases" / f"H-STRU2-8-{bond}"
+                input_text = (case / "INPUT").read_text()
+                stru_text = (case / "STRU").read_text()
+                inputw_text = (case / "INPUTw").read_text()
+
+                self.assertIn(f"suffix H-STRU2-8-{bond}", input_text)
+                self.assertIn("nspin 1", input_text)
+                self.assertIn("nbands 10", input_text)
+                self.assertIn("ecutwfc 100", input_text)
+                self.assertIn("bessel_nao_ecut 100", input_text)
+                self.assertIn("bessel_nao_rcut 8", input_text)
+                self.assertIn("bessel_nao_smooth 1", input_text)
+                self.assertIn("bessel_nao_sigma 0.1", input_text)
+                self.assertIn("out_spillage 2", input_text)
+                self.assertIn(
+                    f"spillage_outdir OUT.H-STRU2-8-{bond}", input_text
+                )
+                self.assertIn("Cartesian_angstrom", stru_text)
+                self.assertIn(f"0.000000 0.000000 {bond}", stru_text)
+                self.assertIn(
+                    f"0.000000 {triangle_y} {triangle_z}", stru_text
+                )
+                self.assertIn("out_spillage 2", inputw_text)
+                self.assertIn(
+                    f"spillage_outdir OUT.H-STRU2-8-{bond}", inputw_text
+                )
+
+        self.assertTrue((LEGACY_PRODUCER / "KPT").is_file())
+        self.assertTrue((LEGACY_PRODUCER / "run_abacus.slurm").is_file())
 
 
 class AppendedResponseShellTest(unittest.TestCase):

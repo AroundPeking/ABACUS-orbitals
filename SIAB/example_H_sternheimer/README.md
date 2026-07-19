@@ -6,7 +6,7 @@ This directory defines the first H-TZDP Sternheimer-supervised SIAB experiment. 
 
 - The H atom Sternheimer matrix is the only new supervision.
 - `st_only` reads no DFT/dpsi matrices; it depends only on the H-atom Sternheimer matrix and the checked-in TZDP coefficients.
-- `st_constrained` additionally reuses the historical H dimer/trimer DFT and dpsi matrices at 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
+- `st_constrained` additionally reuses the historical equilateral H3-trimer DFT and dpsi matrices at side lengths 0.7, 0.9, and 1.3 Angstrom. The original `SIAB.py` writes these values under `Cartesian_angstrom`.
 - `st_dpsi_joint` uses the same training data, but keeps the normalized dpsi
   loss active throughout optimization instead of using dpsi only after a hard
   threshold is crossed.
