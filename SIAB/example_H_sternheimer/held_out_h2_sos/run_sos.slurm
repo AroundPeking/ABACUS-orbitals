@@ -31,6 +31,7 @@ orbital="$script_dir/H_gga_8au_100Ry_3s2p.orb"
 pseudo="$script_dir/H_ONCV_PBE-1.0.upf"
 abacus=/public/home/ghj/app/src/abacus-sternheimer-siab-task4-80a606f57a26/build-task4-o3-debug-info/abacus-80a606f57a26
 librpa=/public/home/ghj/app/src/LibRPA-sternheimer-rpa-20260707/build-sternheimer-fast/chi0_main.exe
+expected_orbital_sha256=${EXPECTED_ORBITAL_SHA256:-30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7}
 
 check_hash() {
   local expected=$1
@@ -39,7 +40,7 @@ check_hash() {
   test "$(sha256sum "$path" | awk '{print $1}')" = "$expected"
 }
 
-check_hash 30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7 "$orbital"
+check_hash "$expected_orbital_sha256" "$orbital"
 check_hash 3f5deaaf57ff09d87da2c2c186eb1654d174fe385c9edc265036b3c8869286ef "$pseudo"
 check_hash 2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d "$abacus"
 check_hash defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c "$librpa"
@@ -61,6 +62,7 @@ echo "date_start=$(date +%F_%T)"
 echo "case=$case_name"
 echo "nodes=${SLURM_JOB_NODELIST:?}"
 echo "omp_threads=$OMP_NUM_THREADS"
+echo "expected_orbital_sha256=$expected_orbital_sha256"
 sha256sum INPUT STRU KPT librpa.in H_gga_8au_100Ry_3s2p.orb H_ONCV_PBE-1.0.upf
 
 /usr/bin/time -v mpirun -np 1 -ppn 1 "$abacus" \

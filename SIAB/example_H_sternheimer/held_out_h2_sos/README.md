@@ -16,4 +16,6 @@ Stage the following generated/provenance-controlled files beside this README:
 Submit `run_sos.slurm` from a clean campaign copy. Its two array tasks each use
 one full `normal` node and run ABACUS followed by LibRPA. The script refuses to
 reuse existing outputs and verifies all immutable executable/input hashes.
-
+The joint orbital hash is the default. A same-producer initial-TZDP baseline
+may override it explicitly with Slurm's
+`EXPECTED_ORBITAL_SHA256` export; use a separate clean campaign directory.

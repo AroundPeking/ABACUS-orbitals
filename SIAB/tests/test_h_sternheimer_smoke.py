@@ -696,6 +696,7 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("#SBATCH --cpus-per-task=30", run_script)
         self.assertIn("#SBATCH --mem=110610M", run_script)
         self.assertIn("#SBATCH --array=0-1", run_script)
+        self.assertIn("EXPECTED_ORBITAL_SHA256", run_script)
         self.assertIn(
             "30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7",
             run_script,
