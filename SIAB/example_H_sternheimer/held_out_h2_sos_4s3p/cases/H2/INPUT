@@ -1,0 +1,26 @@
+INPUT_PARAMETERS
+suffix                  H2_SIAB_JOINT_4S3P_BOX20A_PCA1e4_RMESH5
+calculation             scf
+ntype                   1
+nbands                  26
+nelec                   2
+basis_type              lcao
+ecutwfc                 100
+ks_solver               genelpa
+dft_functional          pbe
+symmetry                0
+pseudo_dir              ./
+orbital_dir             ./
+scf_thr                 1e-8
+scf_nmax                100
+mixing_type             broyden
+mixing_beta             0.5
+smearing_method         fixed
+smearing_sigma          1e-8
+out_chg                 0
+out_wfc_lcao            0
+rpa                     1
+out_librpa_reader_version 1
+exx_pca_threshold       1e-4
+exx_singularity_correction massidda
+rpa_ccp_rmesh_times     5

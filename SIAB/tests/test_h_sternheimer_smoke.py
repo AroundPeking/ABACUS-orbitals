@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "example_H_sternheimer"
 LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 HELD_OUT_SOS = EXAMPLE / "held_out_h2_sos"
+HELD_OUT_SOS_4S3P = EXAMPLE / "held_out_h2_sos_4s3p"
 REAL_H_TZDP = (
     ROOT.parent
     / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt"
@@ -712,6 +713,32 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("EXPECTED_ORBITAL_SHA256", run_script)
         self.assertIn(
             "30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7",
+            run_script,
+        )
+        self.assertIn("libRPA finished successfully", run_script)
+
+    def test_expanded_held_out_uses_every_4s3p_band(self):
+        for case_name, nbands in (("H2", 26), ("H", 13)):
+            with self.subTest(case=case_name):
+                case = HELD_OUT_SOS_4S3P / "cases" / case_name
+                input_text = (case / "INPUT").read_text()
+                stru_text = (case / "STRU").read_text()
+                librpa_text = (case / "librpa.in").read_text()
+                self.assertIn(f"nbands                  {nbands}", input_text)
+                self.assertIn("ecutwfc                 100", input_text)
+                self.assertIn("exx_pca_threshold       1e-4", input_text)
+                self.assertIn("rpa_ccp_rmesh_times     5", input_text)
+                self.assertIn("H_gga_8au_100Ry_4s3p.orb", stru_text)
+                self.assertIn("nfreq = 16", librpa_text)
+                self.assertIn(
+                    "prefix_coul_full = v1_coulomb_full_iq_", librpa_text
+                )
+
+        run_script = (HELD_OUT_SOS_4S3P / "run_sos.slurm").read_text()
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --array=0-1", run_script)
+        self.assertIn(
+            "b394bb7329754e38341050ca4beb3b242b78e4be50c418b8764c98226bc8f033",
             run_script,
         )
         self.assertIn("libRPA finished successfully", run_script)
