@@ -431,3 +431,25 @@ and the previous joint `4s3p` hash. The job first writes the spectrum and
 initial d columns, then runs `st_dpsi_joint` and verifies the fixed DZP columns
 bitwise. It deliberately does not submit H2; the atomic ST/DFT/dpsi result must
 be inspected first.
+
+The 225-column target job `21315811` completed successfully in `03:52:39`.
+Its `sternheimer_matrix.dat` is 9,064,244 bytes with SHA256
+`866ac27a7b0456f332f40048e52e8370a27c85c12b566fdb8189757ae48c2c1b`.
+The first dependent job `21316263` stopped before optimization because the
+finite uniform grid splits the five d-channel projected overlap blocks by
+`3.6776163e-5`, above the original spherical-consistency tolerance `1e-8`.
+
+Diagnostic job `21317474` found zero s deviation, p deviation `4.61e-14`, d
+cross-mixing only `6.15e-15`, and d shell counts `2,2,3,5` at cumulative
+capture `90%,95%,99%,99.9%`. The discrepancy is therefore a small diagonal
+finite-grid anisotropy rather than missing or mixed magnetic channels. Commit
+`829bac21` exposes and records a `1e-4` grid tolerance while retaining the
+large-anisotropy rejection; job `21317505` passed 112/112 tests.
+
+Production rerun `21317536` selected `Nu.H=[4,3,3]` and is currently running
+the real joint optimization. Its initial-coefficient and spectrum JSON hashes
+are `1006c7157994a2b65a3a9e60f684e8cee39058a97a954ef8f09c80accd25da42`
+and `05b8011fadb2509a076b49474fc9aa432be22b805e4567c521f1db4b780d2da5`.
+The printed joint objective decreased from `0.0839024` after the first Adam
+step to `0.0378858` at step 100. These are intermediate values, not the final
+atomic gate.

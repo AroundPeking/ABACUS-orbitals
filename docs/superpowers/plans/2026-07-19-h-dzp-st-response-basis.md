@@ -303,6 +303,20 @@ joint optimization from source commit `d37e5570`. It stops before H2 so the
 atomic gates can be reviewed without leaking the held-out result into basis
 selection.
 
+Target job `21315811` completed in `03:52:39`; the 9,064,244-byte matrix hash
+is `866ac27a7b0456f332f40048e52e8370a27c85c12b566fdb8189757ae48c2c1b`.
+The dependent preparation initially failed its `1e-8` magnetic-overlap gate.
+Audit `21317474` localized the deviation to diagonal d blocks
+(`3.6776163e-5`) with cross-mixing `6.15e-15`; s/p remain rotationally
+consistent to numerical precision. The predeclared d counts are `2,2,3,5` at
+`90%,95%,99%,99.9%`, so the production choice is three d shells.
+
+Commit `829bac21` makes the measured finite-grid tolerance `1e-4` explicit in
+the spectrum JSON and keeps the material-anisotropy rejection. Regression job
+`21317505` passed 112/112. Rerun `21317536` selected `Nu.H=[4,3,3]`; its joint
+objective has fallen from `0.0839024` after the first Adam update to
+`0.0378858` at step 100. Final atomic losses remain pending.
+
 - [ ] **Step 5: Re-run the held-out gate once**
 
 After the atomic ST and DFT/dpsi gates pass, run all H2/H bands with one common
