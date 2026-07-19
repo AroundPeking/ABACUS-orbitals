@@ -3,7 +3,6 @@ suffix H-STRU2-8-1.3
 stru_file STRU
 pseudo_dir ./
 kpoint_file KPT
-wannier_card INPUTw
 calculation scf
 ks_solver dav
 nspin 1

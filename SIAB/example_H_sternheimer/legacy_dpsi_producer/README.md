@@ -8,8 +8,9 @@ not an H2 dimer, at side lengths 0.7, 0.9, and 1.3 Angstrom. It uses 10 bands,
 
 The ABACUS output contract is `out_spillage=2`. Each case must produce both
 `orb_matrix.0.dat` (zero-order wavefunctions) and `orb_matrix.1.dat` (the
-original SIAB dpsi reference). `INPUTw` retains the historical controls while
-`INPUT` also sets the current ABACUS parameters explicitly.
+original SIAB dpsi reference). Modern ABACUS reads these controls directly
+from `INPUT`; `INPUTw` is retained only as a historical record and is not
+passed through the removed `wannier_card` interface.
 
 Stage `Dojo-NC-SR/Pseudopotential/H.upf` as `H.upf` in this directory, then
 submit from a clean campaign copy:

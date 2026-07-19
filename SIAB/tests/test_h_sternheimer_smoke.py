@@ -638,6 +638,7 @@ class ExampleInputTest(unittest.TestCase):
                 self.assertIn("bessel_nao_rcut 8", input_text)
                 self.assertIn("bessel_nao_smooth 1", input_text)
                 self.assertIn("bessel_nao_sigma 0.1", input_text)
+                self.assertNotIn("wannier_card", input_text)
                 self.assertIn("out_spillage 2", input_text)
                 self.assertIn(
                     f"spillage_outdir OUT.H-STRU2-8-{bond}", input_text
