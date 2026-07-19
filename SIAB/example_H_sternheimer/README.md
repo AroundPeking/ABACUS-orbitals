@@ -68,10 +68,25 @@ Sternheimer condition-number limit; among accepted candidates this mode keeps
 the minimum total loss. The older `st_constrained` mode still keeps the minimum
 Sternheimer loss. Do not tune `lambda_dpsi` against the held-out H2 RPA result.
 
-The historical `orb_matrix.0.dat` and `orb_matrix.1.dat` producer files are not
-stored in this checkout. A physical joint campaign therefore requires those
-exact files to be restored or regenerated before this input can run; synthetic
-tests cover the objective, gradients, routing, and selection contract only.
+The historical `orb_matrix.0.dat` and `orb_matrix.1.dat` files were regenerated
+by df_dcu `normal` array job `21315279` using the producer in
+`legacy_dpsi_producer/`. The three tasks completed in 31, 33, and 39 seconds on
+30 MPI ranks each. The zero-order/dpsi SHA256 pairs for H3 side lengths
+0.7, 0.9, and 1.3 Angstrom are, respectively:
+
+```text
+0.7  7d02cc86c20bfb34bd1efa3ca8f1a09f70aec0fbf7079d954d15e1bacc875505
+     80712780be91a38e562d931028ff29053ceaa7ffbb6860ad0d0c5b96e059e015
+0.9  834741f0a3fe69fb9c53ac0c2264e2f1c4d1827e26bf87df66bd14e0271c0648
+     391e876b9fec0c3834a5a6cf5e479d58a53b4ca6e539b8f951bf8f76f9a875e7
+1.3  23326839e68011d8877677f5021da4be032641aa263abe0ab02d40a561f9edad
+     d00fbea91f2dddb346aee7fd5c406743a4f74c51bd49fb5b0009f2776f2622ab
+```
+
+All six files contain the Q, Sq, and V closing tags; the producer also verified
+the final SCF marker. These matrices are the fixed DFT/dpsi input for the first
+physical `st_dpsi_joint` campaign. They are generated results and remain
+outside Git.
 
 Both inputs use seed `20260718`. The optimizer must report that value for both NumPy and PyTorch. Compare the resulting named losses in `Spillage.dat` and `ORBITAL_RESULTS.txt`; do not use the held-out H2 RPA result for parameter fitting.
 

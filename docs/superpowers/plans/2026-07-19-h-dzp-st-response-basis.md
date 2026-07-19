@@ -202,8 +202,18 @@ Write `regularization_dpsi` to both `Spillage.dat` and
 `ORBITAL_RESULTS.txt`. Keep pure-ST validation strict by requiring this value to
 be zero in `st_only` campaigns.
 
-- [ ] **Step 4: Restore or regenerate the historical DFT/dpsi matrices**
+- [x] **Step 4: Restore or regenerate the historical DFT/dpsi matrices**
 
-The three `orb_matrix.0.dat` and three `orb_matrix.1.dat` files referenced by
-the H input are absent locally. Do not report a physical joint-optimization
-result until their producer provenance is recovered.
+df_dcu `normal` array job `21315279` regenerated the three
+`orb_matrix.0.dat` and three `orb_matrix.1.dat` files from equilateral H3 at
+0.7, 0.9, and 1.3 Angstrom. Every task used 30 MPI ranks, completed in under
+40 seconds, passed the SCF/tag checks, and recorded matrix hashes. The producer
+used immutable ABACUS commit `80a606f57a26`; the exact six hashes are recorded
+in `SIAB/example_H_sternheimer/README.md`.
+
+- [ ] **Step 5: Run the first physical fixed-DZP joint campaign**
+
+Evaluate the regenerated DFT/dpsi matrices and the canonical atomic ST target
+from the same initial TZDP coefficients. Then freeze `1s,2s,1p`, optimize only
+`3s,2p` with `lambda_dpsi=0.1`, and reject a result that violates either hard
+DFT/dpsi tolerance. Plot all radial functions before interpreting H2 RPA.
