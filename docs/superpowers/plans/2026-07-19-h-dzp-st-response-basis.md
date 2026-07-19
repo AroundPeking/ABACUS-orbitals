@@ -151,7 +151,7 @@ git commit -m "feat(siab): initialize appended ST response shells"
 - Modify: `SIAB/example_H_sternheimer/README.md`
 - Modify: `sternheimer_siab_project/main.tex` in the parent project only after the campaign artifacts exist.
 
-- [ ] **Step 1: Run the deterministic optimizer against the canonical target**
+- [x] **Step 1: Run the deterministic optimizer against the canonical target**
 
 Run outside the Git tree:
 
@@ -163,15 +163,15 @@ python3 SIAB/example_H_sternheimer/run_st_only.py \
 
 Expected: the summary reports all three DZP columns bitwise unchanged and a final ST loss no larger than the initial loss.
 
-- [ ] **Step 2: Plot and inspect every radial orbital**
+- [x] **Step 2: Plot and inspect every radial orbital**
 
 Plot initial and final `1s`, `2s`, `3s`, `1p`, and `2p` on identical axes. Confirm the fixed DZP curves overlap exactly and report, without hiding, whether the variable response orbitals remain oscillatory.
 
-- [ ] **Step 3: Record numerical results**
+- [x] **Step 3: Record numerical results**
 
 Record the target hash, code commit, initial/final loss, condition number, wall time, coefficient hashes, and radial comparison. Do not claim improved RPA physics before the held-out H2 SOS calculation is run.
 
-- [ ] **Step 4: Commit the campaign record**
+- [x] **Step 4: Commit the campaign record**
 
 Commit only the concise README/TeX record and plot; keep raw campaign output outside Git.
 

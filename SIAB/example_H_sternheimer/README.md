@@ -124,3 +124,32 @@ These numbers validate the implementation and training loop only. The optimized
 upper orbitals are visibly more oscillatory. Do not promote this basis or call
 it RPA-accurate until the held-out H2 LCAO-SOS/LibRPA calculation is compared
 with the initial TZDP, Sternheimer, and FHI-aims references.
+
+## Fixed-DZP response-space diagnostics
+
+The superseding local campaigns fix the complete `1s,2s,1p` DZP core. Both use
+the same canonical target, seed `20260718`, 3000 Adam steps, and 25 primitive
+coefficients per radial orbital.
+
+| basis shape | trainable orbitals | initial ST loss | best ST loss | ratio | condition | wall time | final response-orbital nodes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `3s2p` | `3s,2p` | 0.4428607140 | 0.3943529985 | 0.8904673322 | 5.1688 | 66.69 s | `3s:2, 2p:10` |
+| `4s3p` | `3s,4s,2p,3p` | 0.3777740028 | 0.3174804814 | 0.8403979073 | 11.5152 | 85.42 s | `3s:14, 4s:12, 2p:10, 3p:12` |
+
+All three fixed coefficient columns are bitwise identical to the input. Their
+exported 801-point radial functions have maximum absolute error no larger than
+`1.03e-14`. The different basis dimensions already have different initial
+losses, so their absolute losses are not a direct ranking of transferable basis
+quality.
+
+The `3s2p` result is under the parent project directory
+`../results/siab_h_dzp_core_20260719_st_only_5b47b248_conda310`; the expanded
+result is under
+`../results/siab_h_dzp_core_4s3p_20260719_5b47b248_conda310`. Their final
+coefficient SHA256 values are `88ffd5d3ad75b785efe0a0ef56c873e4b1c82ac022d489e63c9355d9a33c449e`
+and `7a0dc1c09c5e603fe6457780085e214de4f0c7637a2321d90b2fc47fef4fda65`,
+respectively. Both reduce the ST
+training loss, but `2p` develops ten nodes and every trainable `4s3p` response
+orbital is oscillatory. Expanding an ST-only space therefore does not address
+the shape problem. The next physical campaign must use `INPUT.st_dpsi_joint`
+after its referenced legacy DFT/dpsi matrices are restored or regenerated.
