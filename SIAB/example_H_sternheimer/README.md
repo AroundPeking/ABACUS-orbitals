@@ -416,3 +416,10 @@ Module-absence RED job `21316009` and GREEN job `21316014` cover the sign and
 channel-replacement contract. Joint-gradient job `21315966` additionally
 proves that an `lmax=2` d column receives both ST and DFT+dpsi gradients while
 the fixed `1s,2s,1p` columns remain bitwise unchanged.
+
+This was also checked against the generated H3 matrices rather than only the
+synthetic fixture. Normal job `21316098` read all three `lmaxmax=2` origin and
+dpsi pairs as `Nl=3`, `Ne=25`, `Nu=[4,3,1]`. At the previous joint `4s3p`
+coefficients plus one deterministic d column, the d-coefficient gradient norms
+are `1.0922811097e-6` for DFT origin and `1.9509412056e-5` for dpsi. Thus both
+real regularizers act directly on d before the ST term is added.

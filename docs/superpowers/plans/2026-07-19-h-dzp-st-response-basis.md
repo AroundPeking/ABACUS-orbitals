@@ -290,6 +290,12 @@ gradients, changes during a short `st_dpsi_joint` optimization, and leaves all
 three frozen DZP columns bitwise unchanged. The real optimization still waits
 for the completed target and the 99% spectrum-selected `n_d`.
 
+Normal job `21316098` repeated the gradient audit with the three real
+`lmaxmax=2` H3 matrix pairs. It parsed `Nl=3`, `Ne=25`, `Nu=[4,3,1]` and found
+nonzero d-column gradient norms `1.0922811097e-6` (DFT origin) and
+`1.9509412056e-5` (dpsi). This closes the real-data regularizer gate; it does
+not select `n_d` or use H2.
+
 - [ ] **Step 5: Re-run the held-out gate once**
 
 After the atomic ST and DFT/dpsi gates pass, run all H2/H bands with one common
