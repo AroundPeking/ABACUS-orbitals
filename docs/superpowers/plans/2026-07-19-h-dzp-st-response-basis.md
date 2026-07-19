@@ -274,10 +274,21 @@ implemented and passed 107/107 SIAB tests in job `21315899`. This checklist
 item remains open until the completed 225-column atomic target is analyzed and
 the numerical `n_d` is recorded.
 
+Before inspecting the new atomic spectrum or any new H2 energy, the production
+selection threshold is fixed at 99% cumulative d-channel residual weight. The
+analysis will also report 90%, 95%, and 99.9% shell counts, but they are
+diagnostics and must not be substituted after seeing the held-out result.
+
 - [ ] **Step 4: Optimize only with the joint DFT+dpsi path**
 
 Keep `1s,2s,1p` bitwise fixed. Retain `st_only` only for regression/ablation;
 never use its `.orb` in DFT or RPA production calculations.
+
+The synthetic `lmax=2` joint-gradient regression passed as normal-node job
+`21315966`: the d coefficient receives independently nonzero ST and DFT+dpsi
+gradients, changes during a short `st_dpsi_joint` optimization, and leaves all
+three frozen DZP columns bitwise unchanged. The real optimization still waits
+for the completed target and the 99% spectrum-selected `n_d`.
 
 - [ ] **Step 5: Re-run the held-out gate once**
 

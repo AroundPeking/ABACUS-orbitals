@@ -177,11 +177,13 @@ def _make_sternheimer_data_with_d():
     )
 
 
-def _make_legacy_data():
+def _make_legacy_data(include_d=False):
+    nl = 3 if include_d else 2
     info_stru = [
         info(Na={"H": 1}, Nb_true=2, weight=torch.tensor([0.5, 0.5]))
     ]
-    info_element = {"H": info(Nl=2, Ne=4, Nu=[3, 2])}
+    nu = [3, 2, 1] if include_d else [3, 2]
+    info_element = {"H": info(Nl=nl, Ne=4, Nu=nu)}
     q_origin = {
         "H": [
             torch.tensor(
@@ -201,10 +203,28 @@ def _make_legacy_data():
             ),
         ]
     }
-    overlap_by_l = [[None, None], [None, None]]
-    zero_overlap_by_l = [[None, None], [None, None]]
-    for l1 in range(2):
-        for l2 in range(2):
+    if include_d:
+        q_origin["H"].append(
+            torch.tensor(
+                [
+                    [0.20, 0.10, 0.30, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.10, 0.25, 0.00, 0.15],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                    [0.00, 0.00, 0.00, 0.00],
+                ],
+                dtype=torch.complex128,
+            )
+        )
+    overlap_by_l = [[None for _ in range(nl)] for _ in range(nl)]
+    zero_overlap_by_l = [[None for _ in range(nl)] for _ in range(nl)]
+    for l1 in range(nl):
+        for l2 in range(nl):
             nm1 = 2 * l1 + 1
             nm2 = 2 * l2 + 1
             shape = (1, nm1, 4, 1, nm2, 4)
@@ -257,6 +277,18 @@ def _initial_c():
             ),
         ]
     }
+
+
+def _initial_c_with_d():
+    c = _initial_c()
+    c["H"].append(
+        torch.tensor(
+            [[0.20], [0.10], [0.70], [0.15]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+    )
+    return c
 
 
 def _run_smoke(mode):
@@ -852,6 +884,70 @@ class AppendedResponseShellTest(unittest.TestCase):
 
 
 class DeterministicOptimizationSmokeTest(unittest.TestCase):
+    def test_joint_d_channel_receives_st_and_dft_dpsi_gradients(self):
+        np.random.seed(SEED)
+        torch.manual_seed(SEED)
+        c = _initial_c_with_d()
+        initial = tuple(value.detach().clone() for value in c["H"])
+        legacy = _make_legacy_data(include_d=True)
+        stage = {
+            "optimizer": "Adam",
+            "kwargs": {"lr": 0.003},
+            "cal_T": False,
+            "norm": "one",
+            "max_steps": 5,
+            "loss": {
+                "mode": "st_dpsi_joint",
+                **LOSS_DEFAULTS,
+                "joint_dpsi_weight": 0.1,
+            },
+        }
+        converge = Opt_Orbital_Converge()
+        converge.set_info(
+            {"origin": ["synthetic"], "linear": [["synthetic-linear"]]},
+            [stage],
+            legacy["info_stru"],
+            {
+                "init_from_file": True,
+                "freeze_orbitals": DZP_FREEZE_SPECS,
+            },
+            {"same_band": True},
+        )
+        converge.set_info_element(legacy["info_element"])
+        converge.set_QSVI(
+            legacy["q_origin"], legacy["s_origin"], legacy["v_origin"]
+        )
+        converge.set_QSVI_linear(
+            legacy["q_linear"], legacy["s_linear"], legacy["v_linear"]
+        )
+        fixed_columns = [
+            OrbitalColumn("H", 0, 0, 0, 1),
+            OrbitalColumn("H", 0, 0, 0, 2),
+            *(OrbitalColumn("H", 0, 1, m, 1) for m in (-1, 0, 1)),
+        ]
+        evaluator = SternheimerSpillage(
+            _make_sternheimer_data_with_d(), c, fixed_columns
+        )
+        converge.set_sternheimer_spillage(evaluator)
+
+        components = converge._make_spillage(stage).cal_components(c)
+        legacy_loss = components["dft_origin"] + 0.1 * components["dft_dpsi"]
+        legacy_d_gradient = torch.autograd.grad(
+            legacy_loss, c["H"][2], retain_graph=True
+        )[0]
+        st_d_gradient = torch.autograd.grad(
+            evaluator.evaluate(c).loss, c["H"][2]
+        )[0]
+        self.assertGreater(torch.linalg.vector_norm(legacy_d_gradient).item(), 0.0)
+        self.assertGreater(torch.linalg.vector_norm(st_d_gradient).item(), 0.0)
+
+        result = converge.cal_converge(
+            c, (io.StringIO(), io.StringIO())
+        )["C"]["H"]
+        self.assertTrue(torch.equal(initial[0][:, :2], result[0][:, :2]))
+        self.assertTrue(torch.equal(initial[1][:, :1], result[1][:, :1]))
+        self.assertFalse(torch.equal(initial[2], result[2]))
+
     def test_dzp_core_is_fixed_while_3s_and_2p_reduce_st_loss(self):
         np.random.seed(SEED)
         torch.manual_seed(SEED)

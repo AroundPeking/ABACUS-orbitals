@@ -401,3 +401,18 @@ the cumulative eigenvalues determine the shell count without consulting H2.
 Focused GREEN job `21315892` passed both analytic spectrum tests, and full
 normal-node regression job `21315899` passed all 107 SIAB tests. The real d
 shell count is intentionally not declared before job `21315811` finishes.
+
+The shell-selection rule itself is now frozen before that result is available:
+the production candidate uses the smallest `n_d` whose d-channel eigenvalues
+capture at least 99% of the fixed-DZP-projected atomic residual weight. The
+90%, 95%, and 99.9% counts are reported only as diagnostics; the H2 binding
+energy is not allowed to choose among them.
+
+`prepare_d_response_basis.py` reads the completed target and the previous
+joint `4s3p` coefficients, evaluates all s/p/d spectra, fixes each selected
+eigenvector sign by making its largest coefficient positive, and writes the
+selected d vectors into new coefficient columns without changing s or p.
+Module-absence RED job `21316009` and GREEN job `21316014` cover the sign and
+channel-replacement contract. Joint-gradient job `21315966` additionally
+proves that an `lmax=2` d column receives both ST and DFT+dpsi gradients while
+the fixed `1s,2s,1p` columns remain bitwise unchanged.
