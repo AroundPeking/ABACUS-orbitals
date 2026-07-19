@@ -19,3 +19,20 @@ reuse existing outputs and verifies all immutable executable/input hashes.
 The joint orbital hash is the default. A same-producer initial-TZDP baseline
 may override it explicitly with Slurm's
 `EXPECTED_ORBITAL_SHA256` export; use a separate clean campaign directory.
+
+## Completed comparison
+
+- Initial checked-in TZDP: array job `21315392`, orbital SHA256
+  `7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c`,
+  binding energy `106.5360756 kcal/mol`.
+- Fixed-DZP `st_dpsi_joint`: array job `21315382`, orbital SHA256
+  `30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7`,
+  binding energy `106.7371494 kcal/mol`.
+
+Both runs used ABACUS SHA256
+`2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d`
+and LibRPA SHA256
+`defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c`.
+The result is a small `0.2010738 kcal/mol` improvement, not convergence to the
+approximately `108.72 kcal/mol` reference. See the parent README for the full
+energy decomposition and the auxiliary-space qualification.

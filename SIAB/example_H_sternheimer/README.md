@@ -198,3 +198,50 @@ and trajectory SHA256 values are, respectively,
 `476cc96e68da6d1fcdf9160bd8bb9015800f37e69e38958e46420163d91b45a4`.
 This is a training-space result. It is not an RPA-quality claim until the
 held-out H2/H LCAO-SOS and LibRPA binding energy is computed with this orbital.
+
+## Same-producer held-out H2/H SOS-RPA result
+
+The first held-out comparison was completed on df_dcu `normal` with the same
+immutable ABACUS and LibRPA executables, inputs, pseudopotential, 20-Angstrom
+cell, 0.74085-Angstrom H2 bond, 100-Ry cutoff, 16 minimax frequencies,
+`exx_pca_threshold=1e-4`, `rpa_ccp_rmesh_times=5`, and full Coulomb. Array job
+`21315392` used the checked-in initial TZDP orbital (SHA256
+`7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c`);
+job `21315382` used the joint orbital above. Both H2/H pairs completed and
+LibRPA printed its success marker.
+
+The RPA@PBE energy is evaluated as
+
+```text
+E_RPA@PBE = E_PBE - E_xc^PBE + E_x^EXX + E_c^RPA,
+D_e = 2 E_RPA@PBE(H) - E_RPA@PBE(H2).
+```
+
+| basis | H2 PBE (Ry) | H PBE (Ry) | H2 EXX (Ha) | H EXX (Ha) | H2 RPAc (Ha) | H RPAc (Ha) | binding (kcal/mol) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| initial TZDP | -2.3319033102 | -0.9990938552 | -0.6573650319 | -0.3076354167 | -0.067918272 | -0.016168866 | 106.5360756 |
+| fixed-DZP joint | -2.3320626242 | -0.9990624516 | -0.6572902713 | -0.3076186661 | -0.069145013 | -0.016673657 | 106.7371494 |
+
+The binding-energy decomposition in kcal/mol is:
+
+| basis | PBE minus PBE-XC | EXX | RPAc | total |
+| --- | ---: | ---: | ---: | ---: |
+| initial TZDP | 57.7944412 | 26.4145084 | 22.3271259 | 106.5360756 |
+| fixed-DZP joint | 57.8851363 | 26.3886178 | 22.4633953 | 106.7371494 |
+
+The joint basis improves this same-producer held-out value by only
+`0.2010738 kcal/mol`; it remains about `1.98 kcal/mol` below the approximately
+`108.72 kcal/mol` Thesis/FHI-aims reference and is not yet a converged RPA
+basis. At the same PCA threshold the generated auxiliary dimensions are
+H2/H = `68/34` for the initial basis and `66/33` for the joint basis. This test
+therefore evaluates each orbital together with its deterministically regenerated
+product auxiliary basis. A fixed-auxiliary-space cross test is required before
+attributing the change exclusively to the wave-function basis.
+
+The old 20-Angstrom result is not a valid initial-basis control. Its same-named
+orbital has SHA256
+`b2d24063d577a79039e60f5084ba1bd2f3355fc45b8b0d18b7c3ba61e08394f6`,
+which differs from the checked-in TZDP hash above. Phase-aligned normalized
+radial shape errors for `1s,2s,3s,1p,2p` are approximately
+`0.903,1.030,0.805,0.241,0.262`, respectively. Historical binding energies
+from that file must not be used to assess the joint optimization.
