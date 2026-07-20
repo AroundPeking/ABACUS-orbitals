@@ -33,6 +33,16 @@ class RadialResidualSpectrum:
     cumulative_capture: torch.Tensor
     coefficients: torch.Tensor
     overlap_relative_deviation: float
+    atom_indices: tuple
+
+
+@dataclass(frozen=True)
+class RadialResidualTerms:
+    projected_overlap: torch.Tensor
+    covariance: torch.Tensor
+    magnetic_channels: tuple
+    overlap_relative_deviation: float
+    atom_index: int
 
 
 def _orbital_label(column):
@@ -202,18 +212,10 @@ def _clamp_roundoff_negative(values, local_scale, name, detail):
     return torch.clamp(values, min=0.0)
 
 
-def radial_residual_spectrum(
-    data,
-    c0,
-    fixed_orbitals,
-    element,
-    atom_index,
-    l,
-    relative_rank_tolerance=1.0e-10,
-    magnetic_overlap_tolerance=1.0e-8,
-    condition_limit=1.0e12,
+def _normalize_spectrum_tolerances(
+    relative_rank_tolerance, magnetic_overlap_tolerance
 ):
-    """Return the optimal shared radial response spectrum for one l channel."""
+    normalized = []
     for name, value in (
         ("relative_rank_tolerance", relative_rank_tolerance),
         ("magnetic_overlap_tolerance", magnetic_overlap_tolerance),
@@ -224,24 +226,25 @@ def radial_residual_spectrum(
             raise ValueError(f"{name} must be finite and positive") from exc
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError(f"{name} must be finite and positive")
-        if name == "relative_rank_tolerance":
-            relative_rank_tolerance = value
-        else:
-            magnetic_overlap_tolerance = value
+        normalized.append(value)
+    return tuple(normalized)
 
+
+def _fixed_projection(data, c0, fixed_orbitals, condition_limit):
     assembled, labels = assemble_orbital_coefficients(data, c0)
     fixed_orbitals = tuple(fixed_orbitals)
     if not fixed_orbitals:
         raise ValueError("fixed orbital space must be nonempty")
     if len(set(fixed_orbitals)) != len(fixed_orbitals):
         raise ValueError("a fixed orbital was requested more than once")
-    for orbital in fixed_orbitals:
-        if not isinstance(orbital, OrbitalColumn):
+    for value in fixed_orbitals:
+        if not isinstance(value, OrbitalColumn):
             raise ValueError("fixed orbitals must be OrbitalColumn values")
-        if labels.count(orbital) != 1:
+        if labels.count(value) != 1:
             raise ValueError(
-                f"fixed orbital {_orbital_label(orbital)} not found exactly once"
+                f"fixed orbital {_orbital_label(value)} not found exactly once"
             )
+
     fixed_set = set(fixed_orbitals)
     fixed_indices = tuple(
         index for index, label in enumerate(labels) if label in fixed_set
@@ -256,6 +259,23 @@ def radial_residual_spectrum(
         "fixed overlap is not positive definite",
     )
     q0 = data.q @ a0
+    return assembled, labels, a0, s00_cholesky, q0
+
+
+def _radial_residual_terms(
+    data,
+    c0,
+    fixed_orbitals,
+    element,
+    atom_index,
+    l,
+    magnetic_overlap_tolerance,
+    condition_limit,
+):
+    _, _, a0, s00_cholesky, q0 = _fixed_projection(
+        data, c0, fixed_orbitals, condition_limit
+    )
+    overlap = data.overlap
 
     blocks = sorted(
         (
@@ -324,6 +344,56 @@ def radial_residual_spectrum(
             f"{magnetic_overlap_tolerance:.6g}"
         )
 
+    covariance = (covariance + covariance.conj().transpose(0, 1)) / 2.0
+    return RadialResidualTerms(
+        projected_overlap=average_overlap,
+        covariance=covariance,
+        magnetic_channels=actual_m,
+        overlap_relative_deviation=overlap_relative_deviation,
+        atom_index=atom_index,
+    )
+
+
+def _diagonalize_radial_terms(
+    terms,
+    element,
+    atom_index,
+    l,
+    atom_indices,
+    relative_rank_tolerance,
+    magnetic_overlap_tolerance,
+):
+    terms = tuple(terms)
+    if not terms:
+        raise ValueError("radial residual terms must be nonempty")
+    expected_channels = terms[0].magnetic_channels
+    expected_shape = terms[0].projected_overlap.shape
+    for value in terms[1:]:
+        if value.magnetic_channels != expected_channels:
+            raise ValueError("radial residual terms have incompatible m channels")
+        if value.projected_overlap.shape != expected_shape:
+            raise ValueError(
+                "radial residual terms have incompatible primitive counts"
+            )
+
+    average_overlap = sum(value.projected_overlap for value in terms) / len(terms)
+    overlap_scale = max(float(torch.linalg.norm(average_overlap).item()), 1.0)
+    cross_term_deviation = max(
+        float(torch.linalg.norm(value.projected_overlap - average_overlap).item())
+        / overlap_scale
+        for value in terms
+    )
+    overlap_relative_deviation = max(
+        cross_term_deviation,
+        max(value.overlap_relative_deviation for value in terms),
+    )
+    if overlap_relative_deviation > magnetic_overlap_tolerance:
+        raise RuntimeError(
+            "target/atom projected overlaps disagree: "
+            f"relative deviation {overlap_relative_deviation:.6g} exceeds "
+            f"{magnetic_overlap_tolerance:.6g}"
+        )
+
     average_overlap = (average_overlap + average_overlap.transpose(0, 1)) / 2.0
     overlap_eigenvalues, overlap_eigenvectors = torch.linalg.eigh(
         average_overlap
@@ -342,6 +412,7 @@ def radial_residual_spectrum(
         overlap_eigenvalues[keep]
     ).unsqueeze(0)
 
+    covariance = sum(value.covariance for value in terms)
     covariance = (covariance + covariance.conj().transpose(0, 1)) / 2.0
     real_covariance = covariance.real
     whitened_covariance = (
@@ -369,12 +440,154 @@ def radial_residual_spectrum(
         element=element,
         atom_index=atom_index,
         l=l,
-        magnetic_channels=actual_m,
+        magnetic_channels=expected_channels,
         numerical_rank=numerical_rank,
         eigenvalues=eigenvalues,
         cumulative_capture=cumulative_capture,
         coefficients=coefficients,
         overlap_relative_deviation=overlap_relative_deviation,
+        atom_indices=tuple(atom_indices),
+    )
+
+
+def radial_residual_spectrum(
+    data,
+    c0,
+    fixed_orbitals,
+    element,
+    atom_index,
+    l,
+    relative_rank_tolerance=1.0e-10,
+    magnetic_overlap_tolerance=1.0e-8,
+    condition_limit=1.0e12,
+):
+    """Return the optimal shared radial response spectrum for one l channel."""
+    relative_rank_tolerance, magnetic_overlap_tolerance = (
+        _normalize_spectrum_tolerances(
+            relative_rank_tolerance, magnetic_overlap_tolerance
+        )
+    )
+    terms = _radial_residual_terms(
+        data,
+        c0,
+        fixed_orbitals,
+        element,
+        atom_index,
+        l,
+        magnetic_overlap_tolerance,
+        condition_limit,
+    )
+    return _diagonalize_radial_terms(
+        (terms,),
+        element,
+        atom_index,
+        l,
+        (atom_index,),
+        relative_rank_tolerance,
+        magnetic_overlap_tolerance,
+    )
+
+
+def _expand_fixed_radial_specs(labels, fixed_specs):
+    fixed_specs = tuple(fixed_specs)
+    if not fixed_specs:
+        raise ValueError("fixed radial specs must be nonempty")
+
+    selected = []
+    for spec in fixed_specs:
+        if not isinstance(spec, Mapping) or set(spec) != {
+            "element",
+            "l",
+            "zeta",
+        }:
+            raise ValueError("fixed radial spec requires element, l, and zeta")
+        element = spec["element"]
+        l = spec["l"]
+        zeta = spec["zeta"]
+        if not isinstance(element, str) or not element:
+            raise ValueError("fixed radial spec element must be nonempty")
+        if type(l) is not int or l < 0:
+            raise ValueError("fixed radial spec l must be a nonnegative integer")
+        if type(zeta) is not int or zeta <= 0:
+            raise ValueError("fixed radial spec zeta must be a positive integer")
+        matching = tuple(
+            label
+            for label in labels
+            if label.element == element
+            and label.l == l
+            and label.zeta == zeta
+        )
+        if not matching:
+            raise ValueError(
+                f"fixed radial spec {(element, l, zeta)!r} maps to no columns"
+            )
+        selected.extend(matching)
+
+    if len(set(selected)) != len(selected):
+        raise ValueError("a fixed radial spec was requested more than once")
+    selected_set = set(selected)
+    return tuple(label for label in labels if label in selected_set)
+
+
+def radial_residual_spectrum_many(
+    data_items,
+    c0,
+    fixed_specs,
+    element,
+    l,
+    relative_rank_tolerance=1.0e-4,
+    magnetic_overlap_tolerance=1.0e-4,
+    condition_limit=1.0e12,
+):
+    """Aggregate one shared radial spectrum over targets and atom centers."""
+    data_items = tuple(data_items)
+    if not data_items:
+        raise ValueError("data_items must be nonempty")
+    relative_rank_tolerance, magnetic_overlap_tolerance = (
+        _normalize_spectrum_tolerances(
+            relative_rank_tolerance, magnetic_overlap_tolerance
+        )
+    )
+
+    terms = []
+    atom_indices = set()
+    for data in data_items:
+        _, labels = assemble_orbital_coefficients(data, c0)
+        fixed_orbitals = _expand_fixed_radial_specs(labels, fixed_specs)
+        target_atoms = sorted(
+            {
+                block.atom_index
+                for block in data.blocks
+                if block.element == element and block.l == l
+            }
+        )
+        if not target_atoms:
+            raise ValueError(
+                f"Sternheimer target has no {element}/l{l} primitive blocks"
+            )
+        for atom_index in target_atoms:
+            atom_indices.add(atom_index)
+            terms.append(
+                _radial_residual_terms(
+                    data,
+                    c0,
+                    fixed_orbitals,
+                    element,
+                    atom_index,
+                    l,
+                    magnetic_overlap_tolerance,
+                    condition_limit,
+                )
+            )
+
+    return _diagonalize_radial_terms(
+        terms,
+        element,
+        None,
+        l,
+        tuple(sorted(atom_indices)),
+        relative_rank_tolerance,
+        magnetic_overlap_tolerance,
     )
 
 
