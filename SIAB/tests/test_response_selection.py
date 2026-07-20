@@ -5,12 +5,20 @@ import torch
 
 import common  # noqa: F401 - configures the optimizer import path
 from response_selection import (
+    CandidateGain,
     ResponseTargetFamily,
+    append_response_shell,
     borrowing_gap,
+    evaluate_response_candidates,
     normalized_family_loss,
+    score_candidate,
+    select_best_candidate,
 )
 from sternheimer_data import PrimitiveBlock
-from sternheimer_spillage import evaluate_spillage_for_columns
+from sternheimer_spillage import (
+    RadialResidualSpectrum,
+    evaluate_spillage_for_columns,
+)
 from test_sternheimer_spillage import make_sternheimer_data
 
 
@@ -44,6 +52,53 @@ def fixed_dzp_coefficients():
 
 def expanded_coefficients():
     return {"H": [torch.eye(2, dtype=torch.float64)]}
+
+
+def response_coefficients():
+    return {
+        "H": [
+            torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+            torch.empty((2, 0), dtype=torch.float64),
+        ]
+    }
+
+
+def response_spectrum(l, eigenvalue, coefficients):
+    coefficients = torch.as_tensor(coefficients, dtype=torch.float64)
+    eigenvalues = torch.tensor([eigenvalue], dtype=torch.float64)
+    cumulative = torch.tensor(
+        [1.0 if eigenvalue > 0.0 else 0.0], dtype=torch.float64
+    )
+    return RadialResidualSpectrum(
+        element="H",
+        atom_index=None,
+        l=l,
+        magnetic_channels=tuple(range(-l, l + 1)),
+        numerical_rank=1,
+        eigenvalues=eigenvalues,
+        cumulative_capture=cumulative,
+        coefficients=coefficients,
+        overlap_relative_deviation=0.0,
+        atom_indices=(0,),
+    )
+
+
+def response_target_families():
+    physical_data = make_sternheimer_data(
+        [PrimitiveBlock("H", 0, 0, 0, 2, 0)],
+        [0.0, 1.0],
+        norm=1.0,
+    )
+    return (
+        ResponseTargetFamily("atom", (physical_data,), "physical"),
+        ResponseTargetFamily("multicenter", (physical_data,), "physical"),
+        ResponseTargetFamily(
+            "fragment_ghost",
+            (fragment_ghost_data(),),
+            "ghost",
+            real_atom_index=0,
+        ),
+    )
 
 
 class ExplicitProjectorTest(unittest.TestCase):
@@ -134,6 +189,103 @@ class ResponseTargetFamilyTest(unittest.TestCase):
             ResponseTargetFamily("bad", (data,), "energy")
         with self.assertRaisesRegex(ValueError, "real_atom_index"):
             ResponseTargetFamily("ghost", (data,), "ghost")
+
+
+class CandidateScoreTest(unittest.TestCase):
+    def test_score_is_gain_plus_balance_reduction_per_ao_function(self):
+        candidate = CandidateGain(
+            l=3,
+            mode=0,
+            atom=0.9,
+            multicenter=0.4,
+            balance=-0.1,
+        )
+
+        self.assertAlmostEqual(score_candidate(candidate), 1.2 / 7.0, places=14)
+
+    def test_selector_prefers_more_gain_per_actual_ao_function(self):
+        d = CandidateGain(
+            l=2,
+            mode=0,
+            atom=0.50,
+            multicenter=0.0,
+            balance=0.0,
+        )
+        f = CandidateGain(
+            l=3,
+            mode=0,
+            atom=0.84,
+            multicenter=0.0,
+            balance=0.0,
+        )
+
+        self.assertEqual(select_best_candidate([d, f]).l, 3)
+
+    def test_tie_break_is_lower_cost_then_l_then_mode(self):
+        candidates = [
+            CandidateGain(2, 0, 5.0, 0.0, 0.0),
+            CandidateGain(1, 2, 3.0, 0.0, 0.0),
+            CandidateGain(1, 0, 3.0, 0.0, 0.0),
+        ]
+
+        self.assertEqual(select_best_candidate(candidates).key, (1, 0))
+
+    def test_selector_rejects_nonpositive_physical_gain_or_score(self):
+        values = [
+            CandidateGain(0, 0, -0.1, 0.1, 1.0),
+            CandidateGain(1, 0, 0.2, 0.0, -0.3),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "no admissible positive-score"):
+            select_best_candidate(values)
+
+
+class CandidateEvaluatorTest(unittest.TestCase):
+    def test_append_canonicalizes_mode_without_changing_existing_columns(self):
+        current = response_coefficients()
+        before = current["H"][0].clone()
+        spectrum = response_spectrum(0, 1.0, [[0.0], [-1.0]])
+
+        appended = append_response_shell(current, spectrum, mode=0)
+
+        self.assertTrue(torch.equal(current["H"][0], before))
+        self.assertTrue(torch.equal(appended["H"][0][:, :1], before))
+        torch.testing.assert_close(
+            appended["H"][0][:, 1],
+            torch.tensor([0.0, 1.0], dtype=torch.float64),
+            rtol=0.0,
+            atol=0.0,
+        )
+
+    def test_evaluator_returns_gains_and_deterministic_rejections(self):
+        atom, multicenter, ghost = response_target_families()
+        current = response_coefficients()
+        spectra = (
+            response_spectrum(1, 0.0, [[0.0], [1.0]]),
+            response_spectrum(0, 1.0, [[0.0], [1.0]]),
+        )
+
+        values = evaluate_response_candidates(
+            spectra,
+            current,
+            current,
+            atom,
+            multicenter,
+            ghost,
+        )
+
+        self.assertEqual([value.gain.key for value in values], [(0, 0), (1, 0)])
+        self.assertTrue(values[0].admissible)
+        self.assertAlmostEqual(values[0].gain.atom, 1.0, places=13)
+        self.assertAlmostEqual(values[0].gain.multicenter, 1.0, places=13)
+        self.assertAlmostEqual(values[0].gain.balance, -0.4, places=13)
+        self.assertAlmostEqual(values[0].score, 1.6, places=13)
+        self.assertIsNone(values[0].rejection_reason)
+        self.assertFalse(values[1].admissible)
+        self.assertEqual(
+            values[1].rejection_reason,
+            "residual eigenvalue is not positive",
+        )
 
 
 if __name__ == "__main__":
