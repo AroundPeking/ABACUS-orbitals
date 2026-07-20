@@ -34,6 +34,7 @@ import main as siab_main
 import main_each as siab_main_each
 from sternheimer_data import PrimitiveBlock, SternheimerData
 from sternheimer_spillage import OrbitalColumn
+from test_sternheimer_spillage import make_sternheimer_data
 
 
 COMPONENTS = {
@@ -277,6 +278,19 @@ class FixedOrbitalExpansionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             siab_main._expand_fixed_orbitals(self.data, self.c, duplicate)
 
+    def test_sternheimer_info_allows_zero_unselected_channels(self):
+        blocks = [PrimitiveBlock("H", 0, 0, 0, 2, 0)]
+        for index, m in enumerate((-1, 0, 1)):
+            blocks.append(PrimitiveBlock("H", 0, 1, m, 2, 2 + 2 * index))
+        data = make_sternheimer_data(blocks, torch.zeros(8))
+
+        result = siab_main._sternheimer_info_element(
+            data,
+            info(Nt_all=["H"], Nu={"H": [1, 0]}),
+        )
+
+        self.assertEqual(result["H"].Nu, [1, 0])
+
 
 class MainRoutingTest(unittest.TestCase):
     def run_input(self, value):
@@ -286,9 +300,9 @@ class MainRoutingTest(unittest.TestCase):
             with working_directory(path):
                 return siab_main.main()
 
-    def test_requires_exactly_one_sternheimer_file(self):
-        message = "the first SIAB Sternheimer implementation requires exactly one data file"
-        for marker in ("st.dat", [], ["one", "two"]):
+    def test_rejects_nonlist_or_empty_sternheimer_targets(self):
+        message = "SIAB Sternheimer targets require a nonempty list"
+        for marker in ("st.dat", []):
             with self.subTest(marker=marker):
                 with self.assertRaisesRegex(ValueError, f"^{message}$"):
                     self.run_input(input_value(sternheimer_marker=marker))
@@ -304,16 +318,50 @@ class MainRoutingTest(unittest.TestCase):
             "read_sternheimer",
             return_value="loaded",
         ) as reader:
-            data, stages = siab_main._load_sternheimer_data(
+            targets, stages = siab_main._load_sternheimer_data(
                 {"sternheimer": [target]},
                 [{"loss": {"mode": "st_only"}}],
             )
 
-        self.assertEqual(data, "loaded")
+        self.assertEqual(targets.entries[0].family, "atom")
+        self.assertEqual(targets.families[0].name, "atom")
+        self.assertEqual(targets.families[0].data, ("loaded",))
         self.assertEqual(stages[0]["mode"], "st_only")
         reader.assert_called_once_with(Path("st.dat"))
 
-    def test_rejects_ghost_target_in_single_target_optimizer(self):
+    def test_groups_multiple_physical_targets_and_does_not_load_ghost(self):
+        targets = [
+            {"path": "atom-a.dat", "family": "atom", "role": "physical"},
+            {"path": "atom-b.dat", "family": "atom", "role": "physical"},
+            {
+                "path": "h3.dat",
+                "family": "multicenter",
+                "role": "physical",
+            },
+            {
+                "path": "ghost.dat",
+                "family": "fragment_ghost",
+                "role": "ghost",
+            },
+        ]
+        with mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            side_effect=("atom-a", "atom-b", "h3"),
+        ) as reader:
+            loaded, _ = siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": {"mode": "st_dpsi_joint"}}],
+            )
+
+        self.assertEqual(
+            [(family.name, family.data) for family in loaded.families],
+            [("atom", ("atom-a", "atom-b")), ("multicenter", ("h3",))],
+        )
+        self.assertEqual(reader.call_count, 3)
+        self.assertEqual(len(loaded.entries), 4)
+
+    def test_rejects_targets_without_a_physical_family(self):
         target = {
             "path": "ghost.dat",
             "family": "fragment_ghost",

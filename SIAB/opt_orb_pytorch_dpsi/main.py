@@ -9,11 +9,14 @@ import IO.print_orbital
 import IO.cal_weight
 import IO.change_info
 import orbital
+from dataclasses import dataclass
 from attribute_dict import AttributeDict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from optimization_loss import normalize_loss_config
-from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
+from response_family_spillage import NormalizedPhysicalFamilySpillage
+from response_selection import ResponseTargetFamily
+from sternheimer_spillage import OrbitalColumn
 from sternheimer_targets import parse_target_entries
 
 import numpy as np
@@ -21,6 +24,12 @@ import torch
 import time
 import pprint
 import sys
+
+
+@dataclass(frozen=True)
+class LoadedSternheimerTargets:
+	entries: tuple
+	families: tuple
 
 
 def _load_sternheimer_data(file_list, info_optimize):
@@ -31,21 +40,29 @@ def _load_sternheimer_data(file_list, info_optimize):
 	]
 	if "sternheimer" in file_list:
 		values = file_list["sternheimer"]
-		if not isinstance(values, (list, tuple)) or len(values) != 1:
-			raise ValueError(
-				"the first SIAB Sternheimer implementation requires exactly one data file"
-			)
+		if not isinstance(values, (list, tuple)) or not values:
+			raise ValueError("SIAB Sternheimer targets require a nonempty list")
 		entries = parse_target_entries(values)
-		entry = entries[0]
-		if entry.role != "physical":
-			raise ValueError(
-				"SIAB optimization requires a physical Sternheimer target"
-			)
 		if not stages:
 			raise ValueError(
 				"sternheimer data requires a Sternheimer loss stage"
 			)
-		return IO.read_sternheimer.read_sternheimer(entry.path), stages
+		physical = {}
+		for entry in entries:
+			if entry.role != "physical":
+				continue
+			physical.setdefault(entry.family, []).append(
+				IO.read_sternheimer.read_sternheimer(entry.path)
+			)
+		if not physical:
+			raise ValueError(
+				"SIAB optimization requires a physical Sternheimer target"
+			)
+		families = tuple(
+			ResponseTargetFamily(name, tuple(data), "physical")
+			for name, data in physical.items()
+		)
+		return LoadedSternheimerTargets(entries, families), stages
 	if stages:
 		raise ValueError("Sternheimer loss stage requires sternheimer data")
 	return None, stages
@@ -99,9 +116,14 @@ def _sternheimer_info_element(data, info_true):
 	info_element = AttributeDict()
 	for element_index, element in enumerate(elements):
 		nu = list(info_true.Nu[element])
-		if not nu or any(type(value) is not int or value <= 0 for value in nu):
+		if (
+			not nu
+			or any(type(value) is not int or value < 0 for value in nu)
+			or not any(value > 0 for value in nu)
+		):
 			raise ValueError(
-				f"element.Nu[{element!r}] must contain positive integers"
+				f"element.Nu[{element!r}] must contain nonnegative integers "
+				"and at least one orbital"
 			)
 		nprimitive_by_l = []
 		for l in range(len(nu)):
@@ -174,8 +196,13 @@ def main():
 
 	file_list, info_true, info_weight, info_optimize, info_C_init, info_V, info_radial = IO.read_json.read_json("INPUT")
 	_set_random_seed(info_C_init)
-	sternheimer_data, sternheimer_stages = _load_sternheimer_data(
+	sternheimer_targets, sternheimer_stages = _load_sternheimer_data(
 		file_list, info_optimize
+	)
+	sternheimer_data = (
+		sternheimer_targets.families[0].data[0]
+		if sternheimer_targets is not None
+		else None
 	)
 	has_legacy_origin = "origin" in file_list
 	if not has_legacy_origin:
@@ -245,22 +272,20 @@ def main():
 	)
 
 	sternheimer_spillage = None
-	if sternheimer_data is not None:
+	if sternheimer_targets is not None:
 		freeze_specs = info_C_init.get("freeze_orbitals")
 		if not freeze_specs:
 			raise ValueError(
 				"the first SIAB Sternheimer implementation requires nonempty freeze_orbitals"
 			)
-		fixed_orbitals = _expand_fixed_orbitals(
-			sternheimer_data, C, freeze_specs
-		)
 		condition_limit = max(
 			stage["condition_limit"] for stage in sternheimer_stages
 		)
-		sternheimer_spillage = SternheimerSpillage(
-			sternheimer_data,
+		sternheimer_spillage = NormalizedPhysicalFamilySpillage(
+			sternheimer_targets.families,
 			C,
-			fixed_orbitals,
+			C,
+			freeze_specs,
 			condition_limit=condition_limit,
 		)
 
