@@ -28,6 +28,7 @@ EXAMPLE = ROOT / "example_H_sternheimer"
 LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 HELD_OUT_SOS = EXAMPLE / "held_out_h2_sos"
 HELD_OUT_SOS_4S3P = EXAMPLE / "held_out_h2_sos_4s3p"
+HELD_OUT_SOS_4S3P3D = EXAMPLE / "held_out_h2_sos_4s3p3d"
 REAL_H_TZDP = (
     ROOT.parent
     / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt"
@@ -773,6 +774,71 @@ class ExampleInputTest(unittest.TestCase):
             "b394bb7329754e38341050ca4beb3b242b78e4be50c418b8764c98226bc8f033",
             run_script,
         )
+        self.assertIn("libRPA finished successfully", run_script)
+
+    def test_d_response_held_out_predeclares_regenerated_and_fixed_abs_lanes(self):
+        lanes = {
+            "regenerated_4s3p3d": {
+                "orbital": "H_gga_8au_100Ry_4s3p3d.orb",
+                "nbands": {"H2": 56, "H": 28},
+                "pca": "1e-4",
+                "explicit_abs": False,
+            },
+            "fixed_4s3p": {
+                "orbital": "H_gga_8au_100Ry_4s3p.orb",
+                "nbands": {"H2": 26, "H": 13},
+                "pca": "10",
+                "explicit_abs": True,
+            },
+            "fixed_4s3p3d": {
+                "orbital": "H_gga_8au_100Ry_4s3p3d.orb",
+                "nbands": {"H2": 56, "H": 28},
+                "pca": "10",
+                "explicit_abs": True,
+            },
+        }
+
+        for lane_name, lane in lanes.items():
+            for case_name in ("H2", "H"):
+                with self.subTest(lane=lane_name, case=case_name):
+                    case = HELD_OUT_SOS_4S3P3D / "cases" / lane_name / case_name
+                    input_text = (case / "INPUT").read_text()
+                    stru_text = (case / "STRU").read_text()
+                    librpa_text = (case / "librpa.in").read_text()
+                    self.assertIn(
+                        f"nbands                  {lane['nbands'][case_name]}",
+                        input_text,
+                    )
+                    self.assertIn("ecutwfc                 100", input_text)
+                    self.assertIn("rpa                     1", input_text)
+                    self.assertIn(
+                        f"exx_pca_threshold       {lane['pca']}", input_text
+                    )
+                    self.assertIn("rpa_ccp_rmesh_times     5", input_text)
+                    self.assertIn(
+                        "exx_singularity_correction massidda", input_text
+                    )
+                    self.assertIn("37.79452292169073", stru_text)
+                    self.assertIn(lane["orbital"], stru_text)
+                    if lane["explicit_abs"]:
+                        self.assertIn("ABFS_ORBITAL", stru_text)
+                        self.assertIn(
+                            "H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs", stru_text
+                        )
+                    else:
+                        self.assertNotIn("ABFS_ORBITAL", stru_text)
+                    self.assertIn("nfreq = 16", librpa_text)
+                    self.assertIn(
+                        "prefix_coul_full = v1_coulomb_full_iq_", librpa_text
+                    )
+                    self.assertIn("vq_threshold = 0", librpa_text)
+                    self.assertIn("sqrt_coulomb_threshold = 0", librpa_text)
+
+        run_script = (HELD_OUT_SOS_4S3P3D / "run_sos.slurm").read_text()
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("#SBATCH --array=0-5", run_script)
         self.assertIn("libRPA finished successfully", run_script)
 
 
