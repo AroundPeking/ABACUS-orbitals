@@ -195,6 +195,16 @@ def _factor_hermitian(matrix, condition_limit, name, positive_error):
     return factor, condition
 
 
+def _normalize_condition_limit(condition_limit):
+    try:
+        condition_limit = float(condition_limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("condition_limit must be finite and at least 1") from exc
+    if not math.isfinite(condition_limit) or condition_limit < 1.0:
+        raise ValueError("condition_limit must be finite and at least 1")
+    return condition_limit
+
+
 def _row_diagonal(q, solve):
     return torch.sum(q * solve.transpose(0, 1), dim=1)
 
@@ -608,6 +618,61 @@ def shell_count_for_capture(spectrum, threshold):
     return spectrum.numerical_rank
 
 
+def evaluate_spillage_for_columns(
+    data, c, include, condition_limit=1.0e12
+):
+    """Evaluate the full reference residual for an explicit AO projector."""
+    if not callable(include):
+        raise TypeError("include must be callable")
+    condition_limit = _normalize_condition_limit(condition_limit)
+    assembled, labels = assemble_orbital_coefficients(data, c)
+    indices = tuple(
+        index for index, label in enumerate(labels) if bool(include(label))
+    )
+    if not indices:
+        raise ValueError("selected projector contains no orbital columns")
+
+    selected = assembled[:, indices]
+    overlap = selected.conj().transpose(0, 1) @ data.overlap @ selected
+    names = ", ".join(_orbital_label(labels[index]) for index in indices)
+    cholesky, condition = _factor_hermitian(
+        overlap,
+        condition_limit,
+        "selected projector overlap",
+        "selected projector overlap is not positive definite; "
+        f"selected columns: {names}",
+    )
+    q = data.q @ selected
+    represented = _row_diagonal(
+        q, torch.cholesky_solve(q.conj().transpose(0, 1), cholesky)
+    ).real
+    residual_scale = torch.maximum(
+        torch.maximum(torch.abs(data.norm), torch.abs(represented)),
+        torch.ones_like(data.norm),
+    )
+    residual = _clamp_roundoff_negative(
+        data.norm - represented,
+        residual_scale,
+        "selected-projector residual",
+        "the selected projector represents more than the reference norm; "
+        "check q and overlap",
+    )
+
+    weight = data.effective_weight
+    weighted_norm = torch.sum(weight * data.norm)
+    if not bool(torch.isfinite(weighted_norm)) or not bool(weighted_norm > 0.0):
+        raise RuntimeError("weighted reference norm must be positive and finite")
+    weighted_residual = torch.sum(weight * residual)
+    if not bool(torch.isfinite(weighted_residual)):
+        raise RuntimeError("weighted selected-projector residual must be finite")
+    return SternheimerLossResult(
+        loss=weighted_residual / weighted_norm,
+        weighted_residual=weighted_residual,
+        weighted_norm=weighted_norm,
+        max_condition=condition,
+    )
+
+
 class SternheimerSpillage:
     def __init__(
         self,
@@ -616,14 +681,7 @@ class SternheimerSpillage:
         fixed_orbitals,
         condition_limit=1.0e12,
     ):
-        try:
-            condition_limit = float(condition_limit)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "condition_limit must be finite and at least 1"
-            ) from exc
-        if not math.isfinite(condition_limit) or condition_limit < 1.0:
-            raise ValueError("condition_limit must be finite and at least 1")
+        condition_limit = _normalize_condition_limit(condition_limit)
 
         assembled, labels = assemble_orbital_coefficients(data, c0)
         fixed_orbitals = tuple(fixed_orbitals)
