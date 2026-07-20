@@ -14,6 +14,7 @@ from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from optimization_loss import normalize_loss_config
 from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
+from sternheimer_targets import parse_target_entries
 
 import numpy as np
 import torch
@@ -29,16 +30,22 @@ def _load_sternheimer_data(file_list, info_optimize):
 		if "loss" in stage
 	]
 	if "sternheimer" in file_list:
-		paths = file_list["sternheimer"]
-		if not isinstance(paths, (list, tuple)) or len(paths) != 1:
+		values = file_list["sternheimer"]
+		if not isinstance(values, (list, tuple)) or len(values) != 1:
 			raise ValueError(
 				"the first SIAB Sternheimer implementation requires exactly one data file"
+			)
+		entries = parse_target_entries(values)
+		entry = entries[0]
+		if entry.role != "physical":
+			raise ValueError(
+				"SIAB optimization requires a physical Sternheimer target"
 			)
 		if not stages:
 			raise ValueError(
 				"sternheimer data requires a Sternheimer loss stage"
 			)
-		return IO.read_sternheimer.read_sternheimer(paths[0]), stages
+		return IO.read_sternheimer.read_sternheimer(entry.path), stages
 	if stages:
 		raise ValueError("Sternheimer loss stage requires sternheimer data")
 	return None, stages

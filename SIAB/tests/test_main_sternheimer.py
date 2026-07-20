@@ -293,6 +293,40 @@ class MainRoutingTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, f"^{message}$"):
                     self.run_input(input_value(sternheimer_marker=marker))
 
+    def test_accepts_one_named_physical_target(self):
+        target = {
+            "path": "st.dat",
+            "family": "atom",
+            "role": "physical",
+        }
+        with mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ) as reader:
+            data, stages = siab_main._load_sternheimer_data(
+                {"sternheimer": [target]},
+                [{"loss": {"mode": "st_only"}}],
+            )
+
+        self.assertEqual(data, "loaded")
+        self.assertEqual(stages[0]["mode"], "st_only")
+        reader.assert_called_once_with(Path("st.dat"))
+
+    def test_rejects_ghost_target_in_single_target_optimizer(self):
+        target = {
+            "path": "ghost.dat",
+            "family": "fragment_ghost",
+            "role": "ghost",
+        }
+        with self.assertRaisesRegex(
+            ValueError, "SIAB optimization requires a physical Sternheimer target"
+        ):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": [target]},
+                [{"loss": {"mode": "st_only"}}],
+            )
+
     def test_rejects_missing_or_unused_sternheimer_data(self):
         with self.assertRaisesRegex(ValueError, "requires sternheimer data"):
             self.run_input(input_value(sternheimer_marker=False, loss=True))
