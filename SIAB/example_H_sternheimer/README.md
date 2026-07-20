@@ -505,3 +505,56 @@ aed9545d254fe94a9380ebd993dd5d76bb360ccbb7fd2840400b85ad5e1c9f68
 This passes the atomic ST/DFT/dpsi and radial-smoothness gate. It is the only
 `4s3p3d` candidate eligible for the next held-out H2/H all-band SOS-RPA test;
 the `21317536` orbital must not be used in production.
+
+## Smooth `4s3p3d` held-out result and BSSE diagnosis
+
+Commit `6875ce25` freezes the one-time held-out protocol before running H2. It
+uses all `56/28` H2/H bands and three predeclared lanes: new `4s3p3d` with a
+regenerated PCA-`1e-4` ABS, old `4s3p` with a fixed explicit ABS, and new
+`4s3p3d` with the same fixed ABS. The explicit H ABS has 214 functions per atom
+and SHA256
+`d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f`.
+Focused RED job `21321610`, focused GREEN `21321650`, and full regression
+`21321671` establish the input contract; the full job passed 23 tests.
+
+Production array `21321689` completed all six ABACUS-to-LibRPA tasks on
+`normal`. Every task passed SCF, exact band/spin counts, integer occupations,
+full-Coulomb output, and the LibRPA success marker.
+The immutable production root is
+`/work1/ghj/sternheimer_abacus_tests/h2_joint_4s3p3d_sos_6875ce25_20260720`.
+
+| lane | PBE minus PBE-XC | EXX | RPAc | binding | H2/H ABS dimension |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| regenerated `4s3p3d` | 57.6207 | 26.7602 | 29.6768 | 114.0578 | 314/157 |
+| fixed-ABS `4s3p` | 57.5956 | 26.7492 | 22.8383 | 107.1831 | 428/214 |
+| fixed-ABS `4s3p3d` | 57.6207 | 26.7663 | 29.3989 | 113.7859 | 428/214 |
+
+All energy columns are in kcal/mol. Under the identical fixed ABS, adding d
+raises the uncorrected binding by `6.6028 kcal/mol`; `6.5606 kcal/mol` comes
+from RPA correlation. Regenerated and fixed auxiliary spaces for `4s3p3d`
+differ by only `0.2718 kcal/mol`, so the large shift is an AO virtual-space
+effect rather than auxiliary-basis growth.
+
+The uncorrected result overshoots the approximately `108.72 kcal/mol`
+Sternheimer reference. This does not mean that the atomic d-response fit is
+converging to the wrong physical limit. The Thesis explicitly identifies
+unbalanced molecular/atomic SOS virtual spaces as the main RPA BSSE mechanism.
+Commit `835b7112` therefore adds a post-held-out diagnostic with one real H and
+one `H_empty` at the unchanged bond geometry. It does not feed back into shell
+selection. RED `21321773`, GREEN `21321797`, and full regression `21321815`
+establish the ghost contract; the full job passed 24 tests.
+
+Counterpoise production array `21321833` completed both fixed-ABS ghost cases:
+
+| basis | uncorrected | counterpoise | total BSSE | RPAc BSSE |
+| --- | ---: | ---: | ---: | ---: |
+| `4s3p` | 107.1831 | 105.9216 | 1.2615 | 1.2516 |
+| `4s3p3d` | 113.7859 | 107.0212 | 6.7647 | 6.7391 |
+
+The d shells improve the CP-corrected result by `1.0996 kcal/mol`, but allow
+H2 to borrow enough neighboring-center d space to add `6.7391 kcal/mol` of
+spurious RPAc binding. The single-center atomic target cannot measure this
+translation/borrowing error. The next optimization must therefore use a
+predeclared multi-center Delta-ST training target, center-resolved borrowing
+metric, and any f/g channels selected from that training spectrum. It must not
+select new shells from the now-observed H2 value; H2 is no longer held out.

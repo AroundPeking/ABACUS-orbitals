@@ -52,6 +52,27 @@ version change.
 
 ## Result
 
-Not run yet. Populate this section only after all six tasks have valid ABACUS
-and LibRPA completion markers and the H/H2 binding decomposition is recomputed
-from the recorded outputs.
+df_dcu `normal` array job `21321689` completed all six tasks with exit code
+zero. Every task passed the SCF, all-band integer-occupation, full-Coulomb, and
+LibRPA completion gates. The wall times for array indices 0--5 were 3:16,
+3:55, 3:29, 3:00, 4:35, and 4:07, respectively.
+The immutable production directory is
+`/work1/ghj/sternheimer_abacus_tests/h2_joint_4s3p3d_sos_6875ce25_20260720`.
+
+| lane | PBE minus PBE-XC | EXX | RPAc | binding | H2/H ABS dimensions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `regenerated_4s3p3d` | 57.6207 | 26.7602 | 29.6768 | 114.0578 | 314/157 |
+| `fixed_4s3p` | 57.5956 | 26.7492 | 22.8383 | 107.1831 | 428/214 |
+| `fixed_4s3p3d` | 57.6207 | 26.7663 | 29.3989 | 113.7859 | 428/214 |
+
+All energy columns are in kcal/mol. The fixed-ABS comparison isolates the AO
+change: adding the three d shells raises the uncorrected binding by
+`6.6028 kcal/mol`, of which `6.5606 kcal/mol` is RPA correlation. The two new
+`4s3p3d` auxiliary treatments differ by only `0.2718 kcal/mol`; auxiliary-space
+change is therefore not the source of the large shift.
+
+The raw result overbinds relative to the approximately `108.72 kcal/mol`
+Thesis/FHI-aims Sternheimer reference. The post-held-out counterpoise audit in
+`bsse_diagnostic` shows that this is primarily virtual-space BSSE rather than
+convergence toward the reference. The H2 value has now been observed and must
+not be reused as a held-out shell-selection target.

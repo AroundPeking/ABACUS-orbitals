@@ -334,8 +334,30 @@ The final d functions have `0,1,2` main nodes and the maximum ST condition is
 `8.6065`, compared with `382.6418` in the pathological run. The atomic gate is
 therefore closed with the smooth candidate only.
 
-- [ ] **Step 5: Re-run the held-out gate once**
+- [x] **Step 5: Re-run the held-out gate once**
 
 After the atomic ST and DFT/dpsi gates pass, run all H2/H bands with one common
 fixed ABS cross test and the standard regenerated-ABS result. Report both so
 the wavefunction-space improvement is separated from auxiliary-basis change.
+
+Array job `21321689` completed all six ABACUS-to-LibRPA tasks. The regenerated
+and fixed-ABS `4s3p3d` bindings are `114.0578` and `113.7859 kcal/mol`; the
+fixed-ABS `4s3p` control is `107.1831 kcal/mol`. The `6.6028 kcal/mol` fixed-ABS
+AO shift is almost entirely RPAc (`6.5606 kcal/mol`) and is not an auxiliary
+basis effect.
+
+Counterpoise diagnostic `21321833` gives `105.9216` and `107.0212 kcal/mol` for
+fixed-ABS `4s3p` and `4s3p3d`. Their total BSSE values are `1.2615` and
+`6.7647 kcal/mol`, with RPAc accounting for `1.2516` and `6.7391 kcal/mol`.
+Thus the d shells improve the CP result by `1.0996 kcal/mol` but create severe
+multi-center borrowing in raw SOS. H2 is now consumed as a held-out set.
+
+- [ ] **Step 6: Add a predeclared multi-center response and borrowing gate**
+
+Use the existing H3 training geometries, not the observed H2 energy, to produce
+multi-center Delta-ST targets. Decompose response weight by center and angular
+momentum, expose any required f/g primitive blocks, and penalize the reduction
+in response residual obtained only by borrowing neighboring-center orbitals.
+Freeze the loss normalization, shell-selection spectrum, and pass/fail limits
+before evaluating a new transfer system. Keep the fixed DZP columns and all
+existing DFT/dpsi gates unchanged.
