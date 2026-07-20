@@ -841,6 +841,44 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("#SBATCH --array=0-5", run_script)
         self.assertIn("libRPA finished successfully", run_script)
 
+    def test_d_response_bsse_diagnostic_uses_the_full_dimer_basis(self):
+        diagnostic = HELD_OUT_SOS_4S3P3D / "bsse_diagnostic"
+        lanes = {
+            "fixed_4s3p": ("H_gga_8au_100Ry_4s3p.orb", 26),
+            "fixed_4s3p3d": ("H_gga_8au_100Ry_4s3p3d.orb", 56),
+        }
+
+        for lane_name, (orbital, nbands) in lanes.items():
+            with self.subTest(lane=lane_name):
+                case = diagnostic / "cases" / lane_name / "H_ghost"
+                input_text = (case / "INPUT").read_text()
+                stru_text = (case / "STRU").read_text()
+                librpa_text = (case / "librpa.in").read_text()
+                self.assertIn("ntype                   2", input_text)
+                self.assertIn(f"nbands                  {nbands}", input_text)
+                self.assertIn("nelec                   1", input_text)
+                self.assertIn("nspin                   2", input_text)
+                self.assertIn("exx_pca_threshold       10", input_text)
+                self.assertIn("rpa_ccp_rmesh_times     5", input_text)
+                self.assertIn("H_empty", stru_text)
+                self.assertEqual(stru_text.count(orbital), 2)
+                self.assertEqual(
+                    stru_text.count("H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs"), 2
+                )
+                self.assertIn("0.48147879757009904", stru_text)
+                self.assertIn("0.518521202429901", stru_text)
+                self.assertIn("nfreq = 16", librpa_text)
+                self.assertIn(
+                    "prefix_coul_full = v1_coulomb_full_iq_", librpa_text
+                )
+
+        run_script = (diagnostic / "run_bsse.slurm").read_text()
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("#SBATCH --array=0-1", run_script)
+        self.assertIn("libRPA finished successfully", run_script)
+
 
 class AppendedResponseShellTest(unittest.TestCase):
     @staticmethod
