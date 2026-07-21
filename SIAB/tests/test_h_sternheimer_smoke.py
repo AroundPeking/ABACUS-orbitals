@@ -25,6 +25,7 @@ from sternheimer_spillage import OrbitalColumn, SternheimerSpillage
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "example_H_sternheimer"
+GREEDY_RESPONSE = EXAMPLE / "greedy_response_selection"
 LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 HELD_OUT_SOS = EXAMPLE / "held_out_h2_sos"
 HELD_OUT_SOS_4S3P = EXAMPLE / "held_out_h2_sos_4s3p"
@@ -878,6 +879,53 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("#SBATCH --mem=110610M", run_script)
         self.assertIn("#SBATCH --array=0-1", run_script)
         self.assertIn("libRPA finished successfully", run_script)
+
+    def test_greedy_response_producers_fix_high_l_sternheimer_contract(self):
+        for producer_name in (
+            "producer_atom",
+            "producer_h3",
+            "producer_fragment_ghost",
+        ):
+            with self.subTest(producer=producer_name):
+                producer = GREEDY_RESPONSE / producer_name
+                input_text = (producer / "INPUT").read_text()
+                stru_text = (producer / "STRU").read_text()
+
+                self.assertIn("out_sternheimer_siab    1", input_text)
+                self.assertIn("out_sternheimer_librpa  0", input_text)
+                self.assertIn(
+                    "sternheimer_siab_coulomb_threshold  1e-10", input_text
+                )
+                self.assertIn("sternheimer_siab_lmax  4", input_text)
+                self.assertIn("sternheimer_nfreq       16", input_text)
+                self.assertIn("exx_pca_threshold       10", input_text)
+                self.assertIn("rpa_ccp_rmesh_times     5", input_text)
+                self.assertIn("ABFS_ORBITAL", stru_text)
+                self.assertIn(
+                    "H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs", stru_text
+                )
+
+    def test_greedy_response_target_runner_is_immutable_and_complete(self):
+        run_script = (GREEDY_RESPONSE / "run_targets.slurm").read_text()
+
+        self.assertIn("#SBATCH --partition=normal", run_script)
+        self.assertIn("#SBATCH --nodes=16", run_script)
+        self.assertIn("#SBATCH --ntasks=16", run_script)
+        self.assertIn("#SBATCH --ntasks-per-node=1", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("#SBATCH --time=1-00:00:00", run_script)
+        self.assertIn("#SBATCH --array=0-2", run_script)
+        self.assertIn("test ! -e \"$output_dir\"", run_script)
+        self.assertIn("mpirun -np 16 -ppn 1", run_script)
+        self.assertIn(
+            "d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f",
+            run_script,
+        )
+        self.assertIn("expected_primitive_columns_per_h=625", run_script)
+        self.assertIn("validate_targets.py", run_script)
+        self.assertIn("abacus_source_commit=", run_script)
+        self.assertIn("abacus_sha256=", run_script)
 
 
 class AppendedResponseShellTest(unittest.TestCase):

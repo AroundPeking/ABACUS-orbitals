@@ -448,14 +448,17 @@ feat(siab): generate frozen response-basis sequences
 - Create: `SIAB/example_H_sternheimer/greedy_response_selection/producer_h3/INPUT`
 - Create: `SIAB/example_H_sternheimer/greedy_response_selection/producer_fragment_ghost/INPUT`
 - Create: `SIAB/example_H_sternheimer/greedy_response_selection/run_targets.slurm`
+- Create: `SIAB/example_H_sternheimer/greedy_response_selection/validate_targets.py`
 - Modify: `SIAB/tests/test_h_sternheimer_smoke.py`
+- Modify: `SIAB/tests/test_sternheimer_targets.py`
+- Create: `SIAB/tests/test_validate_response_targets.py`
 
 - [ ] **Step 1: Write failing static producer-contract tests**
 
 Require every producer input to contain:
 
 ```text
-sternheimer_siab_output 1
+out_sternheimer_siab 1
 sternheimer_siab_lmax 4
 sternheimer_nfreq 16
 exx_pca_threshold 10
@@ -475,19 +478,136 @@ Expected: missing three producer directories.
 
 - [ ] **Step 3: Add immutable producer inputs and validators**
 
-Use the existing validated ABACUS Sternheimer-SIAB build first. The generic
-producer is expected to emit `25 * sum(2*l+1, l=0..4) = 625` primitive columns
-per H atom. The explicit fixed ABS must retain nonzero f/g perturbation rows
-after full-Coulomb orthonormalization; reject a target whose reference metadata
-contains only s/p/d auxiliary channels. If the existing binary rejects `l=4`,
-stop and open a separate ABACUS producer bugfix stage; do not silently reduce
-`lmax`.
+The audited `efc128f335319114dad6f6e35bd07ceaa8bd15af` source already emits
+explicit Bessel primitive blocks through `l=4`, but its Sternheimer
+`build_abfs_ccp_grid_channels()` ignores `GlobalC::exx_info.info_ri.files_abfs`
+and always rebuilds product-PCA ABFs. Before adding the producers, complete a
+separate tested ABACUS bridge that mirrors `Exx_LRI::init()`:
+
+```text
+A_product = abfs_same_atom(..., exx_pca_threshold) if files_abfs is empty
+A_ST = A_product                                    if files_abfs is empty
+A_ST = construct_abfs(orbitals, files_abfs)         otherwise
+delta V_mu(r) = cal_orbs_ccp(A_ST, full Coulomb, rmesh=5)
+```
+
+The explicit branch must consist only of the fixed ABS and must not depend on
+`exx_pca_threshold=10` making `A_product` empty. In this branch the threshold is
+ignored. Record whether the input ABS file is already
+Coulomb-PCA/orthonormalized; the bridge must not silently apply a second basis
+rotation. Unit-test the source choice, then compile and run an ABFS-diagnostic
+producer on `normal`. It must report the explicit-ABS channel count and nonzero
+f/g channels before a full target is accepted.
+
+The source audit establishes that the fixed file has `Lmax=8`, radial counts
+`(8,7,6,4,4,3,2,1,1)`, and 214 auxiliary functions per H. The reader performs
+no second PCA or Coulomb rotation. Add a second tested ABACUS gate before the
+full producer: use the same `abfs_ccp` radial potentials and channel ordering
+to form the complete molecular full-Coulomb matrix
+
+```text
+V[mu,nu] = integral P_mu(r) v_nu(r) dr,
+vbar_a = sum_mu v_mu U[mu,a] lambda[a]^-1/2.
+```
+
+and solve Delta-ST for the retained Coulomb-orthonormal `vbar_a` directions.
+Reject materially negative eigenvalues; report near-null truncation, retained
+rank, eigenvalue bounds, threshold, and transform SHA256. A unit test must show
+that rescaling or invertibly recombining a synthetic raw ABS produces the same
+whitened response-space loss. This normalization is not a second product-PCA
+step: it is the required `V^-1/2` perturbation metric.
+
+This follows the FHI-aims order exactly: solve raw auxiliary Hartree
+perturbations and apply the complete `V^-1/2` around the response matrix; by
+linearity, solving the globally transformed potentials gives the same
+first-order-wavefunction space. Because global whitening mixes centers, the
+SIAB producer must not emit those transformed channels as ordinary atom-block
+LibRPA v1 chi0. Keep the existing raw v1 path separate and reject a run that
+combines whitened SIAB rows with raw Coulomb metadata.
+
+Before the H3 producer is accepted, add a memory-scaling gate. The current
+implementation duplicates every full-grid Hartree potential and all complete
+Bessel primitive grids; at 20 Angstrom, 50 Ry, 214 auxiliary functions and 625
+primitives per H this does not fit the 110610 MB node limit for three centres.
+The production path must instead:
+
+1. assemble `V` directly from radial `abfs_ccp`/ABFS atom-pair blocks;
+2. sample one raw Hartree channel at a time and accumulate it directly into the
+   retained Coulomb-whitened array, without retaining a second full
+   raw-potential matrix; and
+3. retain the existing PW-projected Bessel definition but store each primitive
+   as its physically normalized reciprocal coefficient row. For ket
+   coefficients `Y[r,G]`, contract `Q[r,e] = sum_G conj(Y[r,G]) B[e,G]`,
+   equivalently `Q^T=B Y^H`, after one serial full-grid FFT per response, and
+   form `S=B B^H` with BLAS, without a dense `n_grid * n_primitive`
+   allocation. A complex-valued regression must compare this BLAS path
+   elementwise with the scalar bra-ket implementation so Gamma-real data
+   cannot hide a conjugation reversal.
+
+Add allocation-size diagnostics and reject an implementation whose estimated
+peak exceeds the Slurm memory request before launching any linear solves.
+
+Implementation snapshot, pending formal build verification: the molecular
+metric now comes from `Matrix_Orbs11(abfs_ccp, abfs)` atom-pair blocks; raw
+Hartree grids are streamed into the global whitening transform; SIAB
+primitives use an `MPI_COMM_SELF` full-grid PW basis on every frequency owner;
+and the producer writes `STERNHEIMER_SIAB_MEMORY.dat`. The estimate includes
+the Coulomb metric, retained Hartree grids, reciprocal primitives, primitive
+overlap, and a conservative three-copy root-row gather, then reserves another
+16 GiB for the solver. Auxiliary-basis provenance deduplicates repeated file
+contents, so H/H_empty entries that share the fixed ABS retain the same SHA256
+as the atom and H3 producers; orbital and pseudopotential manifests remain
+ordered. The target validator cross-checks that fixed SHA256, the
+`serial_reciprocal_pw_v1` representation, primitive/PW dimensions, and the
+node-memory estimate. Job `21328123` was cancelled before start after a static
+audit found the reciprocal-Q conjugation reversal. Job `21328133` was then
+cancelled before start because the streamed raw-to-whitened transform still
+performed `n_grid * n_raw * n_retained` scalar updates. The corrected path
+samples 1024-point raw blocks in OpenMP, applies the same `W[mu,a]` with
+DGEMM, reduces channel maxima without races, and includes its workspace in the
+memory gate. A 1025-point `2s+1p -> 3` regression crosses the block boundary
+and compares every output with the old dense path. The fourth immutable full
+integration build, job `21328341`, was cancelled before start after a source
+audit showed that the Sternheimer path still called the append overload
+`construct_abfs(A_product, ...)`. The first explicit-source RED job `21328356`
+did not reach this test because CMake selected Python 2; full-build job
+`21328391` likewise stopped before C++ compilation because its SIAB snapshot
+omitted the tracked H TZDP seed, leaving 157/161 Python tests passing. These are
+infrastructure failures, not RED or GREEN evidence. The corrected scripts pin
+the Python 3.10.13 executable and check the seed SHA256 before testing. RED job
+`21333276` then failed exactly because the old source lacks
+`sternheimer_builds_product_pca_auxiliary_basis`, proving the test covers the
+exclusive explicit-ABS branch. Full-build job `21333277` passed all 161 Python
+tests and exposed one C++ fixture error: metadata updated with streamed
+`max_abs` had been declared `const`. The production interface correctly takes
+a writable reference, so only that fixture qualifier was removed. Immutable
+v8 job `21333371` contains 12176 regular-file hashes and two separately
+recorded symlink targets; it remains the pending full-build gate. No item is
+accepted as green until v8 and a real H target complete with matching
+real/reciprocal contraction checks.
+
+After that gate, use the new immutable ABACUS Sternheimer-SIAB build. The
+producer must emit `25 * sum(2*l+1, l=0..4) = 625` Bessel primitive columns per
+H atom. This primitive-column count is independent of the number of explicit
+ABS perturbation channels. Validate all 214 raw explicit channels per H through
+`l=8`, plus the retained Coulomb-whitened rank used in the reference rows. If
+the build rejects `l=4`, stop; do not silently reduce `lmax`.
+
+The fragment-ghost target entry explicitly maps `H_empty` primitive blocks to
+the shared H coefficient set while retaining their global atom indices:
+
+```json
+{"element_aliases": {"H_empty": "H"}}
+```
+
+Do not infer this mapping from a species-name suffix.
 
 - [ ] **Step 4: Submit target jobs and verify artifacts**
 
 Run all jobs on `df_dcu` `normal`. Verify scheduler `COMPLETED 0:0`, complete
 `m` multiplets, 16 frequencies, Coulomb-orthonormal perturbation provenance,
-matrix sizes, hashes, wall time, and peak memory before selector use.
+the complete occupied-state x retained-auxiliary x frequency Cartesian
+product, matrix sizes, hashes, wall time, and peak memory before selector use.
 
 - [ ] **Step 5: Commit target contracts and evidence**
 

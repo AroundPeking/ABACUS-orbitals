@@ -1,0 +1,47 @@
+INPUT_PARAMETERS
+suffix                  H_SIAB_GREEDY_ATOM_WFULL_NF16_E50
+calculation             scf
+ntype                   1
+nbands                  9
+nelec                   1
+nspin                   2
+nupdown                 1
+basis_type              lcao
+ecutwfc                 50
+lcao_ecut               100
+ks_solver               genelpa
+dft_functional          pbe
+symmetry                0
+pseudo_dir              ./
+orbital_dir             ./
+scf_thr                 1e-12
+scf_nmax                300
+mixing_type             broyden
+mixing_beta             0.3
+mixing_beta_mag         0.3
+mixing_gg0              0.0
+mixing_gg0_mag          0.0
+smearing_method         gauss
+smearing_sigma          0.001
+out_chg                 0
+out_wfc_lcao            0
+
+bessel_nao_ecut         100
+bessel_nao_rcut         8
+bessel_nao_smooth       1
+bessel_nao_sigma        0.1
+bessel_nao_tolerence    1e-12
+
+out_librpa_reader_version 1
+out_sternheimer_librpa  0
+out_sternheimer_siab    1
+sternheimer_siab_coulomb_threshold  1e-10
+sternheimer_siab_lmax  4
+sternheimer_nfreq       16
+sternheimer_frequency_grid_file fixed_frequency_grid_nfreq16_from_sos20A.dat
+sternheimer_frequency_mpi 1
+sternheimer_delta       1
+sternheimer_delta_max_states 0
+sternheimer_delta_norm_tol 1e-10
+exx_pca_threshold       10
+rpa_ccp_rmesh_times     5

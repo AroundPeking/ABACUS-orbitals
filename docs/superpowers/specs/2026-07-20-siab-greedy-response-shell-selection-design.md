@@ -76,12 +76,81 @@ this campaign it is fixed at `sternheimer_siab_lmax=4`.
 The response perturbations use the explicit fixed
 `H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs` auxiliary basis with SHA256
 `d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f`.
-Set `exx_pca_threshold=10` so no orbital-product PCA space replaces or augments
-that fixed auxiliary basis. This is required because the historical 41-channel
-PCA target contains only s, p, and d perturbations and therefore carries no
-f/g first-order-wavefunction weight. The explicit auxiliary perturbations are
-orthonormalized in the retained full-Coulomb eigenspace before the Delta-ST
-responses are written; no additional Coulomb matrix is applied inside SIAB.
+In the Sternheimer-SIAB producer, a nonempty explicit `ABFS_ORBITAL` list is an
+exclusive source: the producer reads that file directly and does not first
+construct or prepend an orbital-product PCA space. `exx_pca_threshold` is
+therefore ignored for this explicit-source branch. This is required because the
+historical 41-channel PCA target contains only s, p, and d perturbations and
+therefore carries no f/g first-order-wavefunction weight.
+
+The auxiliary provenance manifest is semantic: repeated references to the
+same file contents are counted once. In particular, a fragment STRU containing
+both H and H_empty entries that use this file must retain the same single-file
+SHA256 as atom and H3 targets. The ordered orbital and pseudopotential
+manifests are not deduplicated by this rule.
+
+The fixed file itself has `Lmax=8` and radial counts
+`(8,7,6,4,4,3,2,1,1)` for `l=0,...,8`, or 214 auxiliary functions per H.
+`construct_abfs()` reads these radial functions without a second PCA or
+Coulomb rotation. The exclusive branch, rather than the incidental
+`exx_pca_threshold > 1` behavior, guarantees that the source contains exactly
+these explicit functions. This still does not by itself make the perturbations
+Coulomb orthonormal.
+
+For raw auxiliary functions `P_mu` and their full-Coulomb Hartree potentials
+`v_mu = v P_mu`, form the complete molecular Coulomb matrix with the same
+`abfs_ccp` radial potentials and ABFS ordering used by Delta-ST
+
+```text
+V[mu,nu] = integral P_mu(r) v_nu(r) dr.
+V = U diag(lambda) U^T.
+W = U_retained diag(lambda_retained^-1/2).
+vbar_a(r) = sum_mu v_mu(r) W[mu,a].
+```
+
+The matrix is global over all centers, as in the FHI-aims atomic Sternheimer
+path (`integrate_coulomb_matr_v0` followed by `power_auxmat_lapack(...,-0.5)`).
+The retained eigenspace rejects materially negative eigenvalues and records
+every discarded near-null direction. Delta-ST is solved for `vbar_a`, so the
+stored first-order wavefunctions are
+
+```text
+delta_psibar_a = sum_mu delta_psi_mu W[mu,a].
+```
+
+and satisfy equal weighting in a Coulomb-orthonormal perturbation space. This
+is the response-space form of `V^-1/2 M V^-1/2`; without it, the SIAB loss
+changes under a harmless rescaling or invertible recombination of the input
+ABS. The producer writes raw-channel metadata, the full-Coulomb eigenvalues,
+retained rank, threshold, and transform hash. No additional Coulomb matrix is
+applied inside SIAB after this producer-side normalization.
+
+This global transform destroys the atom-block meaning of the transformed
+auxiliary index. Consequently, `out_sternheimer_siab` writes only the whitened
+first-order-wavefunction target and its whitening provenance. The ordinary
+LibRPA v1 chi0 path remains a separate raw-ABFS run with the original atom
+blocks. A transformed SIAB response must never be written under the raw v1
+atom metadata or combined with an untransformed Coulomb file.
+
+The producer must also avoid materializing all dense real-space objects at
+once. In the H3 case, keeping the raw Hartree channels, the transformed
+channels, and all 1875 full-cell Bessel primitives simultaneously exceeds the
+110610 MB node limit. Build the dense molecular metric from the radial
+`abfs_ccp`/ABFS pair, then sample one raw Hartree channel at a time and
+accumulate it directly into the retained transformed array. Preserve the
+existing PW-projected Bessel definition by storing physically normalized
+reciprocal rows `B[p,g]`; calculate `Q=Y B^H` after transforming each complete
+response once and calculate `S=B B^H` with BLAS. This avoids every
+`n_grid * n_primitive` full-cell array without introducing a new real-space
+Bessel approximation. Memory scales as the retained Hartree array plus
+`n_pw * n_primitive`, not as the sum of raw and transformed Hartree matrices
+and full-grid primitives.
+
+The fragment target contains ABACUS species `H` and `H_empty`, while both
+centers must use the same optimized H radial coefficients. Its target entry
+therefore declares the explicit alias `element_aliases: {"H_empty": "H"}`.
+The loader preserves global `atom_index` values and rejects implicit, cyclic,
+or missing-source aliases.
 
 ## 5. Weighted Residual
 
@@ -255,6 +324,9 @@ Unit tests must establish RED before implementation and cover:
 7. fixed-DZP columns remaining bitwise unchanged after every append;
 8. absence of any H2 energy field or input in the selector API and manifest;
 9. explicit failure when no positive-score candidate remains.
+10. rejection of a target whose fixed auxiliary SHA256, reciprocal primitive
+    representation, primitive count, or node-memory status disagrees with the
+    producer contract.
 
 Focused and full SIAB tests run on `df_dcu` `normal`, one full node with 30 CPU
 threads and 110610 MB. Physics producers also run only on `normal`. Every

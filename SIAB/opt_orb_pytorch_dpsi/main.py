@@ -17,7 +17,7 @@ from optimization_loss import normalize_loss_config
 from response_family_spillage import NormalizedPhysicalFamilySpillage
 from response_selection import ResponseTargetFamily
 from sternheimer_spillage import OrbitalColumn
-from sternheimer_targets import parse_target_entries
+from sternheimer_targets import apply_target_element_aliases, parse_target_entries
 
 import numpy as np
 import torch
@@ -52,7 +52,9 @@ def _load_sternheimer_data(file_list, info_optimize):
 			if entry.role != "physical":
 				continue
 			physical.setdefault(entry.family, []).append(
-				IO.read_sternheimer.read_sternheimer(entry.path)
+				apply_target_element_aliases(
+					IO.read_sternheimer.read_sternheimer(entry.path), entry
+				)
 			)
 		if not physical:
 			raise ValueError(
