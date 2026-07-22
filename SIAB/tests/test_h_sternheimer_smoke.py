@@ -941,6 +941,29 @@ class ExampleInputTest(unittest.TestCase):
         )
         self.assertNotIn("PENDING_GLOBAL_WHITENING", run_script)
 
+    def test_greedy_selection_runner_uses_validated_targets_and_full_node(self):
+        run_script = (GREEDY_RESPONSE / "run_selection.slurm").read_text()
+        driver = (GREEDY_RESPONSE / "run_response_selection.py").read_text()
+        template = json.loads(
+            (GREEDY_RESPONSE / "optimizer_template.json").read_text()
+        )
+
+        self.assertIn("#SBATCH --partition=normal", run_script)
+        self.assertIn("#SBATCH --nodes=1", run_script)
+        self.assertIn("#SBATCH --ntasks=1", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("#SBATCH --time=1-00:00:00", run_script)
+        self.assertEqual(run_script.count("target_validation.json"), 3)
+        self.assertIn("campaign_manifest.json", run_script)
+        self.assertIn("run_response_selection.py", run_script)
+        self.assertNotIn("rpa_binding", driver.lower())
+        self.assertNotIn("h2_energy", driver.lower())
+        self.assertEqual(template["loss"]["mode"], "st_dpsi_joint")
+        self.assertEqual(template["element"]["Nu"]["H"], [2, 1, 0, 0, 0])
+        self.assertEqual(len(template["file_list"]["origin"]), 3)
+        self.assertEqual(len(template["file_list"]["linear"][0]), 3)
+
 
 class AppendedResponseShellTest(unittest.TestCase):
     @staticmethod

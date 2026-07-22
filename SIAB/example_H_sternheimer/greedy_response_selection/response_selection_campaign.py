@@ -1,5 +1,8 @@
 """I/O contracts shared by the physical response-shell selection campaign."""
 
+import copy
+from dataclasses import dataclass
+import json
 import math
 from pathlib import Path
 
@@ -7,6 +10,16 @@ import torch
 
 from IO.read_sternheimer import read_sternheimer
 from response_selection import ResponseTargetFamily
+from select_response_shells import (
+    build_step_input,
+    freeze_selection_sequence,
+    run_joint_optimizer,
+    run_nested_selection,
+)
+from sternheimer_spillage import (
+    RadialResidualSpectrum,
+    radial_residual_spectrum_many,
+)
 from sternheimer_targets import (
     apply_target_element_aliases,
     parse_target_entries,
@@ -18,6 +31,20 @@ _FAMILY_ROLES = {
     "multicenter": "physical",
     "fragment_ghost": "ghost",
 }
+
+
+@dataclass(frozen=True)
+class OptimizedResponseStep:
+    coefficients: dict
+    artifact_sha256: dict
+    input_path: Path
+
+
+@dataclass(frozen=True)
+class ResponseSelectionCampaignResult:
+    selection: object
+    selection_manifest: Path
+    campaign_manifest: Path
 
 
 def _validate_nu(expected_nu, max_l):
@@ -187,6 +214,118 @@ def write_optimizer_coefficients(path, coefficients):
     Path(path).write_text("\n".join(output), encoding="utf-8")
 
 
+def _absolute_path(value, base_dir, name):
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} paths must be nonempty strings")
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path(base_dir) / path
+    return str(path.resolve())
+
+
+def resolve_optimizer_template_paths(template, base_dir):
+    """Resolve legacy origin/dpsi paths before optimization changes cwd."""
+    if not isinstance(template, dict):
+        raise TypeError("optimizer template must be a dictionary")
+    result = copy.deepcopy(template)
+    try:
+        file_list = result["file_list"]
+        origin = file_list["origin"]
+        linear = file_list["linear"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("optimizer template requires origin and linear files") from exc
+    if not isinstance(origin, list) or not origin:
+        raise ValueError("optimizer template origin must be a nonempty list")
+    if not isinstance(linear, list) or not linear:
+        raise ValueError("optimizer template linear must be a nonempty list")
+    file_list["origin"] = [
+        _absolute_path(path, base_dir, "origin") for path in origin
+    ]
+    resolved_linear = []
+    for group in linear:
+        if not isinstance(group, list) or not group:
+            raise ValueError("each optimizer linear group must be nonempty")
+        resolved_linear.append(
+            [_absolute_path(path, base_dir, "linear") for path in group]
+        )
+    file_list["linear"] = resolved_linear
+    return result
+
+
+def _coefficient_shape(coefficients):
+    if not isinstance(coefficients, dict) or len(coefficients) != 1:
+        raise ValueError("the H response campaign requires exactly one element")
+    element = next(iter(coefficients))
+    channels = coefficients[element]
+    if not isinstance(channels, (list, tuple)) or not channels:
+        raise ValueError("response coefficients require angular channels")
+    radial_rows = None
+    nu = []
+    for channel in channels:
+        if not isinstance(channel, torch.Tensor) or channel.ndim != 2:
+            raise ValueError("response coefficient channels must be matrices")
+        if radial_rows is None:
+            radial_rows = channel.shape[0]
+        elif channel.shape[0] != radial_rows:
+            raise ValueError("response coefficient channels must share radial rows")
+        nu.append(channel.shape[1])
+    if radial_rows is None or radial_rows <= 0:
+        raise ValueError("response coefficients require positive radial rows")
+    return element, radial_rows, tuple(nu)
+
+
+def optimize_response_step(
+    *,
+    step,
+    coefficients,
+    template,
+    targets,
+    fixed_specs,
+    seed,
+    output_dir,
+    optimizer,
+    python,
+):
+    """Run one checked native SIAB joint optimization and read its coefficients."""
+    if type(step) is not int or step <= 0:
+        raise ValueError("step must be a positive integer")
+    output_dir = Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"optimization step output is not empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    element, radial_rows, nu = _coefficient_shape(coefficients)
+    initial_path = output_dir / "INITIAL_ORBITAL_RESULTS.txt"
+    write_optimizer_coefficients(initial_path, coefficients)
+    input_value = build_step_input(
+        template,
+        targets,
+        initial_path.resolve(),
+        {element: list(nu)},
+        fixed_specs,
+        seed,
+    )
+    optimizer_dir = output_dir / "optimizer"
+    artifacts = run_joint_optimizer(
+        input_value,
+        optimizer_dir,
+        optimizer,
+        python,
+    )
+    optimized = read_optimizer_coefficients(
+        optimizer_dir / "ORBITAL_RESULTS.txt",
+        element=element,
+        radial_rows=radial_rows,
+        max_l=len(nu) - 1,
+        expected_nu=nu,
+    )
+    return OptimizedResponseStep(
+        coefficients=optimized,
+        artifact_sha256=artifacts,
+        input_path=optimizer_dir / "INPUT",
+    )
+
+
 def assemble_response_families(loaded_entries):
     """Build the frozen atom, multicenter, and fragment/ghost family tuple."""
     loaded_entries = tuple(loaded_entries)
@@ -231,3 +370,219 @@ def load_response_families(targets):
         for entry in entries
     )
     return assemble_response_families(loaded)
+
+
+def _current_radial_specs(coefficients):
+    specs = []
+    for element in sorted(coefficients):
+        for l, channel in enumerate(coefficients[element]):
+            if not isinstance(channel, torch.Tensor) or channel.ndim != 2:
+                raise ValueError("response coefficient channels must be matrices")
+            specs.extend(
+                {"element": element, "l": l, "zeta": zeta}
+                for zeta in range(1, channel.shape[1] + 1)
+            )
+    if not specs:
+        raise ValueError("response spectrum requires at least one current orbital")
+    return tuple(specs)
+
+
+def build_response_spectrum_builder(
+    atom_family,
+    multicenter_family,
+    *,
+    element,
+    max_l,
+    relative_rank_tolerance,
+    magnetic_overlap_tolerance,
+    condition_limit,
+):
+    """Return the physical atom+multicenter residual-spectrum builder."""
+    for family, name in (
+        (atom_family, "atom"),
+        (multicenter_family, "multicenter"),
+    ):
+        if not isinstance(family, ResponseTargetFamily):
+            raise TypeError(f"{name} family must be a ResponseTargetFamily")
+        if family.name != name or family.role != "physical":
+            raise ValueError(f"{name} family has the wrong name or role")
+    if not isinstance(element, str) or not element:
+        raise ValueError("element must be nonempty")
+    if type(max_l) is not int or max_l < 0:
+        raise ValueError("max_l must be a nonnegative integer")
+    data_items = atom_family.data + multicenter_family.data
+
+    def build(coefficients):
+        current_specs = _current_radial_specs(coefficients)
+        spectra = []
+        for l in range(max_l + 1):
+            try:
+                spectrum = radial_residual_spectrum_many(
+                    data_items,
+                    coefficients,
+                    current_specs,
+                    element,
+                    l,
+                    relative_rank_tolerance=relative_rank_tolerance,
+                    magnetic_overlap_tolerance=magnetic_overlap_tolerance,
+                    condition_limit=condition_limit,
+                )
+            except RuntimeError as exc:
+                if str(exc) != "projected primitive overlap has no positive modes":
+                    raise
+                radial_rows = coefficients[element][l].shape[0]
+                atom_indices = sorted(
+                    {
+                        block.atom_index
+                        for data in data_items
+                        for block in data.blocks
+                        if block.element == element and block.l == l
+                    }
+                )
+                spectrum = RadialResidualSpectrum(
+                    element=element,
+                    atom_index=None,
+                    l=l,
+                    magnetic_channels=tuple(range(-l, l + 1)),
+                    numerical_rank=0,
+                    eigenvalues=torch.zeros(1, dtype=torch.float64),
+                    cumulative_capture=torch.zeros(1, dtype=torch.float64),
+                    coefficients=torch.zeros((radial_rows, 1), dtype=torch.float64),
+                    overlap_relative_deviation=0.0,
+                    atom_indices=tuple(atom_indices),
+                )
+            spectra.append(spectrum)
+        return tuple(spectra)
+
+    return build
+
+
+def _metrics_payload(metrics):
+    return {
+        "atom_loss": metrics.atom_loss,
+        "multicenter_loss": metrics.multicenter_loss,
+        "global_capture": metrics.global_capture,
+        "borrowing": metrics.borrowing,
+        "per_l_residual_ratio": {
+            str(l): value
+            for l, value in sorted(metrics.per_l_residual_ratio.items())
+        },
+    }
+
+
+def run_response_selection_campaign(
+    *,
+    config,
+    initial,
+    fixed_specs,
+    families,
+    optimizer_template,
+    targets,
+    output_dir,
+    optimizer,
+    python,
+    condition_limit,
+    max_steps=64,
+):
+    """Run the nested H-only response selection without any H2 feedback."""
+    if not isinstance(config, dict):
+        raise TypeError("selection config must be a dictionary")
+    try:
+        seed = config["seed"]
+        max_l = config["max_l"]
+        relative_rank_tolerance = config["relative_rank_tolerance"]
+        magnetic_overlap_tolerance = config["magnetic_overlap_tolerance"]
+    except KeyError as exc:
+        raise ValueError(f"selection config is missing {exc.args[0]}") from exc
+    if type(seed) is not int or seed < 0 or seed >= 2**32:
+        raise ValueError("selection seed must satisfy 0 <= seed < 2**32")
+    if type(max_l) is not int or max_l < 0:
+        raise ValueError("selection max_l must be a nonnegative integer")
+    element, _, nu = _coefficient_shape(initial)
+    if len(nu) != max_l + 1:
+        raise ValueError("initial coefficient channels do not match max_l")
+    families = tuple(families)
+    if len(families) != 3:
+        raise ValueError("selection campaign requires three response families")
+    atom_family, multicenter_family, ghost_family = families
+
+    output_dir = Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"campaign output is not empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = output_dir / "work"
+    work_dir.mkdir()
+    spectrum_builder = build_response_spectrum_builder(
+        atom_family,
+        multicenter_family,
+        element=element,
+        max_l=max_l,
+        relative_rank_tolerance=relative_rank_tolerance,
+        magnetic_overlap_tolerance=magnetic_overlap_tolerance,
+        condition_limit=condition_limit,
+    )
+    optimizer_records = {}
+
+    def optimize_step(index, coefficients, selected):
+        del selected
+        value = optimize_response_step(
+            step=index,
+            coefficients=coefficients,
+            template=optimizer_template,
+            targets=targets,
+            fixed_specs=fixed_specs,
+            seed=seed,
+            output_dir=work_dir / f"step_{index:03d}",
+            optimizer=optimizer,
+            python=python,
+        )
+        optimizer_records[str(index)] = {
+            "input": str(value.input_path.relative_to(output_dir)),
+            "artifacts": value.artifact_sha256,
+        }
+        return value.coefficients
+
+    selection = run_nested_selection(
+        config,
+        initial,
+        initial,
+        fixed_specs,
+        atom_family,
+        multicenter_family,
+        ghost_family,
+        spectrum_builder,
+        optimize_step,
+        max_steps=max_steps,
+    )
+    selection_manifest = freeze_selection_sequence(
+        output_dir / "frozen",
+        config,
+        initial,
+        fixed_specs,
+        selection.steps,
+    )
+    campaign_payload = {
+        "format_version": 1,
+        "status": selection.status,
+        "steps": len(selection.steps),
+        "metrics": _metrics_payload(selection.metrics),
+        "selection_manifest": str(selection_manifest.relative_to(output_dir)),
+        "optimizer_steps": optimizer_records,
+        "targets": copy.deepcopy(targets),
+    }
+    campaign_manifest = output_dir / "campaign_manifest.json"
+    campaign_manifest.write_text(
+        json.dumps(
+            campaign_payload,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return ResponseSelectionCampaignResult(
+        selection=selection,
+        selection_manifest=selection_manifest,
+        campaign_manifest=campaign_manifest,
+    )

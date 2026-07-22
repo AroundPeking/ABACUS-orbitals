@@ -1,0 +1,62 @@
+{
+  "seed": 20260720,
+  "file_list": {
+    "origin": [
+      "data/H-STRU2-8-0.7/orb_matrix.0.dat",
+      "data/H-STRU2-8-0.9/orb_matrix.0.dat",
+      "data/H-STRU2-8-1.3/orb_matrix.0.dat"
+    ],
+    "linear": [[
+      "data/H-STRU2-8-0.7/orb_matrix.1.dat",
+      "data/H-STRU2-8-0.9/orb_matrix.1.dat",
+      "data/H-STRU2-8-1.3/orb_matrix.1.dat"
+    ]]
+  },
+  "element": {
+    "Nt_all": ["H"],
+    "Nu": {"H": [2, 1, 0, 0, 0]}
+  },
+  "weight": {
+    "stru": [1.0, 1.0, 1.0],
+    "bands_range": [1, 1, 1]
+  },
+  "optimize": [
+    {
+      "optimizer": "Adam",
+      "kwargs": {"lr": 0.003},
+      "cal_T": false,
+      "norm": "element",
+      "max_steps": 3000
+    }
+  ],
+  "C_init_info": {
+    "init_from_file": true,
+    "C_init_file": "replaced-by-campaign",
+    "opt_C_read": false
+  },
+  "V_info": {
+    "init_from_file": true,
+    "same_band": true
+  },
+  "radial": {
+    "Rcut": 8,
+    "dr": 0.01,
+    "Ecut": 100,
+    "smearing_sigma": 0.1
+  },
+  "freeze_orbitals": [
+    {"element": "H", "l": 0, "zeta": 1},
+    {"element": "H", "l": 0, "zeta": 2},
+    {"element": "H", "l": 1, "zeta": 1}
+  ],
+  "loss": {
+    "mode": "st_dpsi_joint",
+    "epsilon": 1e-14,
+    "condition_limit": 1e12,
+    "tau_dft": 0.05,
+    "tau_dpsi": 0.10,
+    "constraint_penalty_dft": 10.0,
+    "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 0.1
+  }
+}

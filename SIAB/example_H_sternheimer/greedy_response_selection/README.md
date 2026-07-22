@@ -26,3 +26,16 @@ native `ORBITAL_RESULTS.txt` coefficient block without inventing missing
 columns. The three producer `STRU` files are deliberately force-tracked even
 though the repository-wide ignore rules match `*STRU`; every immutable runtime
 closure must include `INPUT`, `KPT`, and `STRU` for each producer.
+
+`run_response_selection.py` executes the frozen nested loop. Atom and H3
+physical targets define the radial residual spectra; the fragment/ghost target
+enters only the borrowing-balance score. A selected shell is initialized from
+the leading residual mode, optimized with the existing `st_dpsi_joint` path,
+read back through the native coefficient bridge, and followed by a rebuilt
+spectrum. A fully spanned angular channel is represented as a zero-residual
+spectrum so that it is rejected deterministically while other channels remain
+eligible. The optimizer template uses the independently generated H3
+`lmax=2` origin/dpsi matrices, so DFT/dpsi supervision covers s, p, and d;
+higher angular channels are response-driven while the DZP columns remain
+bitwise fixed. The sequence manifest is frozen before any held-out energy is
+evaluated.
