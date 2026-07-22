@@ -916,6 +916,8 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("#SBATCH --mem=110610M", run_script)
         self.assertIn("#SBATCH --time=1-00:00:00", run_script)
         self.assertIn("#SBATCH --array=0-2", run_script)
+        self.assertIn("for required in INPUT STRU KPT; do", run_script)
+        self.assertIn('test -s "$template_dir/$required"', run_script)
         self.assertIn("test ! -e \"$output_dir\"", run_script)
         self.assertIn("mpirun -np 16 -ppn 1", run_script)
         self.assertIn(

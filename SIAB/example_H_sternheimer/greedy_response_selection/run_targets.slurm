@@ -12,8 +12,8 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_v1_20260722
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v1_20260722
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_v2_20260722
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v2_20260722
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
@@ -42,6 +42,9 @@ output_dir=$campaign_root/$case_name
 test -x "$abacus_work"
 test "$abacus_source_commit" = b8b889b63e6e44a54d8de632c800f25b2a05ad06
 test "$abacus_sha256" = d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44
+for required in INPUT STRU KPT; do
+  test -s "$template_dir/$required"
+done
 test ! -e "$output_dir"
 mkdir -p "$output_dir"
 cp "$template_dir/INPUT" "$template_dir/STRU" "$template_dir/KPT" "$output_dir/"
