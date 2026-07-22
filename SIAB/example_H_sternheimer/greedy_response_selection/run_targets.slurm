@@ -12,16 +12,14 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_20260720
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_20260720
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_v1_20260722
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v1_20260722
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
-# Replace these sentinels only after the explicit-ABS and global-whitening
-# normal-node gates pass. The checks below prevent accidental pre-gate runs.
-abacus_work=PENDING_GLOBAL_WHITENING_BUILD
-abacus_source_commit=PENDING_GLOBAL_WHITENING_COMMIT
-abacus_sha256=PENDING_GLOBAL_WHITENING_SHA256
+abacus_work=/work1/ghj/sternheimer_abacus_tests/siab_full_integration_v11_20260722/build/abacus_3p
+abacus_source_commit=b8b889b63e6e44a54d8de632c800f25b2a05ad06
+abacus_sha256=d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44
 
 case_names=(producer_atom producer_h3 producer_fragment_ghost)
 suffixes=(
@@ -41,9 +39,9 @@ raw_naux=${expected_auxiliary_channels[$index]}
 template_dir=$source_root/SIAB/example_H_sternheimer/greedy_response_selection/$case_name
 output_dir=$campaign_root/$case_name
 
-test "$abacus_work" != PENDING_GLOBAL_WHITENING_BUILD
-test "$abacus_source_commit" != PENDING_GLOBAL_WHITENING_COMMIT
-test "$abacus_sha256" != PENDING_GLOBAL_WHITENING_SHA256
+test -x "$abacus_work"
+test "$abacus_source_commit" = b8b889b63e6e44a54d8de632c800f25b2a05ad06
+test "$abacus_sha256" = d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44
 test ! -e "$output_dir"
 mkdir -p "$output_dir"
 cp "$template_dir/INPUT" "$template_dir/STRU" "$template_dir/KPT" "$output_dir/"

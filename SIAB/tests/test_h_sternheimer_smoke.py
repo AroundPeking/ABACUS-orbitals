@@ -926,6 +926,18 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("validate_targets.py", run_script)
         self.assertIn("abacus_source_commit=", run_script)
         self.assertIn("abacus_sha256=", run_script)
+        self.assertIn(
+            "abacus_source_commit=b8b889b63e6e44a54d8de632c800f25b2a05ad06",
+            run_script,
+        )
+        self.assertIn(
+            "abacus_sha256=d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44",
+            run_script,
+        )
+        self.assertIn(
+            "siab_full_integration_v11_20260722/build/abacus_3p", run_script
+        )
+        self.assertNotIn("PENDING_GLOBAL_WHITENING", run_script)
 
 
 class AppendedResponseShellTest(unittest.TestCase):

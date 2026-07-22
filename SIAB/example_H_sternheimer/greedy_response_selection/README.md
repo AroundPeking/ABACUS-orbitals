@@ -10,7 +10,11 @@ selection records, checks the fixed columns bitwise, and invokes the existing
 joint Sternheimer+dpsi optimizer as a checked subprocess. Selector inputs and
 manifests reject H2/RPA energy fields.
 
-The physical target producers and the production nested-sequence command are
-added only after the `l<=4` atom, H3, and fragment/ghost files pass their own
-contract checks. Until then this directory defines and tests the immutable file
-and optimizer boundary; it does not contain an H2 acceptance result.
+The target runner is pinned to ABACUS commit
+`b8b889b63e6e44a54d8de632c800f25b2a05ad06` and executable SHA256
+`d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44`.
+That build passed the fixed-ABS, global full-Coulomb whitening, reciprocal
+primitive, writer, provenance, and memory-gate tests. The physical target
+producers remain a separate gate: atom, H3, and fragment/ghost outputs must all
+pass `validate_targets.py` before shell selection or any H2 acceptance result is
+allowed.
