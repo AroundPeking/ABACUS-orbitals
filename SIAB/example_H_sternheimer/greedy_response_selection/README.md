@@ -18,3 +18,11 @@ primitive, writer, provenance, and memory-gate tests. The physical target
 producers remain a separate gate: atom, H3, and fragment/ghost outputs must all
 pass `validate_targets.py` before shell selection or any H2 acceptance result is
 allowed.
+
+`response_selection_campaign.py` is the bridge between the physical producer
+files and the nested selector. It requires exactly the `atom`, `multicenter`,
+and `fragment_ghost` families with their frozen roles, and round-trips SIAB's
+native `ORBITAL_RESULTS.txt` coefficient block without inventing missing
+columns. The three producer `STRU` files are deliberately force-tracked even
+though the repository-wide ignore rules match `*STRU`; every immutable runtime
+closure must include `INPUT`, `KPT`, and `STRU` for each producer.
