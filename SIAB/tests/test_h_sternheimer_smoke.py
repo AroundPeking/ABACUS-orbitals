@@ -939,6 +939,9 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn(
             "siab_full_integration_v11_20260722/build/abacus_3p", run_script
         )
+        self.assertNotIn(
+            "ABACUS_STERNHEIMER_FD_ST_ORBITAL_FILES", run_script
+        )
         self.assertNotIn("PENDING_GLOBAL_WHITENING", run_script)
 
     def test_greedy_selection_runner_uses_validated_targets_and_full_node(self):
