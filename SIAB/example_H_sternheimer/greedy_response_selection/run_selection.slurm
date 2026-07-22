@@ -9,10 +9,10 @@
 
 set -euo pipefail
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_source_v1_20260722
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_source_v2_20260722
 asset_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_assets_v1_20260722
-target_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v2_20260722
-output_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_campaign_v1_20260722
+target_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v3_20260722
+output_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_campaign_v2_20260722
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
 greedy=$source_root/SIAB/example_H_sternheimer/greedy_response_selection

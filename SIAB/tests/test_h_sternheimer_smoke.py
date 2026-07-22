@@ -929,15 +929,19 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("abacus_source_commit=", run_script)
         self.assertIn("abacus_sha256=", run_script)
         self.assertIn(
-            "abacus_source_commit=b8b889b63e6e44a54d8de632c800f25b2a05ad06",
+            "abacus_source_commit=868c8ee552141abd656bd858a1954e90b50b3b82",
             run_script,
         )
         self.assertIn(
-            "abacus_sha256=d03e2ad79d645eebca0729ff896a4f8e5e786cbb03ae7f71e3aa2fd2ccf7fb44",
+            "abacus_sha256=a2bd7b93240672a07785cc049c90382e6f9d1990cfd16ed3ee1b3813074d67d1",
             run_script,
         )
         self.assertIn(
-            "siab_full_integration_v11_20260722/build/abacus_3p", run_script
+            "siab_full_integration_v12_20260722/build/abacus_3p", run_script
+        )
+        self.assertIn("siab_greedy_targets_source_v3_20260722", run_script)
+        self.assertIn(
+            "siab_greedy_targets_global_whitening_v3_20260722", run_script
         )
         self.assertNotIn(
             "ABACUS_STERNHEIMER_FD_ST_ORBITAL_FILES", run_script
@@ -960,6 +964,11 @@ class ExampleInputTest(unittest.TestCase):
         self.assertEqual(run_script.count("target_validation.json"), 3)
         self.assertIn("campaign_manifest.json", run_script)
         self.assertIn("run_response_selection.py", run_script)
+        self.assertIn("siab_greedy_selection_source_v2_20260722", run_script)
+        self.assertIn(
+            "siab_greedy_targets_global_whitening_v3_20260722", run_script
+        )
+        self.assertIn("siab_greedy_selection_campaign_v2_20260722", run_script)
         self.assertNotIn("rpa_binding", driver.lower())
         self.assertNotIn("h2_energy", driver.lower())
         self.assertEqual(template["loss"]["mode"], "st_dpsi_joint")
