@@ -12,36 +12,37 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_v3_20260722
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_global_whitening_v3_20260722
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_source_h2_v1_20260725
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_h2_whitening_v1_20260725
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
-abacus_work=/work1/ghj/sternheimer_abacus_tests/siab_full_integration_v12_20260722/build/abacus_3p
-abacus_source_commit=868c8ee552141abd656bd858a1954e90b50b3b82
-abacus_sha256=a2bd7b93240672a07785cc049c90382e6f9d1990cfd16ed3ee1b3813074d67d1
+abacus_work=/work1/ghj/sternheimer_abacus_tests/siab_openmp_red_v13_20260723/artifacts/f9c44f49e_job21356516/abacus_3p
+abacus_source_commit=f9c44f49e0dedaeb6cb7cd0aa886cd924b280c9a
+abacus_sha256=76e8ecfeba19a907507c24da5428d776bf34219f81319b574227f10772d96746
 
-case_names=(producer_atom producer_h3 producer_fragment_ghost)
+case_names=(producer_atom producer_h2 producer_h2_fragment_ghost)
 suffixes=(
   H_SIAB_GREEDY_ATOM_WFULL_NF16_E50
-  H3_SIAB_GREEDY_EQ090_WFULL_NF16_E50
-  H_GHOST2_SIAB_GREEDY_EQ090_WFULL_NF16_E50
+  H2_SIAB_GREEDY_R074085_WFULL_NF16_E50
+  H_GHOST1_SIAB_GREEDY_R074085_WFULL_NF16_E50
 )
-expected_atoms=(1 3 3)
-expected_auxiliary_channels=(214 642 642)
-expected_primitive_columns_per_h=625
+expected_atoms=(1 2 2)
+expected_auxiliary_channels=(214 428 428)
+expected_primitive_columns=(625 1250 1250)
 
 index=${SLURM_ARRAY_TASK_ID:?}
 case_name=${case_names[$index]}
 suffix=${suffixes[$index]}
 nat=${expected_atoms[$index]}
 raw_naux=${expected_auxiliary_channels[$index]}
+primitive_columns=${expected_primitive_columns[$index]}
 template_dir=$source_root/SIAB/example_H_sternheimer/greedy_response_selection/$case_name
 output_dir=$campaign_root/$case_name
 
 test -x "$abacus_work"
-test "$abacus_source_commit" = 868c8ee552141abd656bd858a1954e90b50b3b82
-test "$abacus_sha256" = a2bd7b93240672a07785cc049c90382e6f9d1990cfd16ed3ee1b3813074d67d1
+test "$abacus_source_commit" = f9c44f49e0dedaeb6cb7cd0aa886cd924b280c9a
+test "$abacus_sha256" = 76e8ecfeba19a907507c24da5428d776bf34219f81319b574227f10772d96746
 for required in INPUT STRU KPT; do
   test -s "$template_dir/$required"
 done
@@ -53,11 +54,18 @@ cp "$asset_root/H_ONCV_PBE-1.0.upf" "$output_dir/"
 cp "$asset_root/H_gga_8au_100Ry_3s2p.orb" "$output_dir/"
 cp "$asset_root/H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs" "$output_dir/"
 
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-30}
-export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-30}
-export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK:-30}
+threads=${ABACUS_STERNHEIMER_THREADS:-16}
+case "$threads" in
+  1|16|24|30) ;;
+  *) echo "Unsupported ABACUS_STERNHEIMER_THREADS=$threads" >&2; exit 2 ;;
+esac
+export OMP_NUM_THREADS=$threads
+export MKL_NUM_THREADS=$threads
+export OPENBLAS_NUM_THREADS=$threads
 export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
+export OMP_MAX_ACTIVE_LEVELS=1
+export OMP_WAIT_POLICY=PASSIVE
 export MKL_DYNAMIC=FALSE
 export ABACUS_STERNHEIMER_FD_ST_ORBITAL_DIR="$output_dir/"
 export ABACUS_STERNHEIMER_FD_ST_FREQ_RANK_SHIFT=1
@@ -110,5 +118,5 @@ sha256sum "$result_dir/sternheimer_matrix.dat" \
   "$output_dir/STERNHEIMER_ABFS_CHANNELS.dat" \
   "$output_dir/STERNHEIMER_SIAB_COULOMB_WHITENING.dat" \
   "$output_dir/target_validation.json"
-echo "expected_primitive_columns_per_h=$expected_primitive_columns_per_h"
+echo "expected_primitive_columns=$primitive_columns"
 echo "date_end=$(date +%F_%T)"
