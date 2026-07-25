@@ -56,7 +56,7 @@ for value in sys.argv[1:]:
     payload = json.loads(pathlib.Path(value).read_text())
     if payload.get("abfs_source") != "explicit_abfs":
         raise SystemExit("target validation did not preserve explicit ABFS")
-    if payload.get("frequencies") != 16:
+    if len(payload.get("frequencies", ())) != 16:
         raise SystemExit("target validation has the wrong frequency count")
 PY
 

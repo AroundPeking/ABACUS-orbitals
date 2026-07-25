@@ -61,6 +61,24 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("producer_h2_fragment_ghost", selection)
         self.assertNotIn("producer_h3", selection)
         self.assertNotIn("$h3_target", selection)
+        self.assertIn('len(payload.get("frequencies", ())) != 16', selection)
+
+    def test_h2_target_openmp_benchmark_uses_the_production_operator(self):
+        benchmark = (
+            GREEDY / "run_h2_target_openmp_ab.slurm"
+        ).read_text(encoding="utf-8")
+        self.assertIn("#SBATCH --array=0-1", benchmark)
+        self.assertIn("thread_counts=(16 24)", benchmark)
+        self.assertIn("producer_h2", benchmark)
+        self.assertIn("ecutwfc 50", benchmark)
+        self.assertIn("sternheimer_nfreq 1", benchmark)
+        self.assertIn("H2_SIAB_OMP${threads}_NFREQ1_E50", benchmark)
+        self.assertIn("global_full_coulomb", benchmark)
+        self.assertIn("validate_targets.py", benchmark)
+        self.assertIn("compare_sternheimer_targets.py", benchmark)
+
+        comparator = GREEDY / "compare_sternheimer_targets.py"
+        self.assertTrue(comparator.is_file())
 
 
 if __name__ == "__main__":
