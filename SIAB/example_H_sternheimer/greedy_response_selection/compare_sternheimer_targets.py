@@ -35,14 +35,45 @@ def _compare_tensor(reference, candidate, name):
     }
 
 
+def _compare_provenance(reference, candidate):
+    reference = dict(reference)
+    candidate = dict(candidate)
+    reference_threads = reference.pop("omp_threads", None)
+    candidate_threads = candidate.pop("omp_threads", None)
+
+    if (reference_threads is None) != (candidate_threads is None):
+        raise ValueError("target provenance differs: omp_threads")
+    for name, value in (
+        ("reference omp_threads", reference_threads),
+        ("candidate omp_threads", candidate_threads),
+    ):
+        if value is not None and (type(value) is not int or value <= 0):
+            raise ValueError(f"{name} must be a positive integer")
+
+    differing_fields = sorted(
+        key
+        for key in set(reference) | set(candidate)
+        if reference.get(key) != candidate.get(key)
+    )
+    if differing_fields:
+        raise ValueError(
+            "target provenance differs: " + ", ".join(differing_fields)
+        )
+    return {
+        "reference_omp_threads": reference_threads,
+        "candidate_omp_threads": candidate_threads,
+    }
+
+
 def compare(reference_path, candidate_path):
     reference = read_sternheimer(reference_path)
     candidate = read_sternheimer(candidate_path)
 
     if reference.blocks != candidate.blocks:
         raise ValueError("primitive block layout differs")
-    if reference.provenance != candidate.provenance:
-        raise ValueError("target provenance differs")
+    provenance = _compare_provenance(
+        reference.provenance, candidate.provenance
+    )
 
     integer_metadata = {
         "occupied_state": bool(
@@ -58,6 +89,7 @@ def compare(reference_path, candidate_path):
     return {
         "reference": str(Path(reference_path)),
         "candidate": str(Path(candidate_path)),
+        "provenance": provenance,
         "q": _compare_tensor(reference.q, candidate.q, "OVERLAP_Q"),
         "overlap": _compare_tensor(
             reference.overlap, candidate.overlap, "OVERLAP_S"
