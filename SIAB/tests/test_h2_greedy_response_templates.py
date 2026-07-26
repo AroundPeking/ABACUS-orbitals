@@ -80,6 +80,19 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         comparator = GREEDY / "compare_sternheimer_targets.py"
         self.assertTrue(comparator.is_file())
 
+    def test_h2_channel_mpi_gate_uses_full_outputs_at_10_ry(self):
+        gate = (
+            GREEDY / "run_h2_target_channel_mpi_gate.slurm"
+        ).read_text(encoding="utf-8")
+        self.assertIn('mode=${SIAB_CHANNEL_MPI_MODE:?}', gate)
+        self.assertIn("serial|channel_mpi", gate)
+        self.assertIn("ecutwfc 10", gate)
+        self.assertIn("sternheimer_nfreq 1", gate)
+        self.assertIn("sternheimer_channel_mpi", gate)
+        self.assertIn('mpirun -np "$SLURM_NTASKS" -ppn 1', gate)
+        self.assertIn("validate_targets.py", gate)
+        self.assertIn("solved_equations 428", gate)
+
 
 if __name__ == "__main__":
     unittest.main()
