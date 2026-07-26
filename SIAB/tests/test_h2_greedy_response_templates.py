@@ -31,6 +31,8 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertEqual(h2_input["nspin"], "1")
         self.assertEqual(h2_input["ecutwfc"], "50")
         self.assertEqual(h2_input["sternheimer_nfreq"], "16")
+        self.assertEqual(h2_input["sternheimer_frequency_mpi"], "1")
+        self.assertEqual(h2_input["sternheimer_channel_mpi"], "1")
         self.assertEqual(h2_input["rpa_ccp_rmesh_times"], "5")
 
         ghost_input = input_values(ghost / "INPUT")
@@ -38,6 +40,10 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertEqual(ghost_input["ntype"], "2")
         self.assertEqual(ghost_input["nelec"], "1")
         self.assertEqual(ghost_input["nspin"], "2")
+        self.assertEqual(ghost_input["sternheimer_channel_mpi"], "1")
+
+        atom_input = input_values((GREEDY / "producer_atom") / "INPUT")
+        self.assertEqual(atom_input["sternheimer_channel_mpi"], "1")
 
         h2_stru = (h2 / "STRU").read_text(encoding="utf-8")
         ghost_stru = (ghost / "STRU").read_text(encoding="utf-8")
@@ -54,7 +60,22 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         )
         self.assertIn("expected_atoms=(1 2 2)", runner)
         self.assertIn("expected_auxiliary_channels=(214 428 428)", runner)
-        self.assertIn("ABACUS_STERNHEIMER_THREADS:-16", runner)
+        self.assertIn("expected_solved_equations=(3424 6848 6848)", runner)
+        self.assertIn("#SBATCH --nodes=32", runner)
+        self.assertIn("#SBATCH --ntasks=32", runner)
+        self.assertIn("ABACUS_STERNHEIMER_THREADS:-30", runner)
+        self.assertIn('mpirun -np "$SLURM_NTASKS" -ppn 1', runner)
+        self.assertIn("sternheimer_channel_mpi yes", runner)
+        self.assertIn("frequency_group_size 2", runner)
+        self.assertIn("mpi_ranks 32", runner)
+        self.assertIn(
+            "abacus_source_commit=c273b4ee7051138293d9988c3eb79bee36c0af10",
+            runner,
+        )
+        self.assertIn(
+            "abacus_sha256=ff38348fbad89fde4a985c13f97b59ffc94353c22c7098e19b373c1ef7e76fee",
+            runner,
+        )
 
         selection = (GREEDY / "run_selection.slurm").read_text(encoding="utf-8")
         self.assertIn("producer_h2", selection)

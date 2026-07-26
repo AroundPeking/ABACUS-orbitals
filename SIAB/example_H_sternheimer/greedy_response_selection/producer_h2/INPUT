@@ -37,7 +37,7 @@ sternheimer_siab_lmax  4
 sternheimer_nfreq       16
 sternheimer_frequency_grid_file fixed_frequency_grid_nfreq16_from_sos20A.dat
 sternheimer_frequency_mpi 1
-sternheimer_channel_mpi   0
+sternheimer_channel_mpi   1
 sternheimer_delta       1
 sternheimer_delta_max_states 0
 sternheimer_delta_norm_tol 1e-10

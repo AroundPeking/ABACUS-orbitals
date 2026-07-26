@@ -883,8 +883,8 @@ class ExampleInputTest(unittest.TestCase):
     def test_greedy_response_producers_fix_high_l_sternheimer_contract(self):
         for producer_name in (
             "producer_atom",
-            "producer_h3",
-            "producer_fragment_ghost",
+            "producer_h2",
+            "producer_h2_fragment_ghost",
         ):
             with self.subTest(producer=producer_name):
                 producer = GREEDY_RESPONSE / producer_name
@@ -898,6 +898,8 @@ class ExampleInputTest(unittest.TestCase):
                 )
                 self.assertIn("sternheimer_siab_lmax  4", input_text)
                 self.assertIn("sternheimer_nfreq       16", input_text)
+                self.assertIn("sternheimer_frequency_mpi 1", input_text)
+                self.assertIn("sternheimer_channel_mpi   1", input_text)
                 self.assertIn("exx_pca_threshold       10", input_text)
                 self.assertIn("rpa_ccp_rmesh_times     5", input_text)
                 self.assertIn("ABFS_ORBITAL", stru_text)
@@ -909,8 +911,8 @@ class ExampleInputTest(unittest.TestCase):
         run_script = (GREEDY_RESPONSE / "run_targets.slurm").read_text()
 
         self.assertIn("#SBATCH --partition=normal", run_script)
-        self.assertIn("#SBATCH --nodes=16", run_script)
-        self.assertIn("#SBATCH --ntasks=16", run_script)
+        self.assertIn("#SBATCH --nodes=32", run_script)
+        self.assertIn("#SBATCH --ntasks=32", run_script)
         self.assertIn("#SBATCH --ntasks-per-node=1", run_script)
         self.assertIn("#SBATCH --cpus-per-task=30", run_script)
         self.assertIn("#SBATCH --mem=110610M", run_script)
@@ -919,30 +921,35 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("for required in INPUT STRU KPT; do", run_script)
         self.assertIn('test -s "$template_dir/$required"', run_script)
         self.assertIn("test ! -e \"$output_dir\"", run_script)
-        self.assertIn("mpirun -np 16 -ppn 1", run_script)
+        self.assertIn('mpirun -np "$SLURM_NTASKS" -ppn 1', run_script)
         self.assertIn(
             "d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f",
             run_script,
         )
-        self.assertIn("expected_primitive_columns_per_h=625", run_script)
+        self.assertIn("expected_primitive_columns=(625 1250 1250)", run_script)
+        self.assertIn("expected_solved_equations=(3424 6848 6848)", run_script)
         self.assertIn("validate_targets.py", run_script)
         self.assertIn("abacus_source_commit=", run_script)
         self.assertIn("abacus_sha256=", run_script)
         self.assertIn(
-            "abacus_source_commit=868c8ee552141abd656bd858a1954e90b50b3b82",
+            "abacus_source_commit=c273b4ee7051138293d9988c3eb79bee36c0af10",
             run_script,
         )
         self.assertIn(
-            "abacus_sha256=a2bd7b93240672a07785cc049c90382e6f9d1990cfd16ed3ee1b3813074d67d1",
+            "abacus_sha256=ff38348fbad89fde4a985c13f97b59ffc94353c22c7098e19b373c1ef7e76fee",
             run_script,
         )
         self.assertIn(
-            "siab_full_integration_v12_20260722/build/abacus_3p", run_script
+            "siab_channel_mpi_exact_c273b4ee7_20260726/artifacts/job21389808/abacus_3p",
+            run_script,
         )
-        self.assertIn("siab_greedy_targets_source_v3_20260722", run_script)
+        self.assertIn("siab_greedy_targets_source_h2_channel_mpi_prod_v1_20260726", run_script)
         self.assertIn(
-            "siab_greedy_targets_global_whitening_v3_20260722", run_script
+            "siab_greedy_targets_h2_channel_mpi_prod_v1_20260726", run_script
         )
+        self.assertIn("sternheimer_channel_mpi yes", run_script)
+        self.assertIn("frequency_group_size 2", run_script)
+        self.assertIn("mpi_ranks 32", run_script)
         self.assertNotIn(
             "ABACUS_STERNHEIMER_FD_ST_ORBITAL_FILES", run_script
         )
