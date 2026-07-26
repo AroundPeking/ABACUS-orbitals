@@ -35,7 +35,9 @@ def _compare_tensor(reference, candidate, name):
     }
 
 
-def _compare_provenance(reference, candidate):
+def _compare_provenance(
+    reference, candidate, *, allow_mpi_ranks_differ=False
+):
     reference = dict(reference)
     candidate = dict(candidate)
     reference_threads = reference.pop("omp_threads", None)
@@ -50,6 +52,23 @@ def _compare_provenance(reference, candidate):
         if value is not None and (type(value) is not int or value <= 0):
             raise ValueError(f"{name} must be a positive integer")
 
+    mpi_ranks = {}
+    if allow_mpi_ranks_differ:
+        reference_ranks = reference.pop("mpi_ranks", None)
+        candidate_ranks = candidate.pop("mpi_ranks", None)
+        if (reference_ranks is None) != (candidate_ranks is None):
+            raise ValueError("target provenance differs: mpi_ranks")
+        for name, value in (
+            ("reference mpi_ranks", reference_ranks),
+            ("candidate mpi_ranks", candidate_ranks),
+        ):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"{name} must be a positive integer")
+        mpi_ranks = {
+            "reference_mpi_ranks": reference_ranks,
+            "candidate_mpi_ranks": candidate_ranks,
+        }
+
     differing_fields = sorted(
         key
         for key in set(reference) | set(candidate)
@@ -59,20 +78,24 @@ def _compare_provenance(reference, candidate):
         raise ValueError(
             "target provenance differs: " + ", ".join(differing_fields)
         )
-    return {
+    result = {
         "reference_omp_threads": reference_threads,
         "candidate_omp_threads": candidate_threads,
     }
+    result.update(mpi_ranks)
+    return result
 
 
-def compare(reference_path, candidate_path):
+def compare(reference_path, candidate_path, *, allow_mpi_ranks_differ=False):
     reference = read_sternheimer(reference_path)
     candidate = read_sternheimer(candidate_path)
 
     if reference.blocks != candidate.blocks:
         raise ValueError("primitive block layout differs")
     provenance = _compare_provenance(
-        reference.provenance, candidate.provenance
+        reference.provenance,
+        candidate.provenance,
+        allow_mpi_ranks_differ=allow_mpi_ranks_differ,
     )
 
     integer_metadata = {
@@ -114,12 +137,17 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--max-abs-tolerance", type=float, default=1.0e-8)
     parser.add_argument("--relative-frobenius-tolerance", type=float, default=1.0e-8)
+    parser.add_argument("--allow-mpi-ranks-differ", action="store_true")
     args = parser.parse_args()
 
     if args.max_abs_tolerance <= 0.0 or args.relative_frobenius_tolerance <= 0.0:
         raise ValueError("comparison tolerances must be positive")
 
-    result = compare(args.reference, args.candidate)
+    result = compare(
+        args.reference,
+        args.candidate,
+        allow_mpi_ranks_differ=args.allow_mpi_ranks_differ,
+    )
     checks = {}
     for name, metrics in result.items():
         if not isinstance(metrics, dict) or "max_abs" not in metrics:

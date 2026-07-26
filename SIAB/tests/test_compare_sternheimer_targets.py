@@ -64,6 +64,37 @@ class CompareSternheimerTargetsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ecut_ry"):
                 compare_targets.compare("omp16.dat", "omp24.dat")
 
+    def test_rejects_mpi_rank_count_difference_by_default(self):
+        reference = with_provenance(self.data, mpi_ranks=1)
+        candidate = with_provenance(self.data, mpi_ranks=2)
+
+        with mock.patch.object(
+            compare_targets,
+            "read_sternheimer",
+            side_effect=(reference, candidate),
+        ):
+            with self.assertRaisesRegex(ValueError, "mpi_ranks"):
+                compare_targets.compare("serial.dat", "channel_mpi.dat")
+
+    def test_allows_mpi_rank_count_difference_only_when_requested(self):
+        reference = with_provenance(self.data, mpi_ranks=1)
+        candidate = with_provenance(self.data, mpi_ranks=2)
+
+        with mock.patch.object(
+            compare_targets,
+            "read_sternheimer",
+            side_effect=(reference, candidate),
+        ):
+            result = compare_targets.compare(
+                "serial.dat",
+                "channel_mpi.dat",
+                allow_mpi_ranks_differ=True,
+            )
+
+        self.assertEqual(result["provenance"]["reference_mpi_ranks"], 1)
+        self.assertEqual(result["provenance"]["candidate_mpi_ranks"], 2)
+        self.assertEqual(result["q"]["max_abs"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
