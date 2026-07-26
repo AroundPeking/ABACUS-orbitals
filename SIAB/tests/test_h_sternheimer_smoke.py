@@ -971,11 +971,17 @@ class ExampleInputTest(unittest.TestCase):
         self.assertEqual(run_script.count("target_validation.json"), 3)
         self.assertIn("campaign_manifest.json", run_script)
         self.assertIn("run_response_selection.py", run_script)
-        self.assertIn("siab_greedy_selection_source_v2_20260722", run_script)
         self.assertIn(
-            "siab_greedy_targets_global_whitening_v3_20260722", run_script
+            "siab_greedy_selection_source_h2_channel_mpi_prod_v1_20260726",
+            run_script,
         )
-        self.assertIn("siab_greedy_selection_campaign_v2_20260722", run_script)
+        self.assertIn(
+            "siab_greedy_targets_h2_channel_mpi_prod_v1_20260726", run_script
+        )
+        self.assertIn(
+            "siab_greedy_selection_campaign_h2_channel_mpi_prod_v1_20260726",
+            run_script,
+        )
         self.assertNotIn("rpa_binding", driver.lower())
         self.assertNotIn("h2_energy", driver.lower())
         self.assertEqual(template["loss"]["mode"], "st_dpsi_joint")

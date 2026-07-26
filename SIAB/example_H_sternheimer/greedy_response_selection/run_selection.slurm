@@ -9,10 +9,10 @@
 
 set -euo pipefail
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_source_h2_v1_20260725
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_source_h2_channel_mpi_prod_v1_20260726
 asset_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_assets_v1_20260722
-target_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_h2_whitening_v1_20260725
-output_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_campaign_h2_v1_20260725
+target_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_targets_h2_channel_mpi_prod_v1_20260726
+output_root=/work1/ghj/sternheimer_abacus_tests/siab_greedy_selection_campaign_h2_channel_mpi_prod_v1_20260726
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
 greedy=$source_root/SIAB/example_H_sternheimer/greedy_response_selection
@@ -31,6 +31,9 @@ ghost_validation=$ghost_dir/target_validation.json
 atom_target=$atom_dir/OUT.H_SIAB_GREEDY_ATOM_WFULL_NF16_E50/sternheimer_matrix.dat
 h2_target=$h2_dir/OUT.H2_SIAB_GREEDY_R074085_WFULL_NF16_E50/sternheimer_matrix.dat
 ghost_target=$ghost_dir/OUT.H_GHOST1_SIAB_GREEDY_R074085_WFULL_NF16_E50/sternheimer_matrix.dat
+atom_status=$atom_dir/OUT.H_SIAB_GREEDY_ATOM_WFULL_NF16_E50/STERNHEIMER_SIAB_STATUS.dat
+h2_status=$h2_dir/OUT.H2_SIAB_GREEDY_R074085_WFULL_NF16_E50/STERNHEIMER_SIAB_STATUS.dat
+ghost_status=$ghost_dir/OUT.H_GHOST1_SIAB_GREEDY_R074085_WFULL_NF16_E50/STERNHEIMER_SIAB_STATUS.dat
 
 test ! -e "$output_root"
 test -s "$driver"
@@ -40,11 +43,22 @@ test -s "$template"
 test -s "$baseline"
 for path in \
   "$atom_validation" "$h2_validation" "$ghost_validation" \
-  "$atom_target" "$h2_target" "$ghost_target"; do
+  "$atom_target" "$h2_target" "$ghost_target" \
+  "$atom_status" "$h2_status" "$ghost_status"; do
   test -s "$path"
+done
+for status in "$atom_status" "$h2_status" "$ghost_status"; do
+  grep -q '^status success$' "$status"
+  grep -q '^nfreq 16$' "$status"
+  grep -q '^sternheimer_frequency_mpi yes$' "$status"
+  grep -q '^sternheimer_channel_mpi yes$' "$status"
+  grep -q '^frequency_group_size 2$' "$status"
+  grep -q '^mpi_ranks 32$' "$status"
+  grep -q '^all_converged yes$' "$status"
 done
 
 cd "$source_root"
+test -s SOURCE_COMMIT
 sha256sum -c SOURCE_SHA256SUMS
 cd "$asset_root"
 sha256sum -c ASSET_SHA256SUMS
@@ -69,6 +83,7 @@ export MKL_DYNAMIC=FALSE
 echo "date_start=$(date +%F_%T)"
 echo "nodes=${SLURM_JOB_NODELIST:?}"
 echo "omp_threads=$OMP_NUM_THREADS"
+echo "source_commit=$(cat "$source_root/SOURCE_COMMIT")"
 sha256sum "$driver" "$optimizer" "$config" "$template" "$baseline" \
   "$atom_target" "$h2_target" "$ghost_target"
 

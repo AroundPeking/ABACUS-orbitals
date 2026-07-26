@@ -83,6 +83,27 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertNotIn("producer_h3", selection)
         self.assertNotIn("$h3_target", selection)
         self.assertIn('len(payload.get("frequencies", ())) != 16', selection)
+        self.assertIn(
+            "source_root=/work1/ghj/sternheimer_abacus_tests/"
+            "siab_greedy_selection_source_h2_channel_mpi_prod_v1_20260726",
+            selection,
+        )
+        self.assertIn(
+            "target_root=/work1/ghj/sternheimer_abacus_tests/"
+            "siab_greedy_targets_h2_channel_mpi_prod_v1_20260726",
+            selection,
+        )
+        self.assertIn(
+            "output_root=/work1/ghj/sternheimer_abacus_tests/"
+            "siab_greedy_selection_campaign_h2_channel_mpi_prod_v1_20260726",
+            selection,
+        )
+        self.assertIn("STERNHEIMER_SIAB_STATUS.dat", selection)
+        self.assertIn("sternheimer_channel_mpi yes", selection)
+        self.assertIn("frequency_group_size 2", selection)
+        self.assertIn("mpi_ranks 32", selection)
+        self.assertIn("all_converged yes", selection)
+        self.assertIn("test -s SOURCE_COMMIT", selection)
 
     def test_h2_target_openmp_benchmark_uses_the_production_operator(self):
         benchmark = (
