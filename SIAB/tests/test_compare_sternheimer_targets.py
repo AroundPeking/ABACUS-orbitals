@@ -8,6 +8,7 @@ from unittest import mock
 
 import common  # noqa: F401 - configures the optimizer import path
 from IO.read_sternheimer import read_sternheimer
+import torch
 
 
 GREEDY = (
@@ -94,6 +95,51 @@ class CompareSternheimerTargetsTest(unittest.TestCase):
         self.assertEqual(result["provenance"]["reference_mpi_ranks"], 1)
         self.assertEqual(result["provenance"]["candidate_mpi_ranks"], 2)
         self.assertEqual(result["q"]["max_abs"], 0.0)
+
+    def test_aligns_one_common_phase_for_each_occupied_state(self):
+        occupied_state = torch.tensor([0, 1], dtype=torch.int64)
+        reference = replace(self.data, occupied_state=occupied_state)
+        candidate_q = reference.q.clone()
+        candidate_q[0] *= -1.0
+        candidate_q[1] *= 1.0j
+        candidate = replace(reference, q=candidate_q)
+
+        with mock.patch.object(
+            compare_targets,
+            "read_sternheimer",
+            side_effect=(reference, candidate),
+        ):
+            result = compare_targets.compare(
+                "serial.dat",
+                "channel_mpi.dat",
+                align_occupied_state_phase=True,
+            )
+
+        self.assertLess(result["q"]["max_abs"], 1.0e-15)
+        self.assertLess(result["q"]["relative_frobenius"], 1.0e-15)
+        self.assertEqual(
+            [entry["occupied_state"] for entry in result["q_phase_alignment"]],
+            [0, 1],
+        )
+
+    def test_does_not_hide_a_single_channel_phase_error(self):
+        candidate_q = -self.data.q.clone()
+        candidate_q[0] *= -1.0
+        candidate = replace(self.data, q=candidate_q)
+
+        with mock.patch.object(
+            compare_targets,
+            "read_sternheimer",
+            side_effect=(self.data, candidate),
+        ):
+            result = compare_targets.compare(
+                "serial.dat",
+                "channel_mpi.dat",
+                align_occupied_state_phase=True,
+            )
+
+        self.assertGreater(result["q"]["max_abs"], 0.1)
+        self.assertGreater(result["q"]["relative_frobenius"], 0.1)
 
 
 if __name__ == "__main__":

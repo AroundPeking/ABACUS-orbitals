@@ -35,6 +35,37 @@ def _compare_tensor(reference, candidate, name):
     }
 
 
+def _align_q_by_occupied_state(reference_q, candidate_q, occupied_state):
+    aligned = candidate_q.clone()
+    diagnostics = []
+    for state in torch.unique(occupied_state, sorted=True).tolist():
+        mask = occupied_state == state
+        reference_group = reference_q[mask]
+        candidate_group = candidate_q[mask]
+        overlap = torch.sum(torch.conj(reference_group) * candidate_group)
+        scale = (
+            torch.linalg.vector_norm(reference_group)
+            * torch.linalg.vector_norm(candidate_group)
+        ).item()
+        if scale == 0.0 or abs(overlap).item() == 0.0:
+            phase = torch.ones((), dtype=reference_q.dtype)
+            normalized_overlap = 0.0
+        else:
+            phase = overlap / torch.abs(overlap)
+            normalized_overlap = abs(overlap).item() / scale
+        aligned[mask] = candidate_group / phase
+        diagnostics.append(
+            {
+                "occupied_state": state,
+                "phase_real": float(torch.real(phase).item()),
+                "phase_imag": float(torch.imag(phase).item()),
+                "normalized_overlap_abs": float(normalized_overlap),
+                "reference_rows": int(torch.count_nonzero(mask).item()),
+            }
+        )
+    return aligned, diagnostics
+
+
 def _compare_provenance(
     reference, candidate, *, allow_mpi_ranks_differ=False
 ):
@@ -86,7 +117,13 @@ def _compare_provenance(
     return result
 
 
-def compare(reference_path, candidate_path, *, allow_mpi_ranks_differ=False):
+def compare(
+    reference_path,
+    candidate_path,
+    *,
+    allow_mpi_ranks_differ=False,
+    align_occupied_state_phase=False,
+):
     reference = read_sternheimer(reference_path)
     candidate = read_sternheimer(candidate_path)
 
@@ -109,11 +146,19 @@ def compare(reference_path, candidate_path, *, allow_mpi_ranks_differ=False):
     if not all(integer_metadata.values()):
         raise ValueError("integer reference metadata differs")
 
+    candidate_q = candidate.q
+    q_phase_alignment = []
+    if align_occupied_state_phase:
+        candidate_q, q_phase_alignment = _align_q_by_occupied_state(
+            reference.q, candidate.q, reference.occupied_state
+        )
+
     return {
         "reference": str(Path(reference_path)),
         "candidate": str(Path(candidate_path)),
         "provenance": provenance,
-        "q": _compare_tensor(reference.q, candidate.q, "OVERLAP_Q"),
+        "q": _compare_tensor(reference.q, candidate_q, "OVERLAP_Q"),
+        "q_phase_alignment": q_phase_alignment,
         "overlap": _compare_tensor(
             reference.overlap, candidate.overlap, "OVERLAP_S"
         ),
@@ -138,6 +183,7 @@ def main():
     parser.add_argument("--max-abs-tolerance", type=float, default=1.0e-8)
     parser.add_argument("--relative-frobenius-tolerance", type=float, default=1.0e-8)
     parser.add_argument("--allow-mpi-ranks-differ", action="store_true")
+    parser.add_argument("--align-occupied-state-phase", action="store_true")
     args = parser.parse_args()
 
     if args.max_abs_tolerance <= 0.0 or args.relative_frobenius_tolerance <= 0.0:
@@ -147,6 +193,7 @@ def main():
         args.reference,
         args.candidate,
         allow_mpi_ranks_differ=args.allow_mpi_ranks_differ,
+        align_occupied_state_phase=args.align_occupied_state_phase,
     )
     checks = {}
     for name, metrics in result.items():
