@@ -974,14 +974,14 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("campaign_manifest.json", run_script)
         self.assertIn("run_response_selection.py", run_script)
         self.assertIn(
-            "siab_greedy_selection_source_h_h2_physical_only_prod_v2_20260727",
+            "siab_greedy_selection_source_h_h2_physical_only_prod_v3_20260727",
             run_script,
         )
         self.assertIn(
             "siab_greedy_targets_h2_channel_mpi_prod_v1_20260726", run_script
         )
         self.assertIn(
-            "siab_greedy_selection_campaign_h_h2_physical_only_prod_v2_20260727",
+            "siab_greedy_selection_campaign_h_h2_physical_only_prod_v3_20260727",
             run_script,
         )
         self.assertNotIn("rpa_binding", driver.lower())
