@@ -401,7 +401,7 @@ def build_response_spectrum_builder(
     magnetic_overlap_tolerance,
     condition_limit,
 ):
-    """Return the physical atom+multicenter residual-spectrum builder."""
+    """Return atomic candidate spectra for physical atom+multicenter scoring."""
     for family, name in (
         (atom_family, "atom"),
         (multicenter_family, "multicenter"),
@@ -414,7 +414,10 @@ def build_response_spectrum_builder(
         raise ValueError("element must be nonempty")
     if type(max_l) is not int or max_l < 0:
         raise ValueError("max_l must be a nonnegative integer")
-    data_items = atom_family.data + multicenter_family.data
+    # A common m-resolved radial metric is exact for the spherical atom target.
+    # The multicenter family enters the full-projector candidate score and the
+    # joint optimization, where molecular m splitting is represented directly.
+    data_items = atom_family.data
 
     def build(coefficients):
         current_specs = _current_radial_specs(coefficients)

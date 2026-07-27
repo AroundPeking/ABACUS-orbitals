@@ -242,8 +242,11 @@ class JointOptimizationBridgeTest(unittest.TestCase):
 
 
 class PhysicalSpectrumBuilderTest(unittest.TestCase):
-    def test_aggregates_atom_and_multicenter_residual_for_each_l(self):
-        data = make_sternheimer_data((h_s_block(2),), [0.0, 1.0])
+    def test_builds_candidate_spectrum_from_atom_only(self):
+        atom_data = make_sternheimer_data((h_s_block(2),), [0.0, 1.0])
+        multicenter_data = make_sternheimer_data(
+            (h_s_block(2),), [0.0, 3.0]
+        )
         entries = parse_target_entries(
             [
                 {"path": "atom.dat", "family": "atom", "role": "physical"},
@@ -255,7 +258,7 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
             ]
         )
         atom, multicenter = assemble_response_families(
-            tuple(zip(entries, (data, data)))
+            tuple(zip(entries, (atom_data, multicenter_data)))
         )
         current = {
             "H": [torch.tensor([[1.0], [0.0]], dtype=torch.float64)]
@@ -274,7 +277,7 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
 
         self.assertEqual(len(spectra), 1)
         self.assertEqual(spectra[0].l, 0)
-        self.assertGreater(float(spectra[0].eigenvalues[0]), 0.0)
+        self.assertEqual(float(spectra[0].eigenvalues[0]), 1.0)
         torch.testing.assert_close(
             torch.abs(spectra[0].coefficients[:, 0]),
             torch.tensor([0.0, 1.0], dtype=torch.float64),

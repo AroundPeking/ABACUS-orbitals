@@ -73,7 +73,7 @@ class HighAngularResponseSpectrumTest(unittest.TestCase):
             atol=1.0e-12,
         )
 
-    def test_many_target_spectrum_accepts_distinct_projected_metrics(self):
+    def test_many_target_spectrum_rejects_distinct_projected_metrics(self):
         first = make_high_l_target(3, [4.0, 1.0])
         second = make_high_l_target(3, [2.0, 3.0])
         second_overlap = second.overlap.clone()
@@ -89,21 +89,16 @@ class HighAngularResponseSpectrumTest(unittest.TestCase):
             overlap=second_overlap,
         )
 
-        spectrum = radial_residual_spectrum_many(
-            [first, second],
-            coefficients(3, 2),
-            fixed_dzp_specs(),
-            element="H",
-            l=3,
-        )
-
-        torch.testing.assert_close(
-            spectrum.eigenvalues,
-            torch.tensor([4.0, 8.0 / 3.0], dtype=torch.float64),
-            rtol=0.0,
-            atol=1.0e-12,
-        )
-        self.assertGreater(spectrum.overlap_relative_deviation, 1.0e-4)
+        with self.assertRaisesRegex(
+            RuntimeError, "target/atom projected overlaps disagree"
+        ):
+            radial_residual_spectrum_many(
+                [first, second],
+                coefficients(3, 2),
+                fixed_dzp_specs(),
+                element="H",
+                l=3,
+            )
 
     def test_many_target_spectrum_accumulates_every_atom(self):
         target = make_high_l_target(3, [2.5], atom_count=2)

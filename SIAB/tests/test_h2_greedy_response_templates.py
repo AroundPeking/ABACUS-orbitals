@@ -1,5 +1,6 @@
 """Static contracts for the H2 response-shell producer family."""
 
+import json
 from pathlib import Path
 import unittest
 
@@ -18,6 +19,12 @@ def input_values(path):
 
 
 class H2GreedyResponseTemplatesTest(unittest.TestCase):
+    def test_selection_tolerates_measured_atomic_l4_grid_anisotropy(self):
+        config = json.loads(
+            (GREEDY / "selection_config.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(config["magnetic_overlap_tolerance"], 2.0e-4)
+
     def test_h2_and_h2_ghost_replace_the_h3_target_contract(self):
         h2 = GREEDY / "producer_h2"
         ghost = GREEDY / "producer_h2_fragment_ghost"
