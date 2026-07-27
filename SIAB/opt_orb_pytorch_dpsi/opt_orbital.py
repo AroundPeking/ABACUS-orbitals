@@ -14,10 +14,12 @@ class Opt_Orbital:
 		"""
 		Q = dict()
 		for it in info_stru.Na.keys():
-			Q[it] = ND_list(info_element[it].Nl)
+			if len(C[it]) < len(QI[it]):
+				raise ValueError("coefficient channels do not cover legacy QI")
+			Q[it] = ND_list(len(QI[it]))
 
 		for it in info_stru.Na.keys():
-			for il in range(info_element[it].Nl):
+			for il in range(len(QI[it])):
 				Q[it][il] = torch.mm( QI[it][il], C[it][il].to(torch.complex128) ).view(info_stru.Nb_true,-1)
 		return Q
 
@@ -31,10 +33,16 @@ class Opt_Orbital:
 		"""
 		S = dict()
 		for it1,it2 in itertools.product( info_stru.Na.keys(), info_stru.Na.keys() ):
-			S[it1,it2] = ND_list(info_element[it1].Nl, info_element[it2].Nl)
+			nl1 = len(SI[it1,it2])
+			nl2 = len(SI[it1,it2][0])
+			if len(C[it1]) < nl1 or len(C[it2]) < nl2:
+				raise ValueError("coefficient channels do not cover legacy SI")
+			S[it1,it2] = ND_list(nl1, nl2)
 
 		for it1,it2 in itertools.product( info_stru.Na.keys(), info_stru.Na.keys() ):
-			for il1,il2 in itertools.product( range(info_element[it1].Nl), range(info_element[it2].Nl) ):
+			nl1 = len(SI[it1,it2])
+			nl2 = len(SI[it1,it2][0])
+			for il1,il2 in itertools.product( range(nl1), range(nl2) ):
 				# SI_C[ia1*im1*ie1*ia2*im2,iu2]
 				SI_C = torch.mm( 
 					SI[it1,it2][il1][il2].view(-1,info_element[it2].Ne), 
@@ -66,8 +74,8 @@ class Opt_Orbital:
 			S_t = dict()
 			for it2 in info_stru.Na.keys():
 				# S_tt[il1][ia1*im1*iu1,il2*ia2*im2*iu2]
-				S_tt = ND_list(info_element[it1].Nl)
-				for il1 in range(info_element[it1].Nl):
+				S_tt = ND_list(len(S[it1,it2]))
+				for il1 in range(len(S[it1,it2])):
 					S_tt[il1] = torch.cat( S[it1,it2][il1], dim=1 )
 				S_t[it2] = torch.cat( S_tt, dim=0 )
 			S_[it1] = torch.cat( list(S_t.values()), dim=1 )
