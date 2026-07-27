@@ -968,18 +968,20 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("#SBATCH --cpus-per-task=30", run_script)
         self.assertIn("#SBATCH --mem=110610M", run_script)
         self.assertIn("#SBATCH --time=1-00:00:00", run_script)
-        self.assertEqual(run_script.count("target_validation.json"), 3)
+        self.assertEqual(run_script.count("target_validation.json"), 2)
+        self.assertNotIn("fragment_ghost", run_script)
+        self.assertNotIn("--ghost-target", driver)
         self.assertIn("campaign_manifest.json", run_script)
         self.assertIn("run_response_selection.py", run_script)
         self.assertIn(
-            "siab_greedy_selection_source_h2_channel_mpi_prod_v1_20260726",
+            "siab_greedy_selection_source_h_h2_physical_only_prod_v1_20260727",
             run_script,
         )
         self.assertIn(
             "siab_greedy_targets_h2_channel_mpi_prod_v1_20260726", run_script
         )
         self.assertIn(
-            "siab_greedy_selection_campaign_h2_channel_mpi_prod_v1_20260726",
+            "siab_greedy_selection_campaign_h_h2_physical_only_prod_v1_20260727",
             run_script,
         )
         self.assertNotIn("rpa_binding", driver.lower())

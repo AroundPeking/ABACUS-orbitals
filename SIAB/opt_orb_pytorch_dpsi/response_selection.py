@@ -20,7 +20,6 @@ class CandidateGain:
     mode: int
     atom: float
     multicenter: float
-    balance: float
 
     @property
     def cost(self):
@@ -137,7 +136,7 @@ def score_candidate(value):
     physical = value.atom + value.multicenter
     if physical <= 1.0e-14:
         return float("-inf")
-    return (physical + value.balance) / value.cost
+    return physical / value.cost
 
 
 def select_best_candidate(values):
@@ -208,7 +207,7 @@ def append_response_shell(coefficients, spectrum, mode=0):
 
 
 def _rejected_candidate(l, mode, reason):
-    gain = CandidateGain(l, mode, 0.0, 0.0, 0.0)
+    gain = CandidateGain(l, mode, 0.0, 0.0)
     return CandidateEvaluation(
         gain=gain,
         score=float("-inf"),
@@ -223,7 +222,6 @@ def evaluate_response_candidates(
     fixed_dzp,
     atom_family,
     multicenter_family,
-    ghost_family,
 ):
     spectra = tuple(sorted(spectra, key=lambda value: value.l))
     if not spectra:
@@ -237,8 +235,6 @@ def evaluate_response_candidates(
     multicenter_before = normalized_family_loss(
         multicenter_family, current, fixed_dzp
     )
-    balance_before = borrowing_gap(ghost_family, current, fixed_dzp)
-
     values = []
     for spectrum in spectra:
         mode = 0
@@ -268,8 +264,6 @@ def evaluate_response_candidates(
                 - normalized_family_loss(
                     multicenter_family, candidate, fixed_dzp
                 ),
-                balance=balance_before
-                - borrowing_gap(ghost_family, candidate, fixed_dzp),
             )
         except RuntimeError as exc:
             values.append(

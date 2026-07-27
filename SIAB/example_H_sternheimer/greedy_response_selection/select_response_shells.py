@@ -15,7 +15,6 @@ import torch
 from response_selection import (
     CandidateEvaluation,
     append_response_shell,
-    borrowing_gap,
     evaluate_response_candidates,
     normalized_family_loss,
     select_best_candidate,
@@ -54,7 +53,6 @@ class SelectionMetrics:
     atom_loss: float
     multicenter_loss: float
     global_capture: float
-    borrowing: float
     per_l_residual_ratio: dict
 
 
@@ -181,7 +179,6 @@ def _candidate_record(value):
         "cost": value.gain.cost,
         "gain_atom": value.gain.atom,
         "gain_multicenter": value.gain.multicenter,
-        "gain_balance": value.gain.balance,
         "score": score,
         "admissible": value.admissible,
         "rejection_reason": value.rejection_reason,
@@ -296,7 +293,6 @@ def select_one_response_shell(
     spectra,
     atom_family,
     multicenter_family,
-    ghost_family,
 ):
     spectra = tuple(spectra)
     evaluations = evaluate_response_candidates(
@@ -305,7 +301,6 @@ def select_one_response_shell(
         fixed_dzp,
         atom_family,
         multicenter_family,
-        ghost_family,
     )
     selected_gain = select_best_candidate(
         value.gain for value in evaluations if value.admissible
@@ -347,7 +342,6 @@ def _selection_metrics(
     baseline_weights,
     atom_family,
     multicenter_family,
-    ghost_family,
 ):
     current_weights = _spectrum_weights(spectra)
     if set(current_weights) != set(baseline_weights):
@@ -368,12 +362,11 @@ def _selection_metrics(
         atom_loss=atom_loss,
         multicenter_loss=multicenter_loss,
         global_capture=1.0 - 0.5 * (atom_loss + multicenter_loss),
-        borrowing=borrowing_gap(ghost_family, current, fixed_dzp),
         per_l_residual_ratio=ratios,
     )
 
 
-def _stopping_satisfied(metrics, baseline_borrowing, config):
+def _stopping_satisfied(metrics, config):
     try:
         global_capture = float(config["global_capture"])
         per_l_limit = float(config["per_l_residual_limit"])
@@ -389,14 +382,12 @@ def _stopping_satisfied(metrics, baseline_borrowing, config):
         or not 0.0 <= per_l_limit < 1.0
     ):
         raise ValueError("invalid response-selection stopping thresholds")
-    borrowing_tolerance = 1.0e-12 * max(abs(baseline_borrowing), 1.0)
     return (
         metrics.global_capture >= global_capture
         and all(
             value <= per_l_limit
             for value in metrics.per_l_residual_ratio.values()
         )
-        and metrics.borrowing <= baseline_borrowing + borrowing_tolerance
     )
 
 
@@ -407,7 +398,6 @@ def run_nested_selection(
     fixed_specs,
     atom_family,
     multicenter_family,
-    ghost_family,
     spectrum_builder,
     optimize_step,
     max_steps=64,
@@ -423,7 +413,6 @@ def run_nested_selection(
     _validate_fixed_columns(fixed_dzp, initial, fixed_specs)
     baseline_spectra = tuple(spectrum_builder(fixed_dzp))
     baseline_weights = _spectrum_weights(baseline_spectra)
-    baseline_borrowing = borrowing_gap(ghost_family, fixed_dzp, fixed_dzp)
 
     current = initial
     steps = []
@@ -436,9 +425,8 @@ def run_nested_selection(
             baseline_weights,
             atom_family,
             multicenter_family,
-            ghost_family,
         )
-        if _stopping_satisfied(metrics, baseline_borrowing, config):
+        if _stopping_satisfied(metrics, config):
             return NestedSelectionResult(
                 status="converged",
                 steps=tuple(steps),
@@ -455,7 +443,6 @@ def run_nested_selection(
             spectra,
             atom_family,
             multicenter_family,
-            ghost_family,
         )
         optimized = optimize_step(
             len(steps) + 1,
@@ -485,10 +472,16 @@ def build_step_input(
     seed,
 ):
     entries = parse_target_entries(targets)
-    if not entries:
-        raise ValueError("step input requires Sternheimer targets")
-    if not any(entry.role == "physical" for entry in entries):
-        raise ValueError("step input requires a physical Sternheimer target")
+    target_contract = tuple(
+        sorted((entry.family, entry.role) for entry in entries)
+    )
+    if target_contract != (
+        ("atom", "physical"),
+        ("multicenter", "physical"),
+    ):
+        raise ValueError(
+            "step input requires exactly atom and multicenter physical targets"
+        )
     result = copy.deepcopy(template)
     _reject_energy_fields(result)
     result.setdefault("file_list", {})["sternheimer"] = copy.deepcopy(targets)

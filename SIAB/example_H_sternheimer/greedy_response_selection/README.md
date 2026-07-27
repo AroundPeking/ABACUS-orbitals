@@ -11,27 +11,27 @@ joint Sternheimer+dpsi optimizer as a checked subprocess. Selector inputs and
 manifests reject H2/RPA energy fields.
 
 The target runner is pinned to ABACUS commit
-`f9c44f49e0dedaeb6cb7cd0aa886cd924b280c9a` and executable SHA256
-`76e8ecfeba19a907507c24da5428d776bf34219f81319b574227f10772d96746`.
+`c273b4ee7051138293d9988c3eb79bee36c0af10` and executable SHA256
+`ff38348fbad89fde4a985c13f97b59ffc94353c22c7098e19b373c1ef7e76fee`.
 That build passed the fixed-ABS, global full-Coulomb whitening, reciprocal
 primitive, writer, provenance, memory-gate, and OpenMP response-kernel tests.
-The physical target producers remain a separate gate: atom, H2, and H2
-fragment/ghost outputs must all
-pass `validate_targets.py` before shell selection or any H2 acceptance result is
-allowed.
+The atom and H2 physical targets must pass `validate_targets.py` before shell
+selection. The H2 fragment/ghost producer is a separate post-selection control;
+it does not gate or influence shell selection.
 
 `response_selection_campaign.py` is the bridge between the physical producer
-files and the nested selector. It requires exactly the `atom`, `multicenter`,
-and `fragment_ghost` families with their frozen roles, and round-trips SIAB's
-native `ORBITAL_RESULTS.txt` coefficient block without inventing missing
-columns. The three producer `STRU` files are deliberately force-tracked even
+files and the nested selector. It requires exactly the physical `atom` and
+`multicenter` families, and round-trips SIAB's native `ORBITAL_RESULTS.txt`
+coefficient block without inventing missing columns. The three producer `STRU`
+files are deliberately force-tracked even
 though the repository-wide ignore rules match `*STRU`; every immutable runtime
 closure must include `INPUT`, `KPT`, and `STRU` for each producer.
 
 `run_response_selection.py` executes the frozen nested loop. Atom and H2
-physical targets define the radial residual spectra; the fragment/ghost target
-enters only the borrowing-balance score. A selected shell is initialized from
-the leading residual mode, optimized with the existing `st_dpsi_joint` path,
+physical targets alone define the radial residual spectra, candidate score, and
+stopping conditions. The score is the atom-plus-H2 normalized loss reduction
+divided by the AO cost `2*l+1`. A selected shell is initialized from the leading
+residual mode, optimized with the existing `st_dpsi_joint` path,
 read back through the native coefficient bridge, and followed by a rebuilt
 spectrum. A fully spanned angular channel is represented as a zero-residual
 spectrum so that it is rejected deterministically while other channels remain

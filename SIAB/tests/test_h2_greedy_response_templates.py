@@ -79,13 +79,16 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
 
         selection = (GREEDY / "run_selection.slurm").read_text(encoding="utf-8")
         self.assertIn("producer_h2", selection)
-        self.assertIn("producer_h2_fragment_ghost", selection)
+        self.assertNotIn("producer_h2_fragment_ghost", selection)
+        self.assertNotIn("ghost_target", selection)
+        self.assertNotIn("ghost_validation", selection)
+        self.assertNotIn("--ghost-target", selection)
         self.assertNotIn("producer_h3", selection)
         self.assertNotIn("$h3_target", selection)
         self.assertIn('len(payload.get("frequencies", ())) != 16', selection)
         self.assertIn(
             "source_root=/work1/ghj/sternheimer_abacus_tests/"
-            "siab_greedy_selection_source_h2_channel_mpi_prod_v1_20260726",
+            "siab_greedy_selection_source_h_h2_physical_only_prod_v1_20260727",
             selection,
         )
         self.assertIn(
@@ -95,7 +98,7 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         )
         self.assertIn(
             "output_root=/work1/ghj/sternheimer_abacus_tests/"
-            "siab_greedy_selection_campaign_h2_channel_mpi_prod_v1_20260726",
+            "siab_greedy_selection_campaign_h_h2_physical_only_prod_v1_20260727",
             selection,
         )
         self.assertIn("STERNHEIMER_SIAB_STATUS.dat", selection)

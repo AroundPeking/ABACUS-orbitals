@@ -84,13 +84,33 @@ class OptimizerCoefficientBridgeTest(unittest.TestCase):
 
 
 class ResponseFamilyAssemblyTest(unittest.TestCase):
-    def test_requires_and_returns_the_three_frozen_families(self):
+    def test_requires_and_returns_exactly_two_physical_families(self):
         data = response_data()
         entries = parse_target_entries(
             [
                 {"path": "atom.dat", "family": "atom", "role": "physical"},
                 {
-                    "path": "h3.dat",
+                    "path": "h2.dat",
+                    "family": "multicenter",
+                    "role": "physical",
+                },
+            ]
+        )
+
+        atom, multicenter = assemble_response_families(
+            tuple(zip(entries, (data, data)))
+        )
+
+        self.assertEqual(atom.name, "atom")
+        self.assertEqual(multicenter.name, "multicenter")
+
+    def test_rejects_ghost_family_in_selection(self):
+        data = response_data()
+        entries = parse_target_entries(
+            [
+                {"path": "atom.dat", "family": "atom", "role": "physical"},
+                {
+                    "path": "h2.dat",
                     "family": "multicenter",
                     "role": "physical",
                 },
@@ -102,30 +122,8 @@ class ResponseFamilyAssemblyTest(unittest.TestCase):
             ]
         )
 
-        atom, multicenter, ghost = assemble_response_families(
-            tuple(zip(entries, (data, data, data)))
-        )
-
-        self.assertEqual(atom.name, "atom")
-        self.assertEqual(multicenter.name, "multicenter")
-        self.assertEqual(ghost.name, "fragment_ghost")
-        self.assertEqual(ghost.real_atom_index, 0)
-
-    def test_rejects_missing_ghost_family(self):
-        data = response_data()
-        entries = parse_target_entries(
-            [
-                {"path": "atom.dat", "family": "atom", "role": "physical"},
-                {
-                    "path": "h3.dat",
-                    "family": "multicenter",
-                    "role": "physical",
-                },
-            ]
-        )
-
         with self.assertRaisesRegex(ValueError, "exactly atom, multicenter"):
-            assemble_response_families(tuple(zip(entries, (data, data))))
+            assemble_response_families(tuple(zip(entries, (data, data, data))))
 
 
 class JointOptimizationBridgeTest(unittest.TestCase):
@@ -165,14 +163,9 @@ class JointOptimizationBridgeTest(unittest.TestCase):
         targets = [
             {"path": "atom.dat", "family": "atom", "role": "physical"},
             {
-                "path": "h3.dat",
+                "path": "h2.dat",
                 "family": "multicenter",
                 "role": "physical",
-            },
-            {
-                "path": "ghost.dat",
-                "family": "fragment_ghost",
-                "role": "ghost",
             },
         ]
         template = {
@@ -227,19 +220,14 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
             [
                 {"path": "atom.dat", "family": "atom", "role": "physical"},
                 {
-                    "path": "h3.dat",
+                    "path": "h2.dat",
                     "family": "multicenter",
                     "role": "physical",
                 },
-                {
-                    "path": "ghost.dat",
-                    "family": "fragment_ghost",
-                    "role": "ghost",
-                },
             ]
         )
-        atom, multicenter, _ = assemble_response_families(
-            tuple(zip(entries, (data, data, data)))
+        atom, multicenter = assemble_response_families(
+            tuple(zip(entries, (data, data)))
         )
         current = {
             "H": [torch.tensor([[1.0], [0.0]], dtype=torch.float64)]
@@ -269,19 +257,14 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
         target_values = [
             {"path": "atom.dat", "family": "atom", "role": "physical"},
             {
-                "path": "h3.dat",
+                "path": "h2.dat",
                 "family": "multicenter",
                 "role": "physical",
-            },
-            {
-                "path": "ghost.dat",
-                "family": "fragment_ghost",
-                "role": "ghost",
             },
         ]
         entries = parse_target_entries(target_values)
         families = assemble_response_families(
-            tuple(zip(entries, (data, data, data)))
+            tuple(zip(entries, (data, data)))
         )
         initial = {
             "H": [torch.tensor([[1.0], [0.0]], dtype=torch.float64)]
@@ -339,6 +322,10 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
             )
             self.assertEqual(manifest["status"], "converged")
             self.assertEqual(manifest["steps"], 1)
+            self.assertEqual(
+                [target["role"] for target in manifest["targets"]],
+                ["physical", "physical"],
+            )
             self.assertNotIn("h2_energy", result.campaign_manifest.read_text())
 
 

@@ -67,7 +67,6 @@ def parser():
     value.add_argument("--baseline", required=True, type=Path)
     value.add_argument("--atom-target", required=True, type=Path)
     value.add_argument("--multicenter-target", required=True, type=Path)
-    value.add_argument("--ghost-target", required=True, type=Path)
     value.add_argument("--optimizer", required=True, type=Path)
     value.add_argument("--python", required=True, type=Path)
     value.add_argument("--output", required=True, type=Path)
@@ -88,7 +87,6 @@ def main(argv=None):
         for path in (
             args.atom_target,
             args.multicenter_target,
-            args.ghost_target,
         )
     )
 
@@ -120,12 +118,6 @@ def main(argv=None):
             "path": str(target_paths[1]),
             "family": "multicenter",
             "role": "physical",
-        },
-        {
-            "path": str(target_paths[2]),
-            "family": "fragment_ghost",
-            "role": "ghost",
-            "element_aliases": {"H_empty": "H"},
         },
     ]
     families = load_response_families(targets)

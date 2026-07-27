@@ -92,12 +92,6 @@ def response_target_families():
     return (
         ResponseTargetFamily("atom", (physical_data,), "physical"),
         ResponseTargetFamily("multicenter", (physical_data,), "physical"),
-        ResponseTargetFamily(
-            "fragment_ghost",
-            (fragment_ghost_data(),),
-            "ghost",
-            real_atom_index=0,
-        ),
     )
 
 
@@ -192,16 +186,16 @@ class ResponseTargetFamilyTest(unittest.TestCase):
 
 
 class CandidateScoreTest(unittest.TestCase):
-    def test_score_is_gain_plus_balance_reduction_per_ao_function(self):
+    def test_score_is_physical_gain_per_ao_function(self):
         candidate = CandidateGain(
             l=3,
             mode=0,
             atom=0.9,
             multicenter=0.4,
-            balance=-0.1,
         )
 
-        self.assertAlmostEqual(score_candidate(candidate), 1.2 / 7.0, places=14)
+        self.assertAlmostEqual(score_candidate(candidate), 1.3 / 7.0, places=14)
+        self.assertFalse(hasattr(candidate, "balance"))
 
     def test_selector_prefers_more_gain_per_actual_ao_function(self):
         d = CandidateGain(
@@ -209,31 +203,29 @@ class CandidateScoreTest(unittest.TestCase):
             mode=0,
             atom=0.50,
             multicenter=0.0,
-            balance=0.0,
         )
         f = CandidateGain(
             l=3,
             mode=0,
             atom=0.84,
             multicenter=0.0,
-            balance=0.0,
         )
 
         self.assertEqual(select_best_candidate([d, f]).l, 3)
 
     def test_tie_break_is_lower_cost_then_l_then_mode(self):
         candidates = [
-            CandidateGain(2, 0, 5.0, 0.0, 0.0),
-            CandidateGain(1, 2, 3.0, 0.0, 0.0),
-            CandidateGain(1, 0, 3.0, 0.0, 0.0),
+            CandidateGain(2, 0, 5.0, 0.0),
+            CandidateGain(1, 2, 3.0, 0.0),
+            CandidateGain(1, 0, 3.0, 0.0),
         ]
 
         self.assertEqual(select_best_candidate(candidates).key, (1, 0))
 
-    def test_selector_rejects_nonpositive_physical_gain_or_score(self):
+    def test_selector_rejects_nonpositive_physical_gain(self):
         values = [
-            CandidateGain(0, 0, -0.1, 0.1, 1.0),
-            CandidateGain(1, 0, 0.2, 0.0, -0.3),
+            CandidateGain(0, 0, -0.1, 0.1),
+            CandidateGain(1, 0, -0.2, 0.1),
         ]
 
         with self.assertRaisesRegex(RuntimeError, "no admissible positive-score"):
@@ -258,7 +250,7 @@ class CandidateEvaluatorTest(unittest.TestCase):
         )
 
     def test_evaluator_returns_gains_and_deterministic_rejections(self):
-        atom, multicenter, ghost = response_target_families()
+        atom, multicenter = response_target_families()
         current = response_coefficients()
         spectra = (
             response_spectrum(1, 0.0, [[0.0], [1.0]]),
@@ -271,15 +263,14 @@ class CandidateEvaluatorTest(unittest.TestCase):
             current,
             atom,
             multicenter,
-            ghost,
         )
 
         self.assertEqual([value.gain.key for value in values], [(0, 0), (1, 0)])
         self.assertTrue(values[0].admissible)
         self.assertAlmostEqual(values[0].gain.atom, 1.0, places=13)
         self.assertAlmostEqual(values[0].gain.multicenter, 1.0, places=13)
-        self.assertAlmostEqual(values[0].gain.balance, -0.4, places=13)
-        self.assertAlmostEqual(values[0].score, 1.6, places=13)
+        self.assertFalse(hasattr(values[0].gain, "balance"))
+        self.assertAlmostEqual(values[0].score, 2.0, places=13)
         self.assertIsNone(values[0].rejection_reason)
         self.assertFalse(values[1].admissible)
         self.assertEqual(

@@ -29,7 +29,6 @@ from sternheimer_targets import (
 _FAMILY_ROLES = {
     "atom": "physical",
     "multicenter": "physical",
-    "fragment_ghost": "ghost",
 }
 
 
@@ -327,40 +326,34 @@ def optimize_response_step(
 
 
 def assemble_response_families(loaded_entries):
-    """Build the frozen atom, multicenter, and fragment/ghost family tuple."""
+    """Build the atom and multicenter physical selection families."""
     loaded_entries = tuple(loaded_entries)
     families = {}
     for entry, data in loaded_entries:
         expected_role = _FAMILY_ROLES.get(entry.family)
         if expected_role is None or entry.role != expected_role:
             raise ValueError(
-                "response selection requires exactly atom, multicenter, and "
-                "fragment_ghost with their frozen roles"
+                "response selection requires exactly atom, multicenter "
+                "with physical roles"
             )
         if entry.family in families:
             raise ValueError(f"duplicate response target family {entry.family!r}")
         families[entry.family] = data
     if set(families) != set(_FAMILY_ROLES):
         raise ValueError(
-            "response selection requires exactly atom, multicenter, and "
-            "fragment_ghost with their frozen roles"
+            "response selection requires exactly atom, multicenter "
+            "with physical roles"
         )
     return (
         ResponseTargetFamily("atom", (families["atom"],), "physical"),
         ResponseTargetFamily(
             "multicenter", (families["multicenter"],), "physical"
         ),
-        ResponseTargetFamily(
-            "fragment_ghost",
-            (families["fragment_ghost"],),
-            "ghost",
-            real_atom_index=0,
-        ),
     )
 
 
 def load_response_families(targets):
-    """Read, alias, and assemble the three physical campaign targets once."""
+    """Read, alias, and assemble the two physical campaign targets once."""
     entries = parse_target_entries(targets)
     loaded = tuple(
         (
@@ -462,7 +455,6 @@ def _metrics_payload(metrics):
         "atom_loss": metrics.atom_loss,
         "multicenter_loss": metrics.multicenter_loss,
         "global_capture": metrics.global_capture,
-        "borrowing": metrics.borrowing,
         "per_l_residual_ratio": {
             str(l): value
             for l, value in sorted(metrics.per_l_residual_ratio.items())
@@ -502,9 +494,9 @@ def run_response_selection_campaign(
     if len(nu) != max_l + 1:
         raise ValueError("initial coefficient channels do not match max_l")
     families = tuple(families)
-    if len(families) != 3:
-        raise ValueError("selection campaign requires three response families")
-    atom_family, multicenter_family, ghost_family = families
+    if len(families) != 2:
+        raise ValueError("selection campaign requires two physical response families")
+    atom_family, multicenter_family = families
 
     output_dir = Path(output_dir)
     if output_dir.exists() and any(output_dir.iterdir()):
@@ -549,7 +541,6 @@ def run_response_selection_campaign(
         fixed_specs,
         atom_family,
         multicenter_family,
-        ghost_family,
         spectrum_builder,
         optimize_step,
         max_steps=max_steps,

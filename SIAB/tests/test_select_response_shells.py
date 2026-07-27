@@ -80,11 +80,11 @@ def append_column(coefficients, l, column):
     return result
 
 
-def accepted(l, mode, atom, multicenter, balance):
-    gain = CandidateGain(l, mode, atom, multicenter, balance)
+def accepted(l, mode, atom, multicenter):
+    gain = CandidateGain(l, mode, atom, multicenter)
     return CandidateEvaluation(
         gain=gain,
-        score=(atom + multicenter + balance) / (2 * l + 1),
+        score=(atom + multicenter) / (2 * l + 1),
         admissible=True,
         rejection_reason=None,
     )
@@ -99,7 +99,7 @@ def three_steps():
         (3, [0.0, 0.0, 1.0]),
     ):
         current = append_column(current, l, column)
-        selected = accepted(l, 0, 0.5, 0.25, 0.1)
+        selected = accepted(l, 0, 0.5, 0.25)
         result.append(
             FrozenSelectionStep(
                 selected=selected,
@@ -180,7 +180,7 @@ class FrozenSelectionManifestTest(unittest.TestCase):
 
 class OneStepSelectorTest(unittest.TestCase):
     def test_selects_and_appends_best_candidate_with_full_score_table(self):
-        atom, multicenter, ghost = response_target_families()
+        atom, multicenter = response_target_families()
         current = response_coefficients()
 
         step = select_one_response_shell(
@@ -192,7 +192,6 @@ class OneStepSelectorTest(unittest.TestCase):
             ),
             atom,
             multicenter,
-            ghost,
         )
 
         self.assertEqual(step.selected.gain.key, (0, 0))
@@ -202,7 +201,7 @@ class OneStepSelectorTest(unittest.TestCase):
         self.assertEqual(current["H"][0].shape, (2, 1))
 
     def test_fails_explicitly_when_no_positive_candidate_remains(self):
-        atom, multicenter, ghost = response_target_families()
+        atom, multicenter = response_target_families()
         current = response_coefficients()
 
         with self.assertRaisesRegex(RuntimeError, "no admissible positive-score"):
@@ -212,7 +211,6 @@ class OneStepSelectorTest(unittest.TestCase):
                 (response_spectrum(1, 0.0, [[0.0], [1.0]]),),
                 atom,
                 multicenter,
-                ghost,
             )
 
 
@@ -232,9 +230,6 @@ class NestedSelectorTest(unittest.TestCase):
         )
         atom = ResponseTargetFamily("atom", (data,), "physical")
         multicenter = ResponseTargetFamily("multicenter", (data,), "physical")
-        ghost = ResponseTargetFamily(
-            "fragment_ghost", (data,), "ghost", real_atom_index=0
-        )
         initial = {
             "H": [
                 torch.tensor(
@@ -286,7 +281,6 @@ class NestedSelectorTest(unittest.TestCase):
             ({"element": "H", "l": 0, "zeta": 1},),
             atom,
             multicenter,
-            ghost,
             spectra_for,
             optimize_step,
             max_steps=4,
@@ -297,11 +291,11 @@ class NestedSelectorTest(unittest.TestCase):
         self.assertEqual(optimized_steps, [(1, (0, 0)), (2, (0, 0)), (3, (0, 0))])
         self.assertGreaterEqual(result.metrics.global_capture, 0.999)
         self.assertLessEqual(result.metrics.per_l_residual_ratio[0], 0.01)
-        self.assertEqual(result.metrics.borrowing, 0.0)
+        self.assertFalse(hasattr(result.metrics, "borrowing"))
 
 
 class JointOptimizerContractTest(unittest.TestCase):
-    def test_step_input_keeps_all_named_targets_and_fixed_dzp(self):
+    def test_step_input_keeps_two_physical_targets_and_fixed_dzp(self):
         template = {
             "seed": 1,
             "file_list": {"origin": ["origin.dat"], "linear": [["dpsi.dat"]]},
@@ -312,14 +306,9 @@ class JointOptimizerContractTest(unittest.TestCase):
         targets = [
             {"path": "atom.dat", "family": "atom", "role": "physical"},
             {
-                "path": "h3.dat",
+                "path": "h2.dat",
                 "family": "multicenter",
                 "role": "physical",
-            },
-            {
-                "path": "ghost.dat",
-                "family": "fragment_ghost",
-                "role": "ghost",
             },
         ]
 
@@ -333,10 +322,46 @@ class JointOptimizerContractTest(unittest.TestCase):
         )
 
         self.assertEqual(value["file_list"]["sternheimer"], targets)
+        self.assertEqual(
+            [target["role"] for target in value["file_list"]["sternheimer"]],
+            ["physical", "physical"],
+        )
         self.assertEqual(value["element"]["Nu"]["H"], [3, 2, 1, 0, 0])
         self.assertEqual(value["freeze_orbitals"], list(FIXED_DZP))
         self.assertEqual(value["C_init_info"]["C_init_file"], "initial.txt")
         self.assertEqual(value["seed"], 20260720)
+
+    def test_step_input_rejects_ghost_control_target(self):
+        template = {
+            "seed": 1,
+            "file_list": {"origin": ["origin.dat"], "linear": [["dpsi.dat"]]},
+            "element": {"Nt_all": ["H"], "Nu": {"H": [2, 1]}},
+            "C_init_info": {"init_from_file": True, "C_init_file": "old"},
+            "freeze_orbitals": [],
+        }
+        targets = [
+            {"path": "atom.dat", "family": "atom", "role": "physical"},
+            {
+                "path": "h2.dat",
+                "family": "multicenter",
+                "role": "physical",
+            },
+            {
+                "path": "ghost.dat",
+                "family": "fragment_ghost",
+                "role": "ghost",
+            },
+        ]
+
+        with self.assertRaisesRegex(ValueError, "exactly atom and multicenter"):
+            build_step_input(
+                template,
+                targets,
+                Path("initial.txt"),
+                {"H": [3, 2, 1, 0, 0]},
+                FIXED_DZP,
+                seed=20260720,
+            )
 
     def test_optimizer_requires_all_three_output_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
