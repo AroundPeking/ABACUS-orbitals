@@ -25,6 +25,42 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         )
         self.assertEqual(config["magnetic_overlap_tolerance"], 2.0e-4)
 
+    def test_step30_resume_uses_corrected_floor_contract(self):
+        config = json.loads(
+            (GREEDY / "selection_config_resume_step30.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(config["global_capture"], 0.999)
+        self.assertEqual(config["magnetic_overlap_tolerance"], 3.0e-4)
+        self.assertEqual(config["max_l"], 4)
+
+        runner = (
+            GREEDY / "run_selection_resume_step30.slurm"
+        ).read_text(encoding="utf-8")
+        self.assertIn("#SBATCH --partition=normal", runner)
+        self.assertIn("#SBATCH --cpus-per-task=30", runner)
+        self.assertIn("#SBATCH --mem=110610M", runner)
+        self.assertIn("#SBATCH --time=1-00:00:00", runner)
+        self.assertIn(
+            "siab_greedy_selection_source_h_h2_floor_fixed_resume_v6_20260728",
+            runner,
+        )
+        self.assertIn(
+            "resume_root=/work1/ghj/sternheimer_abacus_tests/"
+            "siab_greedy_selection_campaign_h_h2_physical_only_prod_v5_20260727",
+            runner,
+        )
+        self.assertIn(
+            "baseline=$resume_root/work/step_030/optimizer/ORBITAL_RESULTS.txt",
+            runner,
+        )
+        self.assertIn("selection_config_resume_step30.json", runner)
+        self.assertIn("--max-steps 16", runner)
+        self.assertIn("torch.equal", runner)
+        self.assertNotIn("ghost_target", runner)
+        self.assertNotIn("producer_h2_fragment_ghost", runner)
+
     def test_h2_and_h2_ghost_replace_the_h3_target_contract(self):
         h2 = GREEDY / "producer_h2"
         ghost = GREEDY / "producer_h2_fragment_ghost"

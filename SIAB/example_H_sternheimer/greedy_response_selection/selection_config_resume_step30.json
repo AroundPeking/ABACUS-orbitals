@@ -1,0 +1,27 @@
+{
+  "element": "H",
+  "fixed_orbitals": [
+    {
+      "element": "H",
+      "l": 0,
+      "zeta": 1
+    },
+    {
+      "element": "H",
+      "l": 0,
+      "zeta": 2
+    },
+    {
+      "element": "H",
+      "l": 1,
+      "zeta": 1
+    }
+  ],
+  "format_version": 1,
+  "global_capture": 0.999,
+  "magnetic_overlap_tolerance": 0.0003,
+  "max_l": 4,
+  "per_l_residual_limit": 0.01,
+  "relative_rank_tolerance": 0.0001,
+  "seed": 20260720
+}
