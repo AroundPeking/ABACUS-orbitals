@@ -8,6 +8,8 @@ from sternheimer_spillage import (
     OrbitalColumn,
     SternheimerSpillage,
     assemble_orbital_coefficients,
+    evaluate_spillage_for_columns,
+    evaluate_spillage_for_columns_rank_revealing,
     radial_residual_spectrum,
     shell_count_for_capture,
 )
@@ -110,6 +112,38 @@ def make_s_and_d_spectrum_data(d_eigenvalues):
 
 
 class SternheimerSpillageTest(unittest.TestCase):
+    def test_rank_revealing_projector_drops_duplicate_orbital_columns(self):
+        data = make_sternheimer_data(
+            (h_s_block(2),),
+            torch.tensor([[1.0, 0.0]], dtype=torch.complex128),
+            norm=torch.ones(1, dtype=torch.float64),
+        )
+        duplicated = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 1.0], [0.0, 0.0]], dtype=torch.float64
+                )
+            ]
+        }
+
+        with self.assertRaisesRegex(
+            RuntimeError, "selected projector overlap is not positive definite"
+        ):
+            evaluate_spillage_for_columns(
+                data, duplicated, include=lambda _: True
+            )
+
+        result = evaluate_spillage_for_columns_rank_revealing(
+            data,
+            duplicated,
+            include=lambda _: True,
+            condition_limit=1.0e12,
+        )
+
+        self.assertAlmostEqual(float(result.weighted_residual), 0.0)
+        self.assertAlmostEqual(float(result.loss), 0.0)
+        self.assertEqual(result.max_condition, 1.0)
+
     fixed_h_1s = OrbitalColumn("H", 0, 0, 0, 1)
 
     def test_analytic_projected_result(self):

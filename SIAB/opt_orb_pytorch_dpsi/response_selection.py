@@ -8,6 +8,7 @@ from response_basis import canonicalize_columns
 from sternheimer_spillage import (
     RadialResidualSpectrum,
     evaluate_spillage_for_columns,
+    evaluate_spillage_for_columns_rank_revealing,
 )
 
 
@@ -105,6 +106,45 @@ def normalized_family_loss(family, current, fixed_dzp):
         _sum_residual(family.data, fixed_dzp, include_all)
     )
     return numerator / denominator
+
+
+def normalized_family_floor(
+    family, maximal, fixed_dzp, condition_limit=1.0e12
+):
+    if not isinstance(family, ResponseTargetFamily):
+        raise TypeError("family must be a ResponseTargetFamily")
+    if family.role != "physical":
+        raise ValueError("normalized physical floor requires a physical family")
+    include_all = lambda label: True
+    numerator = 0.0
+    for data in family.data:
+        numerator += float(
+            evaluate_spillage_for_columns_rank_revealing(
+                data,
+                maximal,
+                include_all,
+                condition_limit=condition_limit,
+            ).weighted_residual.item()
+        )
+    denominator = _positive_dzp_residual(
+        _sum_residual(family.data, fixed_dzp, include_all)
+    )
+    result = numerator / denominator
+    if not math.isfinite(result) or not 0.0 <= result < 1.0:
+        raise RuntimeError(
+            "representable family floor must be finite and satisfy 0 <= floor < 1"
+        )
+    return result
+
+
+def _normalize_representable_floor(value, name):
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must satisfy 0 <= floor < 1") from exc
+    if not math.isfinite(value) or not 0.0 <= value < 1.0:
+        raise ValueError(f"{name} must satisfy 0 <= floor < 1")
+    return value
 
 
 def borrowing_gap(family, current, fixed_dzp):
@@ -222,6 +262,9 @@ def evaluate_response_candidates(
     fixed_dzp,
     atom_family,
     multicenter_family,
+    *,
+    atom_floor=0.0,
+    multicenter_floor=0.0,
 ):
     spectra = tuple(sorted(spectra, key=lambda value: value.l))
     if not spectra:
@@ -230,6 +273,10 @@ def evaluate_response_candidates(
         raise TypeError("spectra must contain RadialResidualSpectrum values")
     if len({value.l for value in spectra}) != len(spectra):
         raise ValueError("spectra must contain at most one candidate per l")
+    atom_floor = _normalize_representable_floor(atom_floor, "atom_floor")
+    multicenter_floor = _normalize_representable_floor(
+        multicenter_floor, "multicenter_floor"
+    )
 
     atom_before = normalized_family_loss(atom_family, current, fixed_dzp)
     multicenter_before = normalized_family_loss(
@@ -258,12 +305,20 @@ def evaluate_response_candidates(
             gain = CandidateGain(
                 l=spectrum.l,
                 mode=mode,
-                atom=atom_before
-                - normalized_family_loss(atom_family, candidate, fixed_dzp),
-                multicenter=multicenter_before
-                - normalized_family_loss(
-                    multicenter_family, candidate, fixed_dzp
-                ),
+                atom=(
+                    atom_before
+                    - normalized_family_loss(
+                        atom_family, candidate, fixed_dzp
+                    )
+                )
+                / (1.0 - atom_floor),
+                multicenter=(
+                    multicenter_before
+                    - normalized_family_loss(
+                        multicenter_family, candidate, fixed_dzp
+                    )
+                )
+                / (1.0 - multicenter_floor),
             )
         except RuntimeError as exc:
             values.append(

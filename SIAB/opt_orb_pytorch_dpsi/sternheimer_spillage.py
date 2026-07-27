@@ -673,6 +673,75 @@ def evaluate_spillage_for_columns(
     )
 
 
+def evaluate_spillage_for_columns_rank_revealing(
+    data, c, include, condition_limit=1.0e12
+):
+    """Evaluate a projector after removing its numerically dependent columns."""
+    if not callable(include):
+        raise TypeError("include must be callable")
+    condition_limit = _normalize_condition_limit(condition_limit)
+    assembled, labels = assemble_orbital_coefficients(data, c)
+    indices = tuple(
+        index for index, label in enumerate(labels) if bool(include(label))
+    )
+    if not indices:
+        raise ValueError("selected projector contains no orbital columns")
+
+    selected = assembled[:, indices]
+    overlap = selected.conj().transpose(0, 1) @ data.overlap @ selected
+    overlap = (overlap + overlap.conj().transpose(0, 1)) / 2.0
+    eigenvalues, eigenvectors = torch.linalg.eigh(overlap)
+    largest = float(eigenvalues[-1].item())
+    if not math.isfinite(largest) or largest <= 0.0:
+        raise RuntimeError(
+            "rank-revealing selected projector overlap has no positive modes"
+        )
+    cutoff = largest / condition_limit
+    if float(eigenvalues[0].item()) < -cutoff:
+        raise RuntimeError(
+            "rank-revealing selected projector overlap is materially indefinite"
+        )
+    keep = eigenvalues >= cutoff * (1.0 - 1.0e-12)
+    if not bool(torch.any(keep)):
+        raise RuntimeError(
+            "rank-revealing selected projector overlap has numerical rank zero"
+        )
+
+    whitener = eigenvectors[:, keep] / torch.sqrt(
+        eigenvalues[keep]
+    ).unsqueeze(0)
+    projected_q = data.q @ selected @ whitener
+    represented = torch.sum(torch.abs(projected_q) ** 2, dim=1)
+    residual_scale = torch.maximum(
+        torch.maximum(torch.abs(data.norm), torch.abs(represented)),
+        torch.ones_like(data.norm),
+    )
+    residual = _clamp_roundoff_negative(
+        data.norm - represented,
+        residual_scale,
+        "rank-revealing selected-projector residual",
+        "the selected projector represents more than the reference norm; "
+        "check q and overlap",
+    )
+
+    weight = data.effective_weight
+    weighted_norm = torch.sum(weight * data.norm)
+    if not bool(torch.isfinite(weighted_norm)) or not bool(weighted_norm > 0.0):
+        raise RuntimeError("weighted reference norm must be positive and finite")
+    weighted_residual = torch.sum(weight * residual)
+    if not bool(torch.isfinite(weighted_residual)):
+        raise RuntimeError(
+            "weighted rank-revealing projector residual must be finite"
+        )
+    condition = largest / float(eigenvalues[keep][0].item())
+    return SternheimerLossResult(
+        loss=weighted_residual / weighted_norm,
+        weighted_residual=weighted_residual,
+        weighted_norm=weighted_norm,
+        max_condition=condition,
+    )
+
+
 class SternheimerSpillage:
     def __init__(
         self,

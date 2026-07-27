@@ -278,6 +278,24 @@ class CandidateEvaluatorTest(unittest.TestCase):
             "residual eigenvalue is not positive",
         )
 
+    def test_evaluator_scores_representable_gain_above_family_floors(self):
+        atom, multicenter = response_target_families()
+        current = response_coefficients()
+
+        value = evaluate_response_candidates(
+            (response_spectrum(0, 1.0, [[0.0], [1.0]]),),
+            current,
+            current,
+            atom,
+            multicenter,
+            atom_floor=0.5,
+            multicenter_floor=0.0,
+        )[0]
+
+        self.assertAlmostEqual(value.gain.atom, 2.0, places=13)
+        self.assertAlmostEqual(value.gain.multicenter, 1.0, places=13)
+        self.assertAlmostEqual(value.score, 3.0, places=13)
+
 
 if __name__ == "__main__":
     unittest.main()

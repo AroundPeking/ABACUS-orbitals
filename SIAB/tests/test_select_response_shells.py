@@ -215,6 +215,74 @@ class OneStepSelectorTest(unittest.TestCase):
 
 
 class NestedSelectorTest(unittest.TestCase):
+    def test_global_capture_excludes_irreducible_primitive_floor(self):
+        data = make_sternheimer_data(
+            [PrimitiveBlock("H", 0, 0, 0, 2, 0)],
+            torch.tensor(
+                [[0.0, 1.0], [0.0, 0.0]],
+                dtype=torch.complex128,
+            ),
+            norm=torch.ones(2, dtype=torch.float64),
+        )
+        atom = ResponseTargetFamily("atom", (data,), "physical")
+        multicenter = ResponseTargetFamily("multicenter", (data,), "physical")
+        initial = {
+            "H": [
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64)
+            ]
+        }
+
+        def spectra_for(coefficients):
+            n_column = coefficients["H"][0].shape[1]
+            if n_column == 2:
+                return (
+                    RadialResidualSpectrum(
+                        element="H",
+                        atom_index=None,
+                        l=0,
+                        magnetic_channels=(0,),
+                        numerical_rank=0,
+                        eigenvalues=torch.zeros(1, dtype=torch.float64),
+                        cumulative_capture=torch.zeros(1, dtype=torch.float64),
+                        coefficients=torch.zeros((2, 1), dtype=torch.float64),
+                        overlap_relative_deviation=0.0,
+                        atom_indices=(0,),
+                    ),
+                )
+            return (
+                radial_residual_spectrum_many(
+                    (data,),
+                    coefficients,
+                    ({"element": "H", "l": 0, "zeta": 1},),
+                    "H",
+                    0,
+                ),
+            )
+
+        result = run_nested_selection(
+            {
+                "global_capture": 0.999,
+                "per_l_residual_limit": 0.01,
+            },
+            initial,
+            initial,
+            ({"element": "H", "l": 0, "zeta": 1},),
+            atom,
+            multicenter,
+            spectra_for,
+            optimize_step=lambda index, coefficients, selected: coefficients,
+            max_steps=2,
+        )
+
+        self.assertEqual(len(result.steps), 1)
+        self.assertEqual(result.metrics.atom_loss, 0.5)
+        self.assertEqual(result.metrics.multicenter_loss, 0.5)
+        self.assertEqual(result.metrics.atom_floor, 0.5)
+        self.assertEqual(result.metrics.multicenter_floor, 0.5)
+        self.assertEqual(result.metrics.atom_representable_loss, 0.0)
+        self.assertEqual(result.metrics.multicenter_representable_loss, 0.0)
+        self.assertEqual(result.metrics.global_capture, 1.0)
+
     def test_rebuilds_spectrum_and_stops_after_three_captured_modes(self):
         data = make_sternheimer_data(
             [PrimitiveBlock("H", 0, 0, 0, 4, 0)],

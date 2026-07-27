@@ -18,6 +18,7 @@ if str(SELECTOR_DIR) not in sys.path:
 from response_selection_campaign import (
     assemble_response_families,
     build_response_spectrum_builder,
+    extract_fixed_reference_coefficients,
     optimize_response_step,
     read_optimizer_coefficients,
     resolve_optimizer_template_paths,
@@ -41,6 +42,45 @@ def response_data():
 
 
 class OptimizerCoefficientBridgeTest(unittest.TestCase):
+    def test_fixed_reference_is_extracted_from_full_tzdp_prefix(self):
+        initial = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 0.0, 0.5], [0.0, 1.0, 0.5]],
+                    dtype=torch.float64,
+                ),
+                torch.tensor(
+                    [[1.0, 0.25], [0.0, 0.75]], dtype=torch.float64
+                ),
+                torch.empty((2, 0), dtype=torch.float64),
+            ]
+        }
+        fixed = (
+            {"element": "H", "l": 0, "zeta": 1},
+            {"element": "H", "l": 0, "zeta": 2},
+            {"element": "H", "l": 1, "zeta": 1},
+        )
+
+        reference = extract_fixed_reference_coefficients(initial, fixed)
+
+        self.assertEqual(
+            [channel.shape for channel in reference["H"]],
+            [(2, 2), (2, 1), (2, 0)],
+        )
+        torch.testing.assert_close(reference["H"][0], initial["H"][0][:, :2])
+        torch.testing.assert_close(reference["H"][1], initial["H"][1][:, :1])
+        self.assertEqual(initial["H"][0].shape, (2, 3))
+        self.assertEqual(initial["H"][1].shape, (2, 2))
+
+    def test_fixed_reference_rejects_nonprefix_zetas(self):
+        initial = {"H": [torch.eye(3, dtype=torch.float64)]}
+
+        with self.assertRaisesRegex(ValueError, "contiguous prefix"):
+            extract_fixed_reference_coefficients(
+                initial,
+                ({"element": "H", "l": 0, "zeta": 2},),
+            )
+
     def test_initial_loader_keeps_full_tzdp_and_only_validates_fixed_dzp(self):
         fixed = (
             {"element": "H", "l": 0, "zeta": 1},

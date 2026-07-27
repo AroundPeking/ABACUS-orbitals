@@ -58,6 +58,62 @@ def _validate_nu(expected_nu, max_l):
     return values
 
 
+def _validate_coefficient_channel(channel, name):
+    if not isinstance(channel, torch.Tensor):
+        raise TypeError(f"{name} must be a torch tensor")
+    if channel.ndim != 2:
+        raise ValueError(f"{name} must be a two-dimensional matrix")
+    if channel.shape[0] <= 0:
+        raise ValueError(f"{name} must contain radial rows")
+    if not bool(torch.all(torch.isfinite(channel))):
+        raise ValueError(f"{name} must contain only finite coefficients")
+
+
+def extract_fixed_reference_coefficients(coefficients, fixed_specs):
+    """Extract the contiguous fixed-zeta prefix from a full initial basis."""
+    if not isinstance(coefficients, dict) or not coefficients:
+        raise TypeError("coefficients must be a nonempty dictionary")
+    requested = {}
+    for spec in fixed_specs:
+        if not isinstance(spec, dict) or set(spec) != {
+            "element",
+            "l",
+            "zeta",
+        }:
+            raise ValueError("fixed orbital spec requires element, l, and zeta")
+        element = spec["element"]
+        l = spec["l"]
+        zeta = spec["zeta"]
+        if element not in coefficients:
+            raise ValueError(f"fixed orbital element {element!r} is missing")
+        if type(l) is not int or l < 0 or l >= len(coefficients[element]):
+            raise ValueError(f"fixed orbital l={l!r} is missing")
+        if type(zeta) is not int or zeta <= 0:
+            raise ValueError("fixed orbital zeta must be a positive integer")
+        requested.setdefault((element, l), set()).add(zeta)
+
+    result = {}
+    for element, channels in coefficients.items():
+        result[element] = []
+        for l, channel in enumerate(channels):
+            _validate_coefficient_channel(
+                channel, f"coefficients[{element!r}][{l}]"
+            )
+            zetas = sorted(requested.get((element, l), ()))
+            if zetas and zetas != list(range(1, len(zetas) + 1)):
+                raise ValueError(
+                    "fixed orbital zetas must form a contiguous prefix"
+                )
+            if len(zetas) > channel.shape[1]:
+                raise ValueError(
+                    f"fixed orbital {element}/{l}/zeta{zetas[-1]} is missing"
+                )
+            result[element].append(channel[:, : len(zetas)].detach().clone())
+    if not requested:
+        raise ValueError("fixed orbital specs must be nonempty")
+    return result
+
+
 def _next_nonempty(lines, index):
     while index < len(lines) and not lines[index].strip():
         index += 1
@@ -468,6 +524,12 @@ def _metrics_payload(metrics):
     return {
         "atom_loss": metrics.atom_loss,
         "multicenter_loss": metrics.multicenter_loss,
+        "atom_floor": metrics.atom_floor,
+        "multicenter_floor": metrics.multicenter_floor,
+        "atom_representable_loss": metrics.atom_representable_loss,
+        "multicenter_representable_loss": (
+            metrics.multicenter_representable_loss
+        ),
         "global_capture": metrics.global_capture,
         "per_l_residual_ratio": {
             str(l): value
@@ -528,6 +590,9 @@ def run_response_selection_campaign(
         condition_limit=condition_limit,
     )
     optimizer_records = {}
+    fixed_reference = extract_fixed_reference_coefficients(
+        initial, fixed_specs
+    )
 
     def optimize_step(index, coefficients, selected):
         del selected
@@ -551,13 +616,14 @@ def run_response_selection_campaign(
     selection = run_nested_selection(
         config,
         initial,
-        initial,
+        fixed_reference,
         fixed_specs,
         atom_family,
         multicenter_family,
         spectrum_builder,
         optimize_step,
         max_steps=max_steps,
+        condition_limit=condition_limit,
     )
     selection_manifest = freeze_selection_sequence(
         output_dir / "frozen",

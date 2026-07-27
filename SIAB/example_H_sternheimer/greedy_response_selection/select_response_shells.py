@@ -16,6 +16,7 @@ from response_selection import (
     CandidateEvaluation,
     append_response_shell,
     evaluate_response_candidates,
+    normalized_family_floor,
     normalized_family_loss,
     select_best_candidate,
 )
@@ -52,6 +53,10 @@ class FrozenSelectionStep:
 class SelectionMetrics:
     atom_loss: float
     multicenter_loss: float
+    atom_floor: float
+    multicenter_floor: float
+    atom_representable_loss: float
+    multicenter_representable_loss: float
     global_capture: float
     per_l_residual_ratio: dict
 
@@ -293,6 +298,9 @@ def select_one_response_shell(
     spectra,
     atom_family,
     multicenter_family,
+    *,
+    atom_floor=0.0,
+    multicenter_floor=0.0,
 ):
     spectra = tuple(spectra)
     evaluations = evaluate_response_candidates(
@@ -301,6 +309,8 @@ def select_one_response_shell(
         fixed_dzp,
         atom_family,
         multicenter_family,
+        atom_floor=atom_floor,
+        multicenter_floor=multicenter_floor,
     )
     selected_gain = select_best_candidate(
         value.gain for value in evaluations if value.admissible
@@ -342,6 +352,8 @@ def _selection_metrics(
     baseline_weights,
     atom_family,
     multicenter_family,
+    atom_floor,
+    multicenter_floor,
 ):
     current_weights = _spectrum_weights(spectra)
     if set(current_weights) != set(baseline_weights):
@@ -358,12 +370,42 @@ def _selection_metrics(
     multicenter_loss = normalized_family_loss(
         multicenter_family, current, fixed_dzp
     )
+    atom_representable_loss = _representable_loss(atom_loss, atom_floor)
+    multicenter_representable_loss = _representable_loss(
+        multicenter_loss, multicenter_floor
+    )
     return SelectionMetrics(
         atom_loss=atom_loss,
         multicenter_loss=multicenter_loss,
-        global_capture=1.0 - 0.5 * (atom_loss + multicenter_loss),
+        atom_floor=atom_floor,
+        multicenter_floor=multicenter_floor,
+        atom_representable_loss=atom_representable_loss,
+        multicenter_representable_loss=multicenter_representable_loss,
+        global_capture=1.0
+        - 0.5 * (atom_representable_loss + multicenter_representable_loss),
         per_l_residual_ratio=ratios,
     )
+
+
+def _representable_loss(loss, floor):
+    if not math.isfinite(loss) or not math.isfinite(floor):
+        raise RuntimeError("representable loss and floor must be finite")
+    if not 0.0 <= floor < 1.0:
+        raise RuntimeError("representable floor must satisfy 0 <= floor < 1")
+    tolerance = 1.0e-10 * max(abs(loss), abs(floor), 1.0)
+    if loss < floor - tolerance:
+        raise RuntimeError(
+            "physical-family loss is below its representable floor"
+        )
+    return max(loss - floor, 0.0) / (1.0 - floor)
+
+
+def _maximal_response_space(fixed_dzp, spectra):
+    result = fixed_dzp
+    for spectrum in spectra:
+        for mode in range(spectrum.numerical_rank):
+            result = append_response_shell(result, spectrum, mode)
+    return result
 
 
 def _stopping_satisfied(metrics, config):
@@ -401,6 +443,7 @@ def run_nested_selection(
     spectrum_builder,
     optimize_step,
     max_steps=64,
+    condition_limit=1.0e12,
 ):
     if not callable(spectrum_builder):
         raise TypeError("spectrum_builder must be callable")
@@ -413,6 +456,16 @@ def run_nested_selection(
     _validate_fixed_columns(fixed_dzp, initial, fixed_specs)
     baseline_spectra = tuple(spectrum_builder(fixed_dzp))
     baseline_weights = _spectrum_weights(baseline_spectra)
+    maximal = _maximal_response_space(fixed_dzp, baseline_spectra)
+    atom_floor = normalized_family_floor(
+        atom_family, maximal, fixed_dzp, condition_limit=condition_limit
+    )
+    multicenter_floor = normalized_family_floor(
+        multicenter_family,
+        maximal,
+        fixed_dzp,
+        condition_limit=condition_limit,
+    )
 
     current = initial
     steps = []
@@ -425,6 +478,8 @@ def run_nested_selection(
             baseline_weights,
             atom_family,
             multicenter_family,
+            atom_floor,
+            multicenter_floor,
         )
         if _stopping_satisfied(metrics, config):
             return NestedSelectionResult(
@@ -443,6 +498,8 @@ def run_nested_selection(
             spectra,
             atom_family,
             multicenter_family,
+            atom_floor=atom_floor,
+            multicenter_floor=multicenter_floor,
         )
         optimized = optimize_step(
             len(steps) + 1,

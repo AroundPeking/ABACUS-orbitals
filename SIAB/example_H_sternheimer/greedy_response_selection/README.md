@@ -13,7 +13,9 @@ manifests reject H2/RPA energy fields.
 The H--TZDP 8-au baseline is read at its full `3s2p` size. Only `1s,2s,1p`
 are fixed; the remaining `3s,2p` columns stay in the initial variational basis.
 The fixed-DZP list is therefore a lower-bound validation contract, not the
-declared size of the baseline coefficient file.
+declared size of the baseline coefficient file. All reported physical-family
+losses use that fixed DZP projector as the common denominator; the full TZDP
+initial basis is not a normalization reference.
 
 The target runner is pinned to ABACUS commit
 `c273b4ee7051138293d9988c3eb79bee36c0af10` and executable SHA256
@@ -35,7 +37,8 @@ closure must include `INPUT`, `KPT`, and `STRU` for each producer.
 `run_response_selection.py` executes the frozen nested loop. Atom and H2
 physical targets alone define the radial residual spectra, candidate score, and
 stopping conditions. The score is the atom-plus-H2 normalized loss reduction
-divided by the AO cost `2*l+1`. A selected shell is initialized from the leading
+above each family's finite-space floor, divided by the AO cost `2*l+1`. A
+selected shell is initialized from the leading
 residual mode, optimized with the existing `st_dpsi_joint` path,
 read back through the native coefficient bridge, and followed by a rebuilt
 spectrum. A fully spanned angular channel is represented as a zero-residual
@@ -45,3 +48,12 @@ eligible. The optimizer template uses the independently generated H3
 higher angular channels are response-driven while the DZP columns remain
 bitwise fixed. The sequence manifest is frozen before any held-out energy is
 evaluated.
+
+The stopping capture excludes the irreducible floor of the finite Bessel
+primitive space. For each physical family, the code constructs the maximal
+space from every numerically independent atomic residual mode and evaluates
+its projector with a rank-revealing overlap factorization. If `L` is the
+residual normalized to fixed DZP and `f` is this finite-space floor, the
+remaining representable loss is `(L-f)/(1-f)`. The global capture is one minus
+the mean atom/H2 representable loss. Raw normalized loss, floor, and
+representable loss are all retained in the campaign manifest.
