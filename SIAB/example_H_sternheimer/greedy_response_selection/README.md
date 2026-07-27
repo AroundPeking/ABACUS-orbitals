@@ -10,6 +10,11 @@ selection records, checks the fixed columns bitwise, and invokes the existing
 joint Sternheimer+dpsi optimizer as a checked subprocess. Selector inputs and
 manifests reject H2/RPA energy fields.
 
+The H--TZDP 8-au baseline is read at its full `3s2p` size. Only `1s,2s,1p`
+are fixed; the remaining `3s,2p` columns stay in the initial variational basis.
+The fixed-DZP list is therefore a lower-bound validation contract, not the
+declared size of the baseline coefficient file.
+
 The target runner is pinned to ABACUS commit
 `c273b4ee7051138293d9988c3eb79bee36c0af10` and executable SHA256
 `ff38348fbad89fde4a985c13f97b59ffc94353c22c7098e19b373c1ef7e76fee`.

@@ -81,7 +81,8 @@ def read_optimizer_coefficients(
         raise ValueError("radial_rows must be a positive integer")
     if type(max_l) is not int or max_l < 0:
         raise ValueError("max_l must be a nonnegative integer")
-    expected_nu = _validate_nu(expected_nu, max_l)
+    if expected_nu is not None:
+        expected_nu = _validate_nu(expected_nu, max_l)
 
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     try:
@@ -125,7 +126,12 @@ def read_optimizer_coefficients(
             raise ValueError(
                 f"unexpected coefficient element {label_element!r}; expected {element!r}"
             )
-        if l < 0 or l > max_l or zeta <= 0 or zeta > expected_nu[l]:
+        if (
+            l < 0
+            or l > max_l
+            or zeta <= 0
+            or (expected_nu is not None and zeta > expected_nu[l])
+        ):
             raise ValueError(f"coefficient column {(element, l, zeta)!r} is unexpected")
         key = (l, zeta)
         if key in columns:
@@ -148,6 +154,11 @@ def read_optimizer_coefficients(
 
     if not closed:
         raise ValueError("missing </Coefficient> section")
+    if expected_nu is None:
+        inferred_nu = [0] * (max_l + 1)
+        for l, zeta in columns:
+            inferred_nu[l] = max(inferred_nu[l], zeta)
+        expected_nu = tuple(inferred_nu)
     expected_total = sum(expected_nu)
     if declared_total is not None and declared_total != expected_total:
         raise ValueError("declared coefficient count does not match expected_nu")

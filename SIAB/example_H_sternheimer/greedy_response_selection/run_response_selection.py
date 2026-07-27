@@ -52,6 +52,28 @@ def _fixed_nu(fixed_specs, max_l, element):
     return tuple(counts)
 
 
+def load_initial_coefficients(
+    path,
+    *,
+    element,
+    radial_rows,
+    max_l,
+    fixed_specs,
+):
+    fixed_nu = _fixed_nu(fixed_specs, max_l, element)
+    initial = read_optimizer_coefficients(
+        path,
+        element=element,
+        radial_rows=radial_rows,
+        max_l=max_l,
+        expected_nu=None,
+    )
+    initial_nu = tuple(channel.shape[1] for channel in initial[element])
+    if any(actual < fixed for actual, fixed in zip(initial_nu, fixed_nu)):
+        raise ValueError("initial basis does not contain every fixed orbital")
+    return initial
+
+
 def _template_files(template):
     file_list = template["file_list"]
     return tuple(file_list["origin"]) + tuple(
@@ -94,13 +116,12 @@ def main(argv=None):
     fixed_specs = tuple(config["fixed_orbitals"])
     max_l = config["max_l"]
     element = config["element"]
-    expected_nu = _fixed_nu(fixed_specs, max_l, element)
-    initial = read_optimizer_coefficients(
+    initial = load_initial_coefficients(
         baseline_path,
         element=element,
         radial_rows=25,
         max_l=max_l,
-        expected_nu=expected_nu,
+        fixed_specs=fixed_specs,
     )
 
     optimizer_template = resolve_optimizer_template_paths(

@@ -24,8 +24,16 @@ from response_selection_campaign import (
     run_response_selection_campaign,
     write_optimizer_coefficients,
 )
+from run_response_selection import load_initial_coefficients
 from sternheimer_targets import parse_target_entries
 from test_sternheimer_spillage import h_s_block, make_sternheimer_data
+
+
+SIAB_ROOT = Path(__file__).resolve().parents[1]
+REAL_H_TZDP = (
+    SIAB_ROOT.parent
+    / "Dojo-NC-SR/Orbitals_v2.0/H_TZDP/info/8/ORBITAL_RESULTS.txt"
+)
 
 
 def response_data():
@@ -33,6 +41,26 @@ def response_data():
 
 
 class OptimizerCoefficientBridgeTest(unittest.TestCase):
+    def test_initial_loader_keeps_full_tzdp_and_only_validates_fixed_dzp(self):
+        fixed = (
+            {"element": "H", "l": 0, "zeta": 1},
+            {"element": "H", "l": 0, "zeta": 2},
+            {"element": "H", "l": 1, "zeta": 1},
+        )
+
+        loaded = load_initial_coefficients(
+            REAL_H_TZDP,
+            element="H",
+            radial_rows=25,
+            max_l=4,
+            fixed_specs=fixed,
+        )
+
+        self.assertEqual(
+            [channel.shape for channel in loaded["H"]],
+            [(25, 3), (25, 2), (25, 0), (25, 0), (25, 0)],
+        )
+
     def test_round_trip_preserves_columns_and_empty_channels_exactly(self):
         coefficients = {
             "H": [
