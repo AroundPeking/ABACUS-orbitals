@@ -54,3 +54,13 @@ one MPI rank and 30 OpenMP threads per node. LibRPA remains a one-rank
 postprocessor and reads every rank file through the unchanged reader-v1
 prefixes. No occupation, band, basis, Coulomb, frequency, or counterpoise
 setting is changed by this retry.
+
+The two-rank retry `21410883` also exhausted memory after 39:51. Its largest
+rank reached 108,949,048 KB, showing that the dominant two-spin dense object is
+replicated rather than distributed by the atom-pair MPI route. The next
+diagnostic therefore does not claim a full-band result. Script
+`run_ghost_truncated_cp.slurm` retains physical `nspin=2` and changes only the
+producer band count from 334 to 160. It evaluates H+ghost at 120 and all 160
+bands, to be paired with the completed H2 producer at 120/160 and isolated H at
+60/80 bands. Ghost remains a post-selection counterpoise diagnostic and never
+enters the response loss, candidate score, or stopping criterion.

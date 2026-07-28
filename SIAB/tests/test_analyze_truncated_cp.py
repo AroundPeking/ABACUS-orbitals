@@ -134,5 +134,37 @@ class TruncatedCounterpoiseCombinationTest(unittest.TestCase):
             )
 
 
+class TruncatedGhostContractTest(unittest.TestCase):
+    def test_uses_physical_spin_full_node_and_only_truncates_bands(self):
+        script_path = ANALYZER_DIR / "run_ghost_truncated_cp.slurm"
+        self.assertTrue(script_path.is_file(), script_path)
+        script = script_path.read_text(encoding="utf-8")
+
+        required = (
+            "#SBATCH --partition=normal",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
+            "#SBATCH --time=1-00:00:00",
+            "expected_nbands=160",
+            "expected_spins=2",
+            '"nbands": "160"',
+            '"nspin": "2"',
+            '"nupdown": "1"',
+            "n_bands_chi0 = 120",
+            '"nfreq": "16"',
+            '"rpa_ccp_rmesh_times": "5"',
+            "sha256sum -c SOURCE_SHA256SUMS",
+        )
+        for value in required:
+            self.assertIn(value, script)
+
+        self.assertNotIn("#SBATCH --partition=debug", script)
+        self.assertNotIn('"nspin": "1"', script)
+        self.assertNotIn("coulomb_cut", script)
+        self.assertIn("v1_coulomb_full_iq_1_rank0.dat", script)
+
+
 if __name__ == "__main__":
     unittest.main()
