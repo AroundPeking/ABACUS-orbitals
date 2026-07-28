@@ -35,3 +35,22 @@ historical binaries that produced the accepted 20-Angstrom SOS controls:
 This is a deliberate historical-version exception, not a claim that these
 binaries match the current `master_ghj` branches. Stage a `SOURCE_COMMIT` file
 beside `run_sos_cp.slurm` before submission.
+
+## Single-rank memory gate and ghost retry
+
+The first production array was `21409783_[0-2]`. Isolated H completed the
+full ABACUS-to-LibRPA path in 39:26, and H2 completed its ABACUS producer with
+a 58,782,948-KB peak before entering LibRPA. The spin-polarized H+ghost task
+exhausted the single-node memory limit after 39:08: Slurm reported
+`OUT_OF_MEMORY`, exit code `0:125`, and a peak of 112,502,556 KB against the
+110610-MB request.
+
+This failure is specific to the simultaneous two-center and two-spin reader-v1
+producer. The same orbital and auxiliary basis completed for two centers with
+one spin and for one center with two spins. The ABACUS RPA-LRI path distributes
+atom-pair tensors over MPI ranks and writes one `v1_Cs_data_<rank>.txt` file per
+rank. `run_ghost_mpi_cp.slurm` therefore retries only H+ghost with two nodes,
+one MPI rank and 30 OpenMP threads per node. LibRPA remains a one-rank
+postprocessor and reads every rank file through the unchanged reader-v1
+prefixes. No occupation, band, basis, Coulomb, frequency, or counterpoise
+setting is changed by this retry.

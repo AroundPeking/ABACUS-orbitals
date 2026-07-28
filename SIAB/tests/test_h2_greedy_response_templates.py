@@ -86,6 +86,27 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         )
         self.assertIn("H_empty", ghost_stru)
 
+    def test_full_greedy_ghost_retry_distributes_reader_v1_over_two_nodes(self):
+        campaign = SIAB_ROOT / "example_H_sternheimer" / (
+            "held_out_h2_sos_greedy_full"
+        )
+        runner = (campaign / "run_ghost_mpi_cp.slurm").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("#SBATCH --partition=normal", runner)
+        self.assertIn("#SBATCH --nodes=2", runner)
+        self.assertIn("#SBATCH --ntasks=2", runner)
+        self.assertIn("#SBATCH --ntasks-per-node=1", runner)
+        self.assertIn("#SBATCH --cpus-per-task=30", runner)
+        self.assertIn("#SBATCH --mem=110610M", runner)
+        self.assertIn("#SBATCH --time=1-00:00:00", runner)
+        self.assertIn('mpirun -np "$SLURM_NTASKS" -ppn 1', runner)
+        self.assertIn("v1_Cs_data_*.txt", runner)
+        self.assertIn("v1_coulomb_full_iq_1_rank*.dat", runner)
+        self.assertIn("expected_reader_ranks=2", runner)
+        self.assertIn("mpirun -np 1 -ppn 1", runner)
+        self.assertIn("libRPA finished successfully", runner)
+
     def test_selection_tolerates_measured_atomic_l4_grid_anisotropy(self):
         config = json.loads(
             (GREEDY / "selection_config.json").read_text(encoding="utf-8")
