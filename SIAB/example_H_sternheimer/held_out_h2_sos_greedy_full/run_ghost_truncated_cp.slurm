@@ -40,8 +40,9 @@ test -s "$script_dir/SOURCE_SHA256SUMS"
 test -d "$template_dir"
 test ! -e "$campaign_root"
 mkdir -p "$case_dir"
-cp "$template_dir/INPUT" "$template_dir/STRU" "$template_dir/KPT" \
-  "$template_dir/librpa.in" "$case_dir/"
+install -m 0644 "$template_dir/INPUT" "$case_dir/INPUT"
+cp "$template_dir/STRU" "$template_dir/KPT" "$template_dir/librpa.in" \
+  "$case_dir/"
 cp "$script_dir/$orbital" "$script_dir/$pseudo" "$script_dir/$fixed_abs" \
   "$case_dir/"
 

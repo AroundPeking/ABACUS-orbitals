@@ -70,3 +70,9 @@ seconds because the inline input parser treated the standard
 `INPUT_PARAMETERS` header as a key without a value. The input rewrite now lives
 in the tested Python analyzer: it preserves that header and verifies that only
 `suffix` and `nbands` change. No output from `21421833` is a physics result.
+
+The corrected parser submission, job 21421982, also stopped before ABACUS
+after three seconds. The immutable source closure made the copied input file
+read-only, so the tested rewrite could not replace it in the writable campaign
+directory. The staging script now installs only the destination input with mode
+0644 before rewriting it; the source closure remains read-only.

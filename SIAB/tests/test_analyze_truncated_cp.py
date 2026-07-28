@@ -186,6 +186,7 @@ class TruncatedGhostContractTest(unittest.TestCase):
             "n_bands_chi0 = 120",
             '"nfreq": "16"',
             "sha256sum -c SOURCE_SHA256SUMS",
+            'install -m 0644 "$template_dir/INPUT" "$case_dir/INPUT"',
         )
         for value in required:
             self.assertIn(value, script)
