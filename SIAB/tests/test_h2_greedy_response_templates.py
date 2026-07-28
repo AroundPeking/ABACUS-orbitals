@@ -19,6 +19,73 @@ def input_values(path):
 
 
 class H2GreedyResponseTemplatesTest(unittest.TestCase):
+    def test_full_greedy_basis_sos_uses_all_bands_and_fixed_abs(self):
+        campaign = SIAB_ROOT / "example_H_sternheimer" / (
+            "held_out_h2_sos_greedy_full"
+        )
+        runner = (campaign / "run_sos_cp.slurm").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("#SBATCH --partition=normal", runner)
+        self.assertIn("#SBATCH --array=0-2", runner)
+        self.assertIn("#SBATCH --cpus-per-task=30", runner)
+        self.assertIn("#SBATCH --mem=110610M", runner)
+        self.assertIn("#SBATCH --time=1-00:00:00", runner)
+        self.assertIn(
+            "d518c5997f667249554ab19af1a36d12f17439ffb7f0ecaf5977c1e829be7b00",
+            runner,
+        )
+        self.assertIn("nbands=334", runner)
+        self.assertIn("nbands=167", runner)
+        self.assertIn("expected_electrons=2", runner)
+        self.assertIn("expected_electrons=1", runner)
+        self.assertIn("H_empty", runner)
+        self.assertIn("fixed_abs", runner)
+        self.assertIn(
+            "2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d",
+            runner,
+        )
+        self.assertIn(
+            "defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c",
+            runner,
+        )
+
+        expected = {
+            "H2": (334, 1, 2),
+            "H": (167, 2, 1),
+            "H_ghost": (334, 2, 1),
+        }
+        for case, (nbands, nspin, nelec) in expected.items():
+            case_dir = campaign / "cases" / case
+            values = input_values(case_dir / "INPUT")
+            self.assertEqual(values["nbands"], str(nbands))
+            self.assertEqual(values.get("nspin", "1"), str(nspin))
+            self.assertEqual(values["nelec"], str(nelec))
+            self.assertEqual(values["ecutwfc"], "100")
+            self.assertEqual(values["rpa"], "1")
+            self.assertEqual(values["exx_pca_threshold"], "10")
+            self.assertEqual(
+                values["exx_singularity_correction"], "massidda"
+            )
+            self.assertEqual(values["rpa_ccp_rmesh_times"], "5")
+
+            librpa = (case_dir / "librpa.in").read_text(encoding="utf-8")
+            self.assertIn("prefix_coul_full = v1_coulomb_full_iq_", librpa)
+            self.assertIn("nfreq = 16", librpa)
+            self.assertIn("vq_threshold = 0", librpa)
+            self.assertIn("sqrt_coulomb_threshold = 0", librpa)
+
+            stru = (case_dir / "STRU").read_text(encoding="utf-8")
+            self.assertIn("37.79452292169073", stru)
+            self.assertIn("H_gga_8au_100Ry_13s11p10d5f4g.orb", stru)
+            self.assertIn(
+                "H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs", stru
+            )
+        ghost_stru = (campaign / "cases/H_ghost/STRU").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("H_empty", ghost_stru)
+
     def test_selection_tolerates_measured_atomic_l4_grid_anisotropy(self):
         config = json.loads(
             (GREEDY / "selection_config.json").read_text(encoding="utf-8")
