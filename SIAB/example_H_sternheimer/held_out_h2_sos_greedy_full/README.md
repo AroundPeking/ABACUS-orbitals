@@ -64,3 +64,9 @@ producer band count from 334 to 160. It evaluates H+ghost at 120 and all 160
 bands, to be paired with the completed H2 producer at 120/160 and isolated H at
 60/80 bands. Ghost remains a post-selection counterpoise diagnostic and never
 enters the response loss, candidate score, or stopping criterion.
+
+The first truncated submission, `21421833`, failed before ABACUS after three
+seconds because the inline input parser treated the standard
+`INPUT_PARAMETERS` header as a key without a value. The input rewrite now lives
+in the tested Python analyzer: it preserves that header and verifies that only
+`suffix` and `nbands` change. No output from `21421833` is a physics result.

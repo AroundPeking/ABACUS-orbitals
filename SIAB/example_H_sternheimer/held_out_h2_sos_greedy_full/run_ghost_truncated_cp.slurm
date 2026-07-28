@@ -56,74 +56,10 @@ check_hash 2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d \
 check_hash defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c \
   "$librpa"
 
-"$python" - "$template_dir/INPUT" "$case_dir/INPUT" "$output_dir" <<'PY'
-import pathlib
-import sys
-
-
-def parse(path):
-    rows = []
-    values = {}
-    for raw in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            rows.append((None, raw))
-            continue
-        fields = line.split(None, 1)
-        if len(fields) != 2 or fields[0] in values:
-            raise SystemExit(f"invalid or duplicate INPUT row: {raw}")
-        values[fields[0]] = fields[1].strip()
-        rows.append((fields[0], raw))
-    return rows, values
-
-
-source_path, output_path, suffix = sys.argv[1:]
-rows, source = parse(source_path)
-source_expected = {
-    "nbands": "334",
-    "nspin": "2",
-    "nupdown": "1",
-    "nelec": "1",
-    "ecutwfc": "100",
-    "rpa": "1",
-    "out_librpa_reader_version": "1",
-    "exx_pca_threshold": "10",
-    "exx_singularity_correction": "massidda",
-    "rpa_ccp_rmesh_times": "5",
-}
-for key, expected in source_expected.items():
-    if source.get(key) != expected:
-        raise SystemExit(f"source INPUT {key} expected {expected}, got {source.get(key)}")
-
-expected = {
-    "nbands": "160",
-    "nspin": "2",
-    "nupdown": "1",
-    "nelec": "1",
-    "ecutwfc": "100",
-    "rpa": "1",
-    "out_librpa_reader_version": "1",
-    "exx_pca_threshold": "10",
-    "exx_singularity_correction": "massidda",
-    "rpa_ccp_rmesh_times": "5",
-}
-result = []
-for key, raw in rows:
-    if key == "suffix":
-        result.append(f"suffix                  {suffix}")
-    elif key == "nbands":
-        result.append("nbands                  160")
-    else:
-        result.append(raw)
-pathlib.Path(output_path).write_text("\n".join(result) + "\n", encoding="utf-8")
-_, actual = parse(output_path)
-changed = {key for key in source if source[key] != actual.get(key)}
-if changed != {"suffix", "nbands"}:
-    raise SystemExit(f"unexpected INPUT changes: {sorted(changed)}")
-for key, value in expected.items():
-    if actual.get(key) != value:
-        raise SystemExit(f"generated INPUT {key} expected {value}, got {actual.get(key)}")
-PY
+"$python" "$script_dir/analyze_truncated_cp.py" prepare-ghost-input \
+  --source "$template_dir/INPUT" \
+  --output "$case_dir/INPUT" \
+  --suffix "$output_dir"
 
 "$python" - "$case_dir/librpa.in" <<'PY'
 import pathlib

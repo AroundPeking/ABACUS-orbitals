@@ -6,10 +6,86 @@ import json
 import math
 from pathlib import Path
 import re
+import sys
 
 
 HARTREE_TO_EV = 27.211386245988
 HARTREE_TO_KCAL_MOL = 627.5094740631
+
+
+def _parse_abacus_input(path):
+    rows = []
+    values = {}
+    header_seen = False
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            rows.append((None, raw))
+            continue
+        if line == "INPUT_PARAMETERS":
+            if header_seen or values:
+                raise ValueError(f"{path}: misplaced or duplicate INPUT_PARAMETERS")
+            header_seen = True
+            rows.append((None, raw))
+            continue
+        if not header_seen:
+            raise ValueError(f"{path}: missing INPUT_PARAMETERS before {line}")
+        fields = line.split(None, 1)
+        if len(fields) != 2 or fields[0] in values:
+            raise ValueError(f"{path}: invalid or duplicate INPUT row: {raw}")
+        values[fields[0]] = fields[1].strip()
+        rows.append((fields[0], raw))
+    if not header_seen:
+        raise ValueError(f"{path}: missing INPUT_PARAMETERS")
+    return rows, values
+
+
+def rewrite_truncated_ghost_input(source_path, output_path, suffix):
+    rows, source = _parse_abacus_input(source_path)
+    source_expected = {
+        "nbands": "334",
+        "nspin": "2",
+        "nupdown": "1",
+        "nelec": "1",
+        "ecutwfc": "100",
+        "rpa": "1",
+        "out_librpa_reader_version": "1",
+        "exx_pca_threshold": "10",
+        "exx_singularity_correction": "massidda",
+        "rpa_ccp_rmesh_times": "5",
+    }
+    for key, expected in source_expected.items():
+        if source.get(key) != expected:
+            raise ValueError(
+                f"source INPUT {key} expected {expected}, got {source.get(key)}"
+            )
+
+    result = []
+    for key, raw in rows:
+        if key == "suffix":
+            result.append(f"suffix                  {suffix}")
+        elif key == "nbands":
+            result.append("nbands                  160")
+        else:
+            result.append(raw)
+    Path(output_path).write_text("\n".join(result) + "\n", encoding="utf-8")
+
+    _, actual = _parse_abacus_input(output_path)
+    changed = {key for key in source if source[key] != actual.get(key)}
+    if changed != {"suffix", "nbands"}:
+        raise ValueError(f"unexpected INPUT changes: {sorted(changed)}")
+    expected = dict(source_expected)
+    expected["nbands"] = "160"
+    for key, value in expected.items():
+        if actual.get(key) != value:
+            raise ValueError(
+                f"generated INPUT {key} expected {value}, got {actual.get(key)}"
+            )
+    if actual.get("suffix") != suffix:
+        raise ValueError(
+            f"generated INPUT suffix expected {suffix}, got {actual.get('suffix')}"
+        )
+    return actual
 
 
 def parse_unique_float(path, pattern, label):
@@ -229,5 +305,25 @@ def main(argv=None):
     arguments.markdown_output.write_text(_markdown(rows), encoding="utf-8")
 
 
+def cli(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv[:1] == ["prepare-ghost-input"]:
+        parser = argparse.ArgumentParser(
+            description="Prepare the physical 160-band H+ghost ABACUS input."
+        )
+        parser.add_argument("--source", type=Path, required=True)
+        parser.add_argument("--output", type=Path, required=True)
+        parser.add_argument("--suffix", required=True)
+        arguments = parser.parse_args(argv[1:])
+        rewrite_truncated_ghost_input(
+            arguments.source,
+            arguments.output,
+            arguments.suffix,
+        )
+        return
+    main(argv)
+
+
 if __name__ == "__main__":
-    main()
+    cli()

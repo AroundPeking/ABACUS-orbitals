@@ -18,6 +18,7 @@ from analyze_truncated_cp import (  # noqa: E402
     parse_abacus_energy,
     parse_librpa_ec,
     parse_unique_float,
+    rewrite_truncated_ghost_input,
 )
 
 
@@ -48,6 +49,38 @@ class TruncatedCounterpoiseParserTest(unittest.TestCase):
                     r"Total EcRPA:\s+(?P<value>[-+0-9.eE]+)",
                     "Total EcRPA",
                 )
+
+    def test_rewrite_ghost_input_preserves_header_and_only_truncates_bands(self):
+        source_text = """INPUT_PARAMETERS
+suffix old_suffix
+nbands 334
+nspin 2
+nupdown 1
+nelec 1
+ecutwfc 100
+rpa 1
+out_librpa_reader_version 1
+exx_pca_threshold 10
+exx_singularity_correction massidda
+rpa_ccp_rmesh_times 5
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.write_file(directory, "INPUT.source", source_text)
+            output = Path(directory) / "INPUT"
+
+            rewrite_truncated_ghost_input(source, output, "truncated_suffix")
+
+            actual = output.read_text(encoding="utf-8")
+            self.assertTrue(actual.startswith("INPUT_PARAMETERS\n"))
+            self.assertIn("suffix                  truncated_suffix\n", actual)
+            self.assertIn("nbands                  160\n", actual)
+            self.assertEqual(
+                actual.replace(
+                    "suffix                  truncated_suffix",
+                    "suffix old_suffix",
+                ).replace("nbands                  160", "nbands 334"),
+                source_text,
+            )
 
     def test_parse_abacus_energy_checks_scf_and_zero_order_identity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -149,12 +182,9 @@ class TruncatedGhostContractTest(unittest.TestCase):
             "#SBATCH --time=1-00:00:00",
             "expected_nbands=160",
             "expected_spins=2",
-            '"nbands": "160"',
-            '"nspin": "2"',
-            '"nupdown": "1"',
+            "prepare-ghost-input",
             "n_bands_chi0 = 120",
             '"nfreq": "16"',
-            '"rpa_ccp_rmesh_times": "5"',
             "sha256sum -c SOURCE_SHA256SUMS",
         )
         for value in required:
@@ -164,6 +194,18 @@ class TruncatedGhostContractTest(unittest.TestCase):
         self.assertNotIn('"nspin": "1"', script)
         self.assertNotIn("coulomb_cut", script)
         self.assertIn("v1_coulomb_full_iq_1_rank0.dat", script)
+
+        analyzer = (ANALYZER_DIR / "analyze_truncated_cp.py").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            '"nbands": "334"',
+            'expected["nbands"] = "160"',
+            '"nspin": "2"',
+            '"nupdown": "1"',
+            '"rpa_ccp_rmesh_times": "5"',
+        ):
+            self.assertIn(value, analyzer)
 
 
 if __name__ == "__main__":
