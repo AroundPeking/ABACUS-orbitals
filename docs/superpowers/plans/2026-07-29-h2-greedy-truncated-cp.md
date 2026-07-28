@@ -208,3 +208,28 @@ Commit repository documentation and durable parser output with message:
 ```text
 docs(siab): record truncated full-basis CP diagnosis
 ```
+
+## Execution outcome (2026-07-29)
+
+- The strict analyzer and counterpoise combination tests were committed as
+  `2ba2b3e4`; the production contract was committed as `41d4bb69`.
+- Job `21421833` failed before ABACUS because the input parser rejected the
+  standard `INPUT_PARAMETERS` header. Commit `9bdff344` moved the rewrite into
+  the tested Python analyzer.
+- Job `21421982` then exposed that a read-only source template remained
+  read-only after copying. Commit `3ad69809` installs only the destination
+  input as mode 0644; the immutable-source staging preflight and all 199 SIAB
+  tests passed.
+- Matching LibRPA postprocessing completed for isolated H: 60 and 80 bands
+  give -0.018141011 and -0.019071348 Ha. Together with the completed H2 120/160
+  lanes, the raw binding energies are 109.503973 and 113.591135 kcal/mol.
+- Job `21422123` passed staging and converged SCF, but the 160-band two-spin
+  H+ghost RPA-LRI producer was killed by the cgroup after 38:49 at 110,844,908
+  KB. It wrote neither the final ABACUS marker nor reader-v1 data, so no CP
+  result exists.
+- The 334-to-160 band reduction changed the single-rank peak by only 1.47%.
+  A 120-band producer retry is therefore not a meaningful continuation. Task
+  3 steps 3--4 are blocked by the ABACUS producer memory layout, not by LibRPA
+  or the counterpoise analyzer. Basis compression must remain paused until the
+  empty-spin/two-spin RPA-LRI object is streamed, skipped when unoccupied, or
+  genuinely distributed and validated on a smaller control.

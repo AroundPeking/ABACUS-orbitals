@@ -76,3 +76,14 @@ after three seconds. The immutable source closure made the copied input file
 read-only, so the tested rewrite could not replace it in the writable campaign
 directory. The staging script now installs only the destination input with mode
 0644 before rewriting it; the source closure remains read-only.
+
+Submission `21422123` passed that immutable-source preflight, entered ABACUS,
+and converged the SCF in nine iterations. The RPA-LRI producer nevertheless
+reached 110,844,908 KB and was killed by the cgroup after 38:49, before the
+final ABACUS marker or any reader-v1 file was written. Reducing the producer
+from 334 to 160 bands therefore lowered the single-rank peak by only 1.47%
+relative to job `21409783_2` (112,502,556 KB). The dominant allocation is not
+controlled by the response-band cutoff, so a 120-band retry is not justified.
+No truncated counterpoise energy exists from this campaign. The next required
+step is an ABACUS producer memory change that avoids retaining the empty spin
+channel or otherwise streams/distributes the two-spin RPA-LRI object.
