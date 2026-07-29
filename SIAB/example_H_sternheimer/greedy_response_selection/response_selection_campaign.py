@@ -11,6 +11,7 @@ import torch
 from IO.read_sternheimer import read_sternheimer
 from response_selection import ResponseTargetFamily
 from select_response_shells import (
+    SelectionOptimization,
     build_step_input,
     freeze_selection_sequence,
     run_joint_optimizer,
@@ -37,6 +38,7 @@ class OptimizedResponseStep:
     coefficients: dict
     artifact_sha256: dict
     input_path: Path
+    metrics: dict
 
 
 @dataclass(frozen=True)
@@ -280,6 +282,60 @@ def write_optimizer_coefficients(path, coefficients):
     Path(path).write_text("\n".join(output), encoding="utf-8")
 
 
+_OPTIMIZER_METRIC_LABELS = {
+    "Sternheimer loss": "sternheimer",
+    "Radial tail fraction": "radial_tail",
+    "Radial locality regularization loss": "regularization_locality",
+    "Total loss": "total",
+    "Maximum ST overlap condition": "max_st_condition",
+    "Maximum radial locality condition": "max_locality_condition",
+}
+
+
+def read_optimizer_metrics(path):
+    """Read the accepted SIAB loss and condition diagnostics from <Mkb>."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    inside = False
+    closed = False
+    values = {}
+    for raw in lines:
+        line = raw.strip()
+        if line == "<Mkb>":
+            if inside:
+                raise ValueError("duplicate <Mkb> section")
+            inside = True
+            continue
+        if line == "</Mkb>" and inside:
+            closed = True
+            break
+        if not inside or "=" not in line:
+            continue
+        label, value = (field.strip() for field in line.split("=", 1))
+        name = _OPTIMIZER_METRIC_LABELS.get(label)
+        if name is None:
+            continue
+        if name in values:
+            raise ValueError(f"duplicate optimizer metric {name}")
+        try:
+            number = float(value)
+        except ValueError as exc:
+            raise ValueError(f"optimizer metric {name} is not numeric") from exc
+        lower_bound = 1.0 if name.startswith("max_") else 0.0
+        if not math.isfinite(number) or number < lower_bound:
+            raise ValueError(
+                f"optimizer metric {name} must be finite and at least "
+                f"{lower_bound:g}"
+            )
+        values[name] = number
+    if not inside or not closed:
+        raise ValueError("optimizer result requires one closed <Mkb> section")
+    expected = set(_OPTIMIZER_METRIC_LABELS.values())
+    if set(values) != expected:
+        missing = ", ".join(sorted(expected - set(values)))
+        raise ValueError(f"optimizer result is missing metrics: {missing}")
+    return values
+
+
 def _absolute_path(value, base_dir, name):
     if not isinstance(value, str) or not value:
         raise ValueError(f"{name} paths must be nonempty strings")
@@ -351,6 +407,7 @@ def optimize_response_step(
     output_dir,
     optimizer,
     python,
+    require_metrics=False,
 ):
     """Run one checked native SIAB joint optimization and read its coefficients."""
     if type(step) is not int or step <= 0:
@@ -385,10 +442,17 @@ def optimize_response_step(
         max_l=len(nu) - 1,
         expected_nu=nu,
     )
+    result_path = optimizer_dir / "ORBITAL_RESULTS.txt"
+    result_text = result_path.read_text(encoding="utf-8")
+    if require_metrics or "Maximum ST overlap condition" in result_text:
+        metrics = read_optimizer_metrics(result_path)
+    else:
+        metrics = {}
     return OptimizedResponseStep(
         coefficients=optimized,
         artifact_sha256=artifacts,
         input_path=optimizer_dir / "INPUT",
+        metrics=metrics,
     )
 
 
@@ -590,6 +654,7 @@ def run_response_selection_campaign(
         condition_limit=condition_limit,
     )
     optimizer_records = {}
+    compact = config.get("selection_mode") == "ao_budget_frontier"
     fixed_reference = extract_fixed_reference_coefficients(
         initial, fixed_specs
     )
@@ -606,11 +671,15 @@ def run_response_selection_campaign(
             output_dir=work_dir / f"step_{index:03d}",
             optimizer=optimizer,
             python=python,
+            require_metrics=compact,
         )
         optimizer_records[str(index)] = {
             "input": str(value.input_path.relative_to(output_dir)),
             "artifacts": value.artifact_sha256,
+            "optimization_metrics": value.metrics,
         }
+        if compact:
+            return SelectionOptimization(value.coefficients, value.metrics)
         return value.coefficients
 
     selection = run_nested_selection(

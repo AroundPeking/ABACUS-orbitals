@@ -21,6 +21,7 @@ from response_selection_campaign import (
     extract_fixed_reference_coefficients,
     optimize_response_step,
     read_optimizer_coefficients,
+    read_optimizer_metrics,
     resolve_optimizer_template_paths,
     run_response_selection_campaign,
     write_optimizer_coefficients,
@@ -195,6 +196,35 @@ class ResponseFamilyAssemblyTest(unittest.TestCase):
 
 
 class JointOptimizationBridgeTest(unittest.TestCase):
+    def test_reads_named_optimizer_loss_and_condition_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ORBITAL_RESULTS.txt"
+            path.write_text(
+                "<Mkb>\n"
+                "Sternheimer loss = 2.5000000000e-01\n"
+                "Radial tail fraction = 8.0000000000e-02\n"
+                "Radial locality regularization loss = 4.0000000000e-03\n"
+                "Total loss = 3.0000000000e-01\n"
+                "Maximum ST overlap condition = 1.2000000000e+01\n"
+                "Maximum radial locality condition = 8.0000000000e+00\n"
+                "</Mkb>\n",
+                encoding="utf-8",
+            )
+
+            metrics = read_optimizer_metrics(path)
+
+        self.assertEqual(
+            metrics,
+            {
+                "sternheimer": 0.25,
+                "radial_tail": 0.08,
+                "regularization_locality": 0.004,
+                "total": 0.30,
+                "max_st_condition": 12.0,
+                "max_locality_condition": 8.0,
+            },
+        )
+
     def test_resolves_all_legacy_matrix_paths_against_template_directory(self):
         template = {
             "file_list": {
@@ -398,6 +428,93 @@ class PhysicalSpectrumBuilderTest(unittest.TestCase):
                 ["physical", "physical"],
             )
             self.assertNotIn("h2_energy", result.campaign_manifest.read_text())
+
+    def test_compact_campaign_freezes_metrics_at_ao_budget(self):
+        data = make_sternheimer_data((h_s_block(2),), [0.0, 1.0])
+        target_values = [
+            {"path": "atom.dat", "family": "atom", "role": "physical"},
+            {
+                "path": "h2.dat",
+                "family": "multicenter",
+                "role": "physical",
+            },
+        ]
+        entries = parse_target_entries(target_values)
+        families = assemble_response_families(
+            tuple(zip(entries, (data, data)))
+        )
+        initial = {
+            "H": [torch.tensor([[1.0], [0.0]], dtype=torch.float64)]
+        }
+        fixed = ({"element": "H", "l": 0, "zeta": 1},)
+        template = {
+            "seed": 1,
+            "file_list": {"origin": ["origin.dat"], "linear": [["dpsi.dat"]]},
+            "element": {"Nt_all": ["H"], "Nu": {"H": [1]}},
+            "C_init_info": {"init_from_file": True, "C_init_file": "old"},
+            "freeze_orbitals": list(fixed),
+        }
+        config = {
+            "format_version": 1,
+            "seed": 20260720,
+            "max_l": 0,
+            "relative_rank_tolerance": 1.0e-4,
+            "magnetic_overlap_tolerance": 1.0e-4,
+            "selection_mode": "ao_budget_frontier",
+            "max_ao_per_atom": 2,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            optimizer = root / "optimizer.py"
+            optimizer.write_text(
+                "import json\n"
+                "from pathlib import Path\n"
+                "value = json.loads(Path('INPUT').read_text())\n"
+                "source = Path(value['C_init_info']['C_init_file']).read_text()\n"
+                "metrics = ('Sternheimer loss = 2.5000000000e-01\\n'\n"
+                "           'Radial tail fraction = 8.0000000000e-02\\n'\n"
+                "           'Radial locality regularization loss = 4.0000000000e-03\\n'\n"
+                "           'Total loss = 3.0000000000e-01\\n'\n"
+                "           'Maximum ST overlap condition = 1.2000000000e+01\\n'\n"
+                "           'Maximum radial locality condition = 8.0000000000e+00\\n')\n"
+                "Path('ORBITAL_RESULTS.txt').write_text(source.replace('</Mkb>', metrics + '</Mkb>'))\n"
+                "Path('ORBITAL_1U.dat').write_text('orbital\\n')\n"
+                "Path('Spillage.dat').write_text('spillage\\n')\n",
+                encoding="utf-8",
+            )
+
+            result = run_response_selection_campaign(
+                config=config,
+                initial=initial,
+                fixed_specs=fixed,
+                families=families,
+                optimizer_template=template,
+                targets=target_values,
+                output_dir=root / "campaign",
+                optimizer=optimizer,
+                python=Path(sys.executable),
+                condition_limit=1.0e12,
+                max_steps=3,
+            )
+
+            manifest = json.loads(
+                result.selection_manifest.read_text(encoding="utf-8")
+            )
+            campaign = json.loads(
+                result.campaign_manifest.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result.selection.status, "ao_budget_reached")
+        self.assertEqual(len(result.selection.steps), 1)
+        self.assertEqual(
+            manifest["steps"][0]["optimization_metrics"]["radial_tail"],
+            0.08,
+        )
+        self.assertEqual(
+            campaign["optimizer_steps"]["1"]["optimization_metrics"]
+            ["max_locality_condition"],
+            8.0,
+        )
 
 
 if __name__ == "__main__":

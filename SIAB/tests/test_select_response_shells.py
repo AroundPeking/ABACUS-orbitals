@@ -4,6 +4,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 
@@ -21,6 +22,7 @@ from response_selection import (
     CandidateGain,
     ResponseTargetFamily,
 )
+import select_response_shells as selector_module
 from select_response_shells import (
     FrozenSelectionStep,
     build_step_input,
@@ -90,6 +92,17 @@ def accepted(l, mode, atom, multicenter):
     )
 
 
+def optimization_metrics():
+    return {
+        "sternheimer": 0.25,
+        "radial_tail": 0.08,
+        "regularization_locality": 0.004,
+        "total": 0.30,
+        "max_st_condition": 12.0,
+        "max_locality_condition": 8.0,
+    }
+
+
 def three_steps():
     current = baseline_coefficients()
     result = []
@@ -117,6 +130,44 @@ def float64_bytes(values):
 
 
 class FrozenSelectionManifestTest(unittest.TestCase):
+    def test_compact_manifest_records_optimized_locality_metrics(self):
+        selected = accepted(2, 0, 0.5, 0.25)
+        step = FrozenSelectionStep(
+            selected=selected,
+            candidates=(selected,),
+            coefficients=append_column(
+                baseline_coefficients(), 2, [0.0, 1.0, 0.0]
+            ),
+            optimization_metrics=optimization_metrics(),
+        )
+        config = {
+            "format_version": 1,
+            "selection_mode": "ao_budget_frontier",
+            "max_ao_per_atom": 48,
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = freeze_selection_sequence(
+                Path(directory),
+                config,
+                baseline_coefficients(),
+                FIXED_DZP,
+                (step,),
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            record = json.loads(
+                (Path(directory) / manifest["steps"][0]["selection_record"])
+                .read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(
+            record["optimization_metrics"], optimization_metrics()
+        )
+        self.assertEqual(
+            manifest["steps"][0]["optimization_metrics"],
+            optimization_metrics(),
+        )
+
     def test_manifest_is_deterministic_and_contains_no_energy(self):
         config = {"format_version": 1, "seed": 20260720}
         with tempfile.TemporaryDirectory() as first_dir:
@@ -179,6 +230,47 @@ class FrozenSelectionManifestTest(unittest.TestCase):
 
 
 class OneStepSelectorTest(unittest.TestCase):
+    def test_budget_skips_expensive_best_candidate_and_selects_one_that_fits(self):
+        atom, multicenter = response_target_families()
+        current = {
+            "H": [
+                torch.tensor([[1.0], [0.0]], dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+            ]
+        }
+        spectra = (
+            response_spectrum(0, 1.0, [[0.0], [1.0]]),
+            response_spectrum(2, 1.0, [[0.0], [1.0]]),
+        )
+        evaluations = (
+            accepted(0, 0, 0.1, 0.1),
+            accepted(2, 0, 10.0, 10.0),
+        )
+
+        with mock.patch.object(
+            selector_module,
+            "evaluate_response_candidates",
+            return_value=evaluations,
+        ):
+            step = select_one_response_shell(
+                current,
+                current,
+                spectra,
+                atom,
+                multicenter,
+                max_ao_per_atom=2,
+            )
+
+        self.assertEqual(step.selected.gain.key, (0, 0))
+        rejected = next(
+            value for value in step.candidates if value.gain.key == (2, 0)
+        )
+        self.assertFalse(rejected.admissible)
+        self.assertEqual(
+            rejected.rejection_reason, "candidate exceeds max_ao_per_atom"
+        )
+
     def test_selects_and_appends_best_candidate_with_full_score_table(self):
         atom, multicenter = response_target_families()
         current = response_coefficients()
@@ -215,6 +307,69 @@ class OneStepSelectorTest(unittest.TestCase):
 
 
 class NestedSelectorTest(unittest.TestCase):
+    def test_ao_budget_frontier_ignores_capture_and_stops_before_overflow(self):
+        data = make_sternheimer_data(
+            [PrimitiveBlock("H", 0, 0, 0, 4, 0)],
+            torch.tensor(
+                [
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=torch.complex128,
+            ),
+            norm=torch.ones(3, dtype=torch.float64),
+        )
+        atom = ResponseTargetFamily("atom", (data,), "physical")
+        multicenter = ResponseTargetFamily(
+            "multicenter", (data,), "physical"
+        )
+        initial = {
+            "H": [
+                torch.tensor(
+                    [[1.0], [0.0], [0.0], [0.0]], dtype=torch.float64
+                )
+            ]
+        }
+
+        def spectra_for(coefficients):
+            n_column = coefficients["H"][0].shape[1]
+            projected = [
+                {"element": "H", "l": 0, "zeta": zeta}
+                for zeta in range(1, n_column + 1)
+            ]
+            return (
+                radial_residual_spectrum_many(
+                    (data,), coefficients, projected, "H", 0
+                ),
+            )
+
+        optimized_steps = []
+
+        def optimize_step(index, coefficients, selected):
+            optimized_steps.append((index, selected.gain.key))
+            return coefficients
+
+        result = run_nested_selection(
+            {
+                "selection_mode": "ao_budget_frontier",
+                "max_ao_per_atom": 3,
+            },
+            initial,
+            initial,
+            ({"element": "H", "l": 0, "zeta": 1},),
+            atom,
+            multicenter,
+            spectra_for,
+            optimize_step,
+            max_steps=4,
+        )
+
+        self.assertEqual(result.status, "ao_budget_reached")
+        self.assertEqual(len(result.steps), 2)
+        self.assertEqual(optimized_steps, [(1, (0, 0)), (2, (0, 0))])
+        self.assertLess(result.metrics.global_capture, 0.999)
+
     def test_global_capture_excludes_irreducible_primitive_floor(self):
         data = make_sternheimer_data(
             [PrimitiveBlock("H", 0, 0, 0, 2, 0)],

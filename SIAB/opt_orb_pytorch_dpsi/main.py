@@ -372,6 +372,16 @@ def main():
 		data_transmit["Spillage"],
 		loss_components=data_transmit.get("loss_components"),
 		mode=data_transmit.get("loss_mode"),
+		diagnostics=(
+			{
+				"max_st_condition": data_transmit["max_st_condition"],
+				"max_locality_condition": data_transmit[
+					"max_locality_condition"
+				],
+			}
+			if "loss_components" in data_transmit
+			else None
+		),
 	)
 
 	print("Time (PyTorch):     %s\n"%(time.time()-time_start) )

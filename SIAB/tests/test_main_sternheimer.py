@@ -431,6 +431,10 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
                 0.6,
                 loss_components=COMPONENTS,
                 mode="st_only",
+                diagnostics={
+                    "max_st_condition": 12.0,
+                    "max_locality_condition": 8.0,
+                },
             )
             text = output.read_text()
 
@@ -450,6 +454,8 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
                 "Radial tail fraction = 2.0000000000e-02",
                 "Radial locality regularization loss = 0.0000000000e+00",
                 "Total loss = 6.0000000000e-01",
+                "Maximum ST overlap condition = 1.2000000000e+01",
+                "Maximum radial locality condition = 8.0000000000e+00",
             )
             positions = [metadata.index(line) for line in expected_lines]
             self.assertEqual(positions, sorted(positions))

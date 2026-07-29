@@ -19,6 +19,11 @@ _LOSS_COMPONENTS = (
 	("total", "Total loss"),
 )
 
+_LOSS_DIAGNOSTICS = (
+	("max_st_condition", "Maximum ST overlap condition"),
+	("max_locality_condition", "Maximum radial locality condition"),
+)
+
 
 @dataclass(frozen=True)
 class CoefficientInitializationMetadata:
@@ -52,6 +57,31 @@ def _validate_loss_metadata(loss_components, mode):
 			or value < 0.0
 		):
 			raise ValueError(f"{name} metadata must be finite and nonnegative")
+		validated[name] = float(value)
+	return validated
+
+
+def _validate_loss_diagnostics(diagnostics):
+	if diagnostics is None:
+		return None
+	if not isinstance(diagnostics, Mapping):
+		raise TypeError("loss diagnostics must be a mapping")
+	expected = {name for name, _ in _LOSS_DIAGNOSTICS}
+	if set(diagnostics) != expected:
+		raise ValueError(
+			"loss diagnostics must contain exactly "
+			+ ", ".join(name for name, _ in _LOSS_DIAGNOSTICS)
+		)
+	validated = {}
+	for name, _ in _LOSS_DIAGNOSTICS:
+		value = diagnostics[name]
+		if (
+			isinstance(value, bool)
+			or not isinstance(value, numbers.Real)
+			or not math.isfinite(value)
+			or value < 1.0
+		):
+			raise ValueError(f"{name} diagnostic must be finite and at least one")
 		validated[name] = float(value)
 	return validated
 
@@ -180,8 +210,18 @@ def copy_C(C,info_element):
 
 
 
-def write_C(file_name,C,Spillage,loss_components=None,mode=None):
+def write_C(
+	file_name,
+	C,
+	Spillage,
+	loss_components=None,
+	mode=None,
+	diagnostics=None,
+):
 	loss_components = _validate_loss_metadata(loss_components, mode)
+	diagnostics = _validate_loss_diagnostics(diagnostics)
+	if diagnostics is not None and loss_components is None:
+		raise ValueError("loss diagnostics require loss_components")
 	with open(file_name,"w") as file:
 		print("<Coefficient>", file=file)
 		#print("\tTotal number of radial orbitals.", file=file)
@@ -207,6 +247,9 @@ def write_C(file_name,C,Spillage,loss_components=None,mode=None):
 			print(f"Mode = {mode}", file=file)
 			for name, label in _LOSS_COMPONENTS:
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
+			if diagnostics is not None:
+				for name, label in _LOSS_DIAGNOSTICS:
+					print(f"{label} = {diagnostics[name]:.10e}", file=file)
 		print("</Mkb>", file=file)
 
 

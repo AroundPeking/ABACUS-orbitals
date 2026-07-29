@@ -35,6 +35,7 @@ class FrozenSelectionStep:
     selected: CandidateEvaluation
     candidates: tuple
     coefficients: dict
+    optimization_metrics: dict = None
 
     def __post_init__(self):
         candidates = tuple(self.candidates)
@@ -47,6 +48,26 @@ class FrozenSelectionStep:
             raise ValueError("selected candidate must occur in candidates")
         if not isinstance(self.coefficients, dict) or not self.coefficients:
             raise TypeError("coefficients must be a nonempty dictionary")
+        object.__setattr__(
+            self,
+            "optimization_metrics",
+            _validate_optimization_metrics(self.optimization_metrics),
+        )
+
+
+@dataclass(frozen=True)
+class SelectionOptimization:
+    coefficients: dict
+    metrics: dict
+
+    def __post_init__(self):
+        if not isinstance(self.coefficients, dict) or not self.coefficients:
+            raise TypeError("coefficients must be a nonempty dictionary")
+        object.__setattr__(
+            self,
+            "metrics",
+            _validate_optimization_metrics(self.metrics, required=True),
+        )
 
 
 @dataclass(frozen=True)
@@ -66,6 +87,53 @@ class NestedSelectionResult:
     status: str
     steps: tuple
     metrics: SelectionMetrics
+
+
+_OPTIMIZATION_METRIC_NAMES = (
+    "sternheimer",
+    "radial_tail",
+    "regularization_locality",
+    "total",
+    "max_st_condition",
+    "max_locality_condition",
+)
+
+
+class _AOBudgetReached(RuntimeError):
+    pass
+
+
+def _validate_optimization_metrics(metrics, required=False):
+    if metrics is None:
+        if required:
+            raise ValueError("compact selection requires optimization metrics")
+        return None
+    if not isinstance(metrics, dict):
+        raise TypeError("optimization_metrics must be a dictionary")
+    if set(metrics) != set(_OPTIMIZATION_METRIC_NAMES):
+        raise ValueError(
+            "optimization_metrics must contain exactly "
+            + ", ".join(_OPTIMIZATION_METRIC_NAMES)
+        )
+    result = {}
+    for name in _OPTIMIZATION_METRIC_NAMES:
+        value = metrics[name]
+        if isinstance(value, bool):
+            raise ValueError(f"optimization metric {name} must be finite")
+        try:
+            value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"optimization metric {name} must be finite"
+            ) from exc
+        lower_bound = 1.0 if name.startswith("max_") else 0.0
+        if not math.isfinite(value) or value < lower_bound:
+            raise ValueError(
+                f"optimization metric {name} must be finite and at least "
+                f"{lower_bound:g}"
+            )
+        result[name] = value
+    return result
 
 
 def _reject_energy_fields(value):
@@ -205,6 +273,40 @@ def _basis_counts(coefficients):
     return nu, radial_shells, ao_functions
 
 
+def _ao_functions_by_element(coefficients):
+    result = {}
+    for element, channels in coefficients.items():
+        total = 0
+        for l, value in enumerate(channels):
+            _validate_channel(value, f"coefficients[{element!r}][{l}]")
+            total += (2 * l + 1) * value.shape[1]
+        result[element] = total
+    if not result:
+        raise ValueError("coefficients must contain at least one element")
+    return result
+
+
+def _selection_contract(config, initial):
+    if not isinstance(config, dict):
+        raise TypeError("selection config must be a dictionary")
+    mode = config.get("selection_mode", "response_converged")
+    if mode not in ("response_converged", "ao_budget_frontier"):
+        raise ValueError(
+            "selection_mode must be response_converged or ao_budget_frontier"
+        )
+    if mode == "response_converged":
+        return mode, None
+    budget = config.get("max_ao_per_atom")
+    if type(budget) is not int or budget <= 0:
+        raise ValueError("max_ao_per_atom must be a positive integer")
+    initial_counts = _ao_functions_by_element(initial)
+    if any(value > budget for value in initial_counts.values()):
+        raise ValueError(
+            "max_ao_per_atom must be at least the initial per-atom AO count"
+        )
+    return mode, budget
+
+
 def freeze_selection_sequence(
     output_dir,
     config,
@@ -219,7 +321,9 @@ def freeze_selection_sequence(
     output_dir.mkdir(parents=True, exist_ok=True)
     fixed_specs = tuple(copy.deepcopy(fixed_specs))
     steps = tuple(steps)
-    if not steps:
+    selection_mode, _ = _selection_contract(config, fixed_dzp)
+    compact = selection_mode == "ao_budget_frontier"
+    if not steps and not compact:
         raise ValueError("frozen selection sequence must be nonempty")
 
     previous_nu, _, _ = _basis_counts(fixed_dzp)
@@ -263,6 +367,10 @@ def freeze_selection_sequence(
             "coefficients": "coefficients.json",
             "coefficients_sha256": _sha256(coefficients_path),
         }
+        if compact:
+            record["optimization_metrics"] = _validate_optimization_metrics(
+                step.optimization_metrics, required=True
+            )
         _canonical_json(step_dir / "selection_record.json", record)
         relative_coefficients = coefficients_path.relative_to(output_dir)
         manifest_steps.append(
@@ -279,6 +387,10 @@ def freeze_selection_sequence(
                 ),
             }
         )
+        if compact:
+            manifest_steps[-1]["optimization_metrics"] = copy.deepcopy(
+                record["optimization_metrics"]
+            )
         previous_nu = nu
 
     manifest = {
@@ -301,6 +413,7 @@ def select_one_response_shell(
     *,
     atom_floor=0.0,
     multicenter_floor=0.0,
+    max_ao_per_atom=None,
 ):
     spectra = tuple(spectra)
     evaluations = evaluate_response_candidates(
@@ -312,13 +425,50 @@ def select_one_response_shell(
         atom_floor=atom_floor,
         multicenter_floor=multicenter_floor,
     )
+    spectrum_by_l = {value.l: value for value in spectra}
+    if max_ao_per_atom is not None:
+        if type(max_ao_per_atom) is not int or max_ao_per_atom <= 0:
+            raise ValueError("max_ao_per_atom must be a positive integer")
+        budgeted = []
+        rejected_for_budget = False
+        for value in evaluations:
+            if not value.admissible:
+                budgeted.append(value)
+                continue
+            candidate = append_response_shell(
+                current,
+                spectrum_by_l[value.gain.l],
+                value.gain.mode,
+            )
+            if any(
+                count > max_ao_per_atom
+                for count in _ao_functions_by_element(candidate).values()
+            ):
+                rejected_for_budget = True
+                budgeted.append(
+                    CandidateEvaluation(
+                        gain=value.gain,
+                        score=value.score,
+                        admissible=False,
+                        rejection_reason="candidate exceeds max_ao_per_atom",
+                    )
+                )
+            else:
+                budgeted.append(value)
+        evaluations = tuple(budgeted)
+        if rejected_for_budget and not any(
+            value.admissible for value in evaluations
+        ):
+            raise _AOBudgetReached(
+                "no admissible response shell fits max_ao_per_atom"
+            )
+
     selected_gain = select_best_candidate(
         value.gain for value in evaluations if value.admissible
     )
     selected = next(
         value for value in evaluations if value.gain.key == selected_gain.key
     )
-    spectrum_by_l = {value.l: value for value in spectra}
     coefficients = append_response_shell(
         current,
         spectrum_by_l[selected.gain.l],
@@ -454,6 +604,7 @@ def run_nested_selection(
 
     fixed_specs = tuple(fixed_specs)
     _validate_fixed_columns(fixed_dzp, initial, fixed_specs)
+    selection_mode, max_ao_per_atom = _selection_contract(config, initial)
     baseline_spectra = tuple(spectrum_builder(fixed_dzp))
     baseline_weights = _spectrum_weights(baseline_spectra)
     maximal = _maximal_response_space(fixed_dzp, baseline_spectra)
@@ -481,7 +632,22 @@ def run_nested_selection(
             atom_floor,
             multicenter_floor,
         )
-        if _stopping_satisfied(metrics, config):
+        if (
+            selection_mode == "ao_budget_frontier"
+            and all(
+                count >= max_ao_per_atom
+                for count in _ao_functions_by_element(current).values()
+            )
+        ):
+            return NestedSelectionResult(
+                status="ao_budget_reached",
+                steps=tuple(steps),
+                metrics=metrics,
+            )
+        if (
+            selection_mode == "response_converged"
+            and _stopping_satisfied(metrics, config)
+        ):
             return NestedSelectionResult(
                 status="converged",
                 steps=tuple(steps),
@@ -492,20 +658,34 @@ def run_nested_selection(
                 "response-shell selection exceeded max_steps before convergence"
             )
 
-        initialized = select_one_response_shell(
-            current,
-            fixed_dzp,
-            spectra,
-            atom_family,
-            multicenter_family,
-            atom_floor=atom_floor,
-            multicenter_floor=multicenter_floor,
-        )
-        optimized = optimize_step(
+        try:
+            initialized = select_one_response_shell(
+                current,
+                fixed_dzp,
+                spectra,
+                atom_family,
+                multicenter_family,
+                atom_floor=atom_floor,
+                multicenter_floor=multicenter_floor,
+                max_ao_per_atom=max_ao_per_atom,
+            )
+        except _AOBudgetReached:
+            return NestedSelectionResult(
+                status="ao_budget_reached",
+                steps=tuple(steps),
+                metrics=metrics,
+            )
+        optimization = optimize_step(
             len(steps) + 1,
             initialized.coefficients,
             initialized.selected,
         )
+        if isinstance(optimization, SelectionOptimization):
+            optimized = optimization.coefficients
+            optimization_metrics = optimization.metrics
+        else:
+            optimized = optimization
+            optimization_metrics = None
         _validate_fixed_columns(fixed_dzp, optimized, fixed_specs)
         initialized_nu, _, _ = _basis_counts(initialized.coefficients)
         optimized_nu, _, _ = _basis_counts(optimized)
@@ -515,6 +695,7 @@ def run_nested_selection(
             selected=initialized.selected,
             candidates=initialized.candidates,
             coefficients=optimized,
+            optimization_metrics=optimization_metrics,
         )
         steps.append(step)
         current = optimized
