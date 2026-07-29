@@ -23,7 +23,7 @@ energies with:
 ```bash
 python analyze_results.py \
   --campaign-root \
-  /work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v2_20260729 \
+  /work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v3_20260729 \
   --json-output compact_response_sos_summary.json \
   --markdown-output compact_response_sos_summary.md
 ```

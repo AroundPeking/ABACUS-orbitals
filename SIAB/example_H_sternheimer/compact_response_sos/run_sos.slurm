@@ -11,10 +11,10 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v3_20260729
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v4_20260729
 selection_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_campaign_v1_20260729
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v2_20260729
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v3_20260729
 template_root=$source_root/SIAB/example_H_sternheimer/held_out_h2_sos_greedy_full/cases
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
@@ -24,6 +24,7 @@ case_names=(H2 H H_ghost H2 H H_ghost H2 H H_ghost)
 nbands=(96 48 96 96 48 96 96 48 96)
 expected_spins=(1 2 2 1 2 2 1 2 2)
 expected_electrons=(2 1 1 2 1 1 2 1 1)
+expected_orbital_entries=(1 1 2 1 1 2 1 1 2)
 
 task=${SLURM_ARRAY_TASK_ID:?}
 lane=${lanes[$task]}
@@ -32,6 +33,7 @@ case_name=${case_names[$task]}
 case_bands=${nbands[$task]}
 case_spins=${expected_spins[$task]}
 case_electrons=${expected_electrons[$task]}
+case_orbital_entries=${expected_orbital_entries[$task]}
 lane_root=$selection_root/$lane/campaign
 template_dir=$template_root/$case_name
 run_root=$campaign_root/$lane/$case_name
@@ -129,7 +131,7 @@ cp "$asset_root/$pseudo_name" "$asset_root/$fixed_abs" "$run_root/"
 
 suffix="COMPACT48_${lane}_${case_name}_BOX20A_FIXED_ABS_RMESH5"
 "$python" - "$run_root/INPUT" "$run_root/STRU" "$suffix" \
-  "$case_bands" "$orbital_name" "$fixed_abs" <<'PY'
+  "$case_bands" "$orbital_name" "$fixed_abs" "$case_orbital_entries" <<'PY'
 from pathlib import Path
 import sys
 
@@ -139,6 +141,7 @@ suffix = sys.argv[3]
 nbands = sys.argv[4]
 orbital = sys.argv[5]
 fixed_abs = sys.argv[6]
+expected_orbital_count = int(sys.argv[7])
 
 lines = input_path.read_text().splitlines()
 replacements = {"suffix": suffix, "nbands": nbands}
@@ -158,7 +161,7 @@ input_path.write_text("\n".join(output) + "\n")
 
 stru = stru_path.read_text()
 old = "H_gga_8au_100Ry_13s11p10d5f4g.orb"
-if stru.count(old) != 1:
+if stru.count(old) != expected_orbital_count:
     raise SystemExit("STRU compact-orbital rewrite count mismatch")
 stru = stru.replace(old, orbital)
 if fixed_abs not in stru:

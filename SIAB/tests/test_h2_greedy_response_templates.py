@@ -39,7 +39,11 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("#SBATCH --cpus-per-task=30", runner)
         self.assertIn("#SBATCH --mem=110610M", runner)
         self.assertIn("#SBATCH --time=1-00:00:00", runner)
-        self.assertIn("siab_compact_response_sos_source_v3_20260729", runner)
+        self.assertIn("siab_compact_response_sos_source_v4_20260729", runner)
+        self.assertIn(
+            "siab_compact_response_sos_campaign_v3_20260729",
+            runner,
+        )
         self.assertIn(
             "lanes=(tail_0p00 tail_0p00 tail_0p00 tail_0p10 tail_0p10 "
             "tail_0p10 tail_0p30 tail_0p30 tail_0p30)",
@@ -70,6 +74,28 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("version_exception=historical_exact_sos_binary", runner)
         self.assertIn('install -m 0644 "$template_dir/INPUT"', runner)
         self.assertNotIn('cp "$template_dir/INPUT"', runner)
+        self.assertIn(
+            "expected_orbital_entries=(1 1 2 1 1 2 1 1 2)",
+            runner,
+        )
+        self.assertIn("expected_orbital_count = int(sys.argv[7])", runner)
+        self.assertIn(
+            "if stru.count(old) != expected_orbital_count:",
+            runner,
+        )
+
+        ghost_stru = (
+            SIAB_ROOT
+            / "example_H_sternheimer"
+            / "held_out_h2_sos_greedy_full"
+            / "cases"
+            / "H_ghost"
+            / "STRU"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            ghost_stru.count("H_gga_8au_100Ry_13s11p10d5f4g.orb"),
+            2,
+        )
 
         self.assertIn("H2/H/H+ghost", readme)
         self.assertIn("48 AO/H", readme)
