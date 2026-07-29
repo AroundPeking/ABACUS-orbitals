@@ -105,11 +105,11 @@ class Opt_Orbital_Converge:
 				)
 			for stage_index in new_stage_indices:
 				loss_config = loss_configs[stage_index]
-				if loss_config["radial_tail_weight"] > 0.0:
+				if loss_config["radial_tail_radius"] > 0.0:
 					locality = getattr(self, "radial_locality", None)
 					if not callable(getattr(locality, "evaluate", None)):
 						raise ValueError(
-							"positive radial_tail_weight requires a radial locality evaluator; "
+							"positive radial_tail_radius requires a radial locality evaluator; "
 							"call set_radial_locality first"
 						)
 				if hasattr(self, "QI"):
@@ -179,7 +179,7 @@ class Opt_Orbital_Converge:
 						}
 					else:
 						legacy_components = spillage.cal_components(C)
-					if loss_config["radial_tail_weight"] > 0.0:
+					if loss_config["radial_tail_radius"] > 0.0:
 						locality_result = self.radial_locality.evaluate(C)
 						if not isinstance(locality_result, RadialLocalityResult):
 							raise TypeError(

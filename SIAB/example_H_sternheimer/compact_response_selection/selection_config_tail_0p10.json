@@ -1,0 +1,20 @@
+{
+  "element": "H",
+  "fixed_orbitals": [
+    {"element": "H", "l": 0, "zeta": 1},
+    {"element": "H", "l": 0, "zeta": 2},
+    {"element": "H", "l": 1, "zeta": 1}
+  ],
+  "format_version": 1,
+  "magnetic_overlap_tolerance": 0.0002,
+  "max_ao_per_atom": 48,
+  "max_l": 4,
+  "optimizer_loss": {
+    "radial_tail_condition_limit": 10000000000.0,
+    "radial_tail_radius": 4.0,
+    "radial_tail_weight": 0.1
+  },
+  "relative_rank_tolerance": 0.0001,
+  "seed": 20260720,
+  "selection_mode": "ao_budget_frontier"
+}

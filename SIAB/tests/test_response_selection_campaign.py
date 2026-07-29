@@ -16,6 +16,7 @@ if str(SELECTOR_DIR) not in sys.path:
     sys.path.insert(0, str(SELECTOR_DIR))
 
 from response_selection_campaign import (
+    apply_optimizer_loss_overrides,
     assemble_response_families,
     build_response_spectrum_builder,
     extract_fixed_reference_coefficients,
@@ -196,6 +197,33 @@ class ResponseFamilyAssemblyTest(unittest.TestCase):
 
 
 class JointOptimizationBridgeTest(unittest.TestCase):
+    def test_compact_config_only_overrides_radial_locality_loss(self):
+        template = {
+            "loss": {
+                "mode": "st_dpsi_joint",
+                "joint_dpsi_weight": 0.1,
+            }
+        }
+        config = {
+            "optimizer_loss": {
+                "radial_tail_weight": 0.3,
+                "radial_tail_radius": 4.0,
+                "radial_tail_condition_limit": 1.0e10,
+            }
+        }
+
+        result = apply_optimizer_loss_overrides(template, config)
+
+        self.assertEqual(result["loss"]["mode"], "st_dpsi_joint")
+        self.assertEqual(result["loss"]["joint_dpsi_weight"], 0.1)
+        self.assertEqual(result["loss"]["radial_tail_weight"], 0.3)
+        self.assertNotIn("radial_tail_weight", template["loss"])
+        with self.assertRaisesRegex(ValueError, "only radial locality"):
+            apply_optimizer_loss_overrides(
+                template,
+                {"optimizer_loss": {"joint_dpsi_weight": 0.0}},
+            )
+
     def test_reads_named_optimizer_loss_and_condition_metrics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ORBITAL_RESULTS.txt"

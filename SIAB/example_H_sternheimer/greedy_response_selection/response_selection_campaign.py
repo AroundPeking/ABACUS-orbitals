@@ -32,6 +32,14 @@ _FAMILY_ROLES = {
     "multicenter": "physical",
 }
 
+_LOCALITY_OVERRIDE_KEYS = frozenset(
+    {
+        "radial_tail_weight",
+        "radial_tail_radius",
+        "radial_tail_condition_limit",
+    }
+)
+
 
 @dataclass(frozen=True)
 class OptimizedResponseStep:
@@ -46,6 +54,31 @@ class ResponseSelectionCampaignResult:
     selection: object
     selection_manifest: Path
     campaign_manifest: Path
+
+
+def apply_optimizer_loss_overrides(template, config):
+    """Apply only the predeclared radial-locality lane to a joint template."""
+    if not isinstance(template, dict):
+        raise TypeError("optimizer template must be a dictionary")
+    if not isinstance(config, dict):
+        raise TypeError("selection config must be a dictionary")
+    result = copy.deepcopy(template)
+    overrides = config.get("optimizer_loss")
+    if overrides is None:
+        return result
+    if not isinstance(overrides, dict) or set(overrides) != _LOCALITY_OVERRIDE_KEYS:
+        raise ValueError(
+            "optimizer_loss may contain only radial locality weight, radius, "
+            "and condition limit"
+        )
+    try:
+        loss = result["loss"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("optimizer template requires a loss dictionary") from exc
+    if not isinstance(loss, dict):
+        raise ValueError("optimizer template requires a loss dictionary")
+    loss.update(copy.deepcopy(overrides))
+    return result
 
 
 def _validate_nu(expected_nu, max_l):
@@ -619,6 +652,9 @@ def run_response_selection_campaign(
     """Run the nested H-only response selection without any H2 feedback."""
     if not isinstance(config, dict):
         raise TypeError("selection config must be a dictionary")
+    optimizer_template = apply_optimizer_loss_overrides(
+        optimizer_template, config
+    )
     try:
         seed = config["seed"]
         max_l = config["max_l"]

@@ -481,6 +481,55 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
 
 
 class MainIntegrationTest(unittest.TestCase):
+    def test_main_measures_zero_weight_radial_control_without_changing_total(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            st_path = path / "sternheimer.dat"
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["file_list"] = {"sternheimer": [str(st_path)]}
+            value["weight"] = {}
+            value["loss"].update(
+                {
+                    "radial_tail_weight": 0.0,
+                    "radial_tail_radius": 3.0,
+                    "radial_tail_condition_limit": 1.0e10,
+                }
+            )
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path), mock.patch.object(
+                siab_main.orbital, "normalize", return_value=None
+            ), mock.patch.object(
+                siab_main.orbital, "generate_orbital", return_value={"H": [[]]}
+            ), mock.patch.object(
+                siab_main.orbital, "orth", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "print_orbital", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "plot_orbital", return_value=None
+            ):
+                siab_main.main()
+
+            metadata = {}
+            for line in (path / "ORBITAL_RESULTS.txt").read_text().splitlines():
+                if " = " in line:
+                    label, raw = line.split(" = ", 1)
+                    try:
+                        metadata[label] = float(raw)
+                    except ValueError:
+                        pass
+            self.assertGreater(metadata["Radial tail fraction"], 0.0)
+            self.assertEqual(
+                metadata["Radial locality regularization loss"], 0.0
+            )
+            self.assertEqual(
+                metadata["Sternheimer loss"], metadata["Total loss"]
+            )
+
     def test_main_builds_and_records_positive_radial_locality(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

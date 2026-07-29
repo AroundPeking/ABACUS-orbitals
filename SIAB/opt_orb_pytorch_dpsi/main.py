@@ -277,7 +277,7 @@ def main():
 	locality_stages = [
 		stage
 		for stage in sternheimer_stages
-		if stage["radial_tail_weight"] > 0.0
+		if stage["radial_tail_radius"] > 0.0
 	]
 	if locality_stages:
 		if not freeze_specs:
