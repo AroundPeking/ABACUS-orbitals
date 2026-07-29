@@ -39,7 +39,7 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("#SBATCH --cpus-per-task=30", runner)
         self.assertIn("#SBATCH --mem=110610M", runner)
         self.assertIn("#SBATCH --time=1-00:00:00", runner)
-        self.assertIn("siab_compact_response_sos_source_v2_20260729", runner)
+        self.assertIn("siab_compact_response_sos_source_v3_20260729", runner)
         self.assertIn(
             "lanes=(tail_0p00 tail_0p00 tail_0p00 tail_0p10 tail_0p10 "
             "tail_0p10 tail_0p30 tail_0p30 tail_0p30)",
@@ -68,6 +68,8 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("v1_coulomb_full_iq_1_rank0.dat", runner)
         self.assertIn("libRPA finished successfully", runner)
         self.assertIn("version_exception=historical_exact_sos_binary", runner)
+        self.assertIn('install -m 0644 "$template_dir/INPUT"', runner)
+        self.assertNotIn('cp "$template_dir/INPUT"', runner)
 
         self.assertIn("H2/H/H+ghost", readme)
         self.assertIn("48 AO/H", readme)

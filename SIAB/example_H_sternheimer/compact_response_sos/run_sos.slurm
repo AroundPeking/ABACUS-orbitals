@@ -11,10 +11,10 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v2_20260729
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v3_20260729
 selection_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_campaign_v1_20260729
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v1_20260729
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v2_20260729
 template_root=$source_root/SIAB/example_H_sternheimer/held_out_h2_sos_greedy_full/cases
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
@@ -122,7 +122,7 @@ check_hash 2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d \
 check_hash defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c \
   "$librpa"
 
-cp "$template_dir/INPUT" "$template_dir/STRU" "$template_dir/KPT" \
+install -m 0644 "$template_dir/INPUT" "$template_dir/STRU" "$template_dir/KPT" \
   "$template_dir/librpa.in" "$run_root/"
 cp "$orbital_source" "$run_root/$orbital_name"
 cp "$asset_root/$pseudo_name" "$asset_root/$fixed_abs" "$run_root/"
