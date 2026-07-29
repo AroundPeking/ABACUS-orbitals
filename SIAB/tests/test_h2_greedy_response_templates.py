@@ -1,12 +1,20 @@
 """Static contracts for the H2 response-shell producer family."""
 
+import hashlib
 import json
 from pathlib import Path
+import sys
+import tempfile
 import unittest
 
 
 SIAB_ROOT = Path(__file__).resolve().parents[1]
 GREEDY = SIAB_ROOT / "example_H_sternheimer" / "greedy_response_selection"
+COMPACT_SOS = SIAB_ROOT / "example_H_sternheimer" / "compact_response_sos"
+if str(COMPACT_SOS) not in sys.path:
+    sys.path.insert(0, str(COMPACT_SOS))
+
+from analyze_results import summarize_campaign  # noqa: E402
 
 
 def input_values(path):
@@ -64,6 +72,80 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("48 AO/H", readme)
         self.assertIn("96/48/96", readme)
         self.assertIn("does not feed back", readme)
+
+    def test_compact_response_analyzer_requires_complete_matched_cases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lane = root / "tail_0p00"
+            for case, zero_order, ec in (
+                ("H2", -2.0, -0.20),
+                ("H", -0.90, -0.05),
+                ("H_ghost", -0.95, -0.08),
+            ):
+                case_dir = lane / case
+                output_dir = case_dir / f"OUT.{case}"
+                output_dir.mkdir(parents=True)
+                (case_dir / "selection_contract.json").write_text(
+                    json.dumps(
+                        {
+                            "format_version": 1,
+                            "lane_weight": 0.0,
+                            "selection_status": "ao_budget_reached",
+                            "selection_steps": 9,
+                            "ao_function_count": 48,
+                            "nu": [5, 4, 3, 1, 1],
+                            "orbital_sha256": "a" * 64,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                dft_total = zero_order - 0.10
+                (case_dir / "abacus.1.out").write_text(
+                    "\n".join(
+                        (
+                            "rpa_lcao_exx(Ha): -0.200000000000000",
+                            "etxc(Ha): -0.300000000000000",
+                            f"etot(Ha): {dft_total:.15f}",
+                            f"Etot_without_rpa(Ha): {zero_order:.15f}",
+                        )
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (output_dir / "running_scf.log").write_text(
+                    f" !FINAL_ETOT_IS {dft_total * 27.211386245988:.15f} eV\n",
+                    encoding="utf-8",
+                )
+                (case_dir / "librpa.1.out").write_text(
+                    f"| Total EcRPA: {ec:.15f}\nlibRPA finished successfully\n",
+                    encoding="utf-8",
+                )
+                payload = case_dir / "payload.dat"
+                payload.write_text(case, encoding="utf-8")
+                digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+                (case_dir / "PRODUCTION_OUTPUTS.sha256").write_text(
+                    f"{digest}  payload.dat\n",
+                    encoding="utf-8",
+                )
+
+            result = summarize_campaign(root, ("tail_0p00",))
+
+            self.assertEqual(result["format_version"], 1)
+            self.assertEqual(len(result["lanes"]), 1)
+            row = result["lanes"][0]
+            self.assertEqual(row["lane"], "tail_0p00")
+            self.assertEqual(row["selection"]["ao_function_count"], 48)
+            self.assertAlmostEqual(
+                row["binding"]["cp_total_ha"], 0.14, places=14
+            )
+
+            (lane / "H_ghost/librpa.1.out").write_text(
+                "| Total EcRPA: -0.08\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "finish successfully"):
+                summarize_campaign(root, ("tail_0p00",))
 
     def test_full_greedy_basis_sos_uses_all_bands_and_fixed_abs(self):
         campaign = SIAB_ROOT / "example_H_sternheimer" / (

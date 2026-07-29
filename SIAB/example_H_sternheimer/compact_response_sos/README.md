@@ -16,3 +16,19 @@ measure whether the optimized space reaches the intended result, but are not
 an independent held-out selector. H+ghost remains a post-selection
 counterpoise diagnostic and does not feed back into shell selection,
 coefficients, or the 48-AO budget.
+
+After all nine array members have completed, validate and combine the matched
+energies with:
+
+```bash
+python analyze_results.py \
+  --campaign-root \
+  /work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v1_20260729 \
+  --json-output compact_response_sos_summary.json \
+  --markdown-output compact_response_sos_summary.md
+```
+
+The analyzer rejects missing or duplicate ABACUS/LibRPA logs, inconsistent
+selection contracts, non-48-AO frontiers, absent completion markers, and
+changed production-output checksums before reporting raw, counterpoise, and
+BSSE-resolved binding energies.
