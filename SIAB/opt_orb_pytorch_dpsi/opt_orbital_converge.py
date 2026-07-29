@@ -9,6 +9,7 @@ from optimization_loss import (
 	normalize_loss_config,
 	selection_component,
 )
+from radial_locality import RadialLocalityResult
 from sternheimer_spillage import SternheimerLossResult
 
 import math
@@ -45,6 +46,9 @@ class Opt_Orbital_Converge:
 
 	def set_sternheimer_spillage(self, sternheimer_spillage):
 		self.sternheimer_spillage = sternheimer_spillage
+
+	def set_radial_locality(self, radial_locality):
+		self.radial_locality = radial_locality
 
 	def _make_spillage(self, info_opt):
 		if not hasattr(self, "QI"):
@@ -101,6 +105,13 @@ class Opt_Orbital_Converge:
 				)
 			for stage_index in new_stage_indices:
 				loss_config = loss_configs[stage_index]
+				if loss_config["radial_tail_weight"] > 0.0:
+					locality = getattr(self, "radial_locality", None)
+					if not callable(getattr(locality, "evaluate", None)):
+						raise ValueError(
+							"positive radial_tail_weight requires a radial locality evaluator; "
+							"call set_radial_locality first"
+						)
 				if hasattr(self, "QI"):
 					baseline_spillage = self._make_spillage(
 						self.info_optimize[stage_index]
@@ -128,8 +139,9 @@ class Opt_Orbital_Converge:
 		new_header = (
 			"istep_big", "istep_small", "istep_all", "dft_origin",
 			"dft_dpsi", "sternheimer", "regularization_dpsi",
-			"constraint_dft", "constraint_dpsi", "total",
-			"max_st_condition", "accepted",
+			"constraint_dft", "constraint_dpsi", "total", "radial_tail",
+			"regularization_locality", "max_st_condition",
+			"max_locality_condition", "accepted",
 		)
 		legacy_header = ("istep_big", "istep_small", "istep_all", "Spillage")
 
@@ -167,6 +179,22 @@ class Opt_Orbital_Converge:
 						}
 					else:
 						legacy_components = spillage.cal_components(C)
+					if loss_config["radial_tail_weight"] > 0.0:
+						locality_result = self.radial_locality.evaluate(C)
+						if not isinstance(locality_result, RadialLocalityResult):
+							raise TypeError(
+								"radial locality evaluator must return RadialLocalityResult"
+							)
+						if not math.isfinite(locality_result.max_condition):
+							raise ValueError(
+								"max_locality_condition must be finite"
+							)
+					else:
+						locality_result = RadialLocalityResult(
+							loss=torch.zeros_like(st_result.loss),
+							max_condition=1.0,
+							by_channel={},
+						)
 					components = compose_loss(
 						loss_config["mode"],
 						st_result.loss,
@@ -174,13 +202,24 @@ class Opt_Orbital_Converge:
 						legacy_components["dft_dpsi"],
 						loss_baseline,
 						loss_config,
+						radial_tail=locality_result.loss,
 					)
-					return legacy_components, st_result, components
+					return (
+						legacy_components,
+						st_result,
+						locality_result,
+						components,
+					)
 
 				def evaluate_candidate(istep_big, closure_count):
 					nonlocal best_accepted, best_violation
 					with torch.no_grad():
-						legacy_components, st_result, components = calculate_components()
+						(
+							legacy_components,
+							st_result,
+							locality_result,
+							components,
+						) = calculate_components()
 					constraints_ok = (
 						loss_config["mode"] == "st_only"
 						or constraints_satisfied(
@@ -193,7 +232,13 @@ class Opt_Orbital_Converge:
 					condition_ok = (
 						st_result.max_condition <= loss_config["condition_limit"]
 					)
-					accepted = constraints_ok and condition_ok
+					locality_condition_ok = (
+						locality_result.max_condition
+						<= loss_config["radial_tail_condition_limit"]
+					)
+					accepted = (
+						constraints_ok and condition_ok and locality_condition_ok
+					)
 
 					baseline_dft = max(
 						loss_baseline["dft_origin"].item(), loss_config["epsilon"]
@@ -215,9 +260,25 @@ class Opt_Orbital_Converge:
 						0.0,
 						st_result.max_condition / loss_config["condition_limit"] - 1.0,
 					)
+					locality_condition_violation = max(
+						0.0,
+						locality_result.max_condition
+						/ loss_config["radial_tail_condition_limit"]
+						- 1.0,
+					)
 					violation_key = (
-						max(dft_violation, dpsi_violation, condition_violation),
-						dft_violation + dpsi_violation + condition_violation,
+						max(
+							dft_violation,
+							dpsi_violation,
+							condition_violation,
+							locality_condition_violation,
+						),
+						(
+							dft_violation
+							+ dpsi_violation
+							+ condition_violation
+							+ locality_condition_violation
+						),
 					)
 					if best_violation is None or violation_key < best_violation["key"]:
 						best_violation = {
@@ -225,8 +286,13 @@ class Opt_Orbital_Converge:
 							"dft": dft_violation,
 							"dpsi": dpsi_violation,
 							"condition": condition_violation,
+							"locality_condition": locality_condition_violation,
 							"max_st_condition": st_result.max_condition,
 							"condition_limit": loss_config["condition_limit"],
+							"max_locality_condition": locality_result.max_condition,
+							"locality_condition_limit": (
+								loss_config["radial_tail_condition_limit"]
+							),
 						}
 
 					print(
@@ -240,7 +306,10 @@ class Opt_Orbital_Converge:
 						components["constraint_dft"].item(),
 						components["constraint_dpsi"].item(),
 						components["total"].item(),
+						components["radial_tail"].item(),
+						components["regularization_locality"].item(),
 						st_result.max_condition,
+						locality_result.max_condition,
 						str(accepted).lower(),
 						sep="\t",
 						file=files[1],
@@ -269,6 +338,9 @@ class Opt_Orbital_Converge:
 								name: value.item() for name, value in loss_baseline.items()
 							},
 							"max_st_condition": st_result.max_condition,
+							"max_locality_condition": (
+								locality_result.max_condition
+							),
 						}
 						data_transmit["flag_finish"] = 0
 					else:
@@ -276,7 +348,7 @@ class Opt_Orbital_Converge:
 
 				def closure():
 					opt.zero_grad()
-					_, _, components = calculate_components()
+					_, _, _, components = calculate_components()
 					Loss = components["total"]
 					Loss.backward()
 					if explicit_freeze:
@@ -379,8 +451,13 @@ class Opt_Orbital_Converge:
 					f"dft={best_violation['dft']:.8g}, "
 					f"dpsi={best_violation['dpsi']:.8g}, "
 					f"condition={best_violation['condition']:.8g}; "
+					f"locality_condition={best_violation['locality_condition']:.8g}; "
 					f"max_st_condition={best_violation['max_st_condition']:.8g}, "
-					f"condition_limit={best_violation['condition_limit']:.8g}"
+					f"condition_limit={best_violation['condition_limit']:.8g}, "
+					f"max_locality_condition="
+					f"{best_violation['max_locality_condition']:.8g}, "
+					f"locality_condition_limit="
+					f"{best_violation['locality_condition_limit']:.8g}"
 				)
 			data_transmit.update(best_accepted)
 			data_transmit["Loss"] = best_accepted["loss_components"]["total"]

@@ -14,6 +14,7 @@ from attribute_dict import AttributeDict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from optimization_loss import normalize_loss_config
+from radial_locality import RadialSubspaceLocality
 from response_family_spillage import NormalizedPhysicalFamilySpillage
 from response_selection import ResponseTargetFamily
 from sternheimer_spillage import OrbitalColumn
@@ -272,6 +273,38 @@ def main():
 	_normalize_initial_coefficients(
 		C, info_element, info_radial, E, freeze_specs
 	)
+	radial_locality = None
+	locality_stages = [
+		stage
+		for stage in sternheimer_stages
+		if stage["radial_tail_weight"] > 0.0
+	]
+	if locality_stages:
+		if not freeze_specs:
+			raise ValueError(
+				"radial locality requires nonempty freeze_orbitals"
+			)
+		contracts = {
+			(
+				stage["radial_tail_radius"],
+				stage["radial_tail_condition_limit"],
+			)
+			for stage in locality_stages
+		}
+		if len(contracts) != 1:
+			raise ValueError(
+				"all locality-enabled optimization stages must use the same "
+				"radial_tail_radius and radial_tail_condition_limit"
+			)
+		local_radius, locality_condition_limit = contracts.pop()
+		radial_locality = RadialSubspaceLocality(
+			info_element,
+			info_radial,
+			E,
+			freeze_specs,
+			local_radius,
+			condition_limit=locality_condition_limit,
+		)
 
 	sternheimer_spillage = None
 	if sternheimer_targets is not None:
@@ -298,6 +331,8 @@ def main():
 		opt_orb_conv.set_QSVI(QI, SI, VI_origin)
 	if sternheimer_spillage is not None:
 		opt_orb_conv.set_sternheimer_spillage(sternheimer_spillage)
+	if radial_locality is not None:
+		opt_orb_conv.set_radial_locality(radial_locality)
 	if "linear" in file_list.keys():
 		opt_orb_conv.set_QSVI_linear(QI_linear, SI_linear, VI_linear)
 	if info_C_init["init_from_file"]:

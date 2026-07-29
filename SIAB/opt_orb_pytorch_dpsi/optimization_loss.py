@@ -12,6 +12,9 @@ LOSS_DEFAULTS = {
     "constraint_penalty_dft": 10.0,
     "constraint_penalty_dpsi": 10.0,
     "joint_dpsi_weight": 1.0,
+    "radial_tail_weight": 0.0,
+    "radial_tail_radius": 0.0,
+    "radial_tail_condition_limit": 1.0e10,
 }
 
 _LOSS_MODES = frozenset({"st_only", "st_constrained", "st_dpsi_joint"})
@@ -60,6 +63,20 @@ def normalize_loss_config(config):
         "constraint_penalty_dpsi", normalized["constraint_penalty_dpsi"], 0.0
     )
     _validate_real("joint_dpsi_weight", normalized["joint_dpsi_weight"], 0.0)
+    _validate_real("radial_tail_weight", normalized["radial_tail_weight"], 0.0)
+    _validate_real("radial_tail_radius", normalized["radial_tail_radius"], 0.0)
+    _validate_real(
+        "radial_tail_condition_limit",
+        normalized["radial_tail_condition_limit"],
+        1.0,
+    )
+    if (
+        normalized["radial_tail_weight"] > 0.0
+        and normalized["radial_tail_radius"] <= 0.0
+    ):
+        raise ValueError(
+            "radial_tail_radius must be positive when radial_tail_weight is positive"
+        )
     return normalized
 
 
@@ -100,7 +117,9 @@ def _ratios(dft, dpsi, baseline, config):
     return dft / dft_denominator, dpsi / dpsi_denominator
 
 
-def compose_loss(mode, st, dft, dpsi, baseline, config):
+def compose_loss(
+    mode, st, dft, dpsi, baseline, config, radial_tail=None
+):
     _validate_mode(mode)
     normalized = normalize_loss_config(config)
     if normalized["mode"] != mode:
@@ -110,13 +129,28 @@ def compose_loss(mode, st, dft, dpsi, baseline, config):
     _validate_loss_tensor("sternheimer", st)
     _validate_loss_tensor("dft_origin", dft)
     _validate_loss_tensor("dft_dpsi", dpsi)
+    if radial_tail is None:
+        if normalized["radial_tail_weight"] > 0.0:
+            raise ValueError(
+                "radial_tail is required when radial_tail_weight is positive"
+            )
+        radial_tail = torch.zeros_like(st)
+    else:
+        _validate_loss_tensor("radial_tail", radial_tail)
     dft_ratio, dpsi_ratio = _ratios(dft, dpsi, baseline, normalized)
 
     regularization_dpsi = torch.zeros_like(dpsi)
+    regularization_locality = (
+        normalized["radial_tail_weight"] * radial_tail
+    )
     if mode == "st_only":
         constraint_dft = torch.zeros_like(dft)
         constraint_dpsi = torch.zeros_like(dpsi)
-        total = st
+        total = (
+            st
+            if normalized["radial_tail_weight"] == 0.0
+            else st + regularization_locality
+        )
     else:
         constraint_dft = normalized["constraint_penalty_dft"] * torch.relu(
             dft_ratio - 1.0 - normalized["tau_dft"]
@@ -127,7 +161,11 @@ def compose_loss(mode, st, dft, dpsi, baseline, config):
         if mode == "st_dpsi_joint":
             regularization_dpsi = normalized["joint_dpsi_weight"] * dpsi_ratio
         total = (
-            st + regularization_dpsi + constraint_dft + constraint_dpsi
+            st
+            + regularization_dpsi
+            + regularization_locality
+            + constraint_dft
+            + constraint_dpsi
         )
 
     return {
@@ -137,6 +175,8 @@ def compose_loss(mode, st, dft, dpsi, baseline, config):
         "regularization_dpsi": regularization_dpsi,
         "constraint_dft": constraint_dft,
         "constraint_dpsi": constraint_dpsi,
+        "radial_tail": radial_tail,
+        "regularization_locality": regularization_locality,
         "total": total,
     }
 

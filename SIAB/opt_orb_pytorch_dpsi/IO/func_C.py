@@ -14,6 +14,8 @@ _LOSS_COMPONENTS = (
 	("regularization_dpsi", "dpsi regularization loss"),
 	("constraint_dft", "DFT constraint loss"),
 	("constraint_dpsi", "dpsi constraint loss"),
+	("radial_tail", "Radial tail fraction"),
+	("regularization_locality", "Radial locality regularization loss"),
 	("total", "Total loss"),
 )
 

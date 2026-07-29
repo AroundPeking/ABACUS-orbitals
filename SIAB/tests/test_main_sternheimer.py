@@ -42,6 +42,8 @@ COMPONENTS = {
     "constraint_dpsi": 0.05,
     "sternheimer": 0.25,
     "regularization_dpsi": 0.0,
+    "radial_tail": 0.02,
+    "regularization_locality": 0.0,
     "dft_dpsi": 0.2,
     "constraint_dft": 0.1,
     "dft_origin": 0.3,
@@ -445,6 +447,8 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
                 "dpsi regularization loss = 0.0000000000e+00",
                 "DFT constraint loss = 1.0000000000e-01",
                 "dpsi constraint loss = 5.0000000000e-02",
+                "Radial tail fraction = 2.0000000000e-02",
+                "Radial locality regularization loss = 0.0000000000e+00",
                 "Total loss = 6.0000000000e-01",
             )
             positions = [metadata.index(line) for line in expected_lines]
@@ -471,6 +475,49 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
 
 
 class MainIntegrationTest(unittest.TestCase):
+    def test_main_builds_and_records_positive_radial_locality(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            st_path = path / "sternheimer.dat"
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["file_list"] = {"sternheimer": [str(st_path)]}
+            value["weight"] = {}
+            value["loss"].update(
+                {
+                    "radial_tail_weight": 0.5,
+                    "radial_tail_radius": 3.0,
+                    "radial_tail_condition_limit": 1.0e10,
+                }
+            )
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path), mock.patch.object(
+                siab_main.orbital, "normalize", return_value=None
+            ), mock.patch.object(
+                siab_main.orbital, "generate_orbital", return_value={"H": [[]]}
+            ), mock.patch.object(
+                siab_main.orbital, "orth", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "print_orbital", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "plot_orbital", return_value=None
+            ):
+                siab_main.main()
+
+            header = (path / "Spillage.dat").read_text().splitlines()[0].split()
+            self.assertIn("radial_tail", header)
+            self.assertIn("regularization_locality", header)
+            self.assertIn("max_locality_condition", header)
+            result_text = (path / "ORBITAL_RESULTS.txt").read_text()
+            self.assertIn("Radial tail fraction =", result_text)
+            self.assertIn(
+                "Radial locality regularization loss =", result_text
+            )
+
     def test_st_only_main_needs_no_origin_or_linear_files(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

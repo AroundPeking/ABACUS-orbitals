@@ -20,6 +20,7 @@ from optimization_loss import (
 )
 from opt_orbital_converge import Opt_Orbital_Converge
 from opt_orbital_spillage import Opt_Orbital_Spillage
+from radial_locality import RadialLocalityResult
 from sternheimer_spillage import SternheimerLossResult
 
 
@@ -183,6 +184,19 @@ class SingleOrbitalSternheimer:
         )
 
 
+class QuadraticLocality:
+    def __init__(self, max_condition=3.0):
+        self.max_condition = max_condition
+
+    def evaluate(self, c):
+        loss = torch.sum(c["H"][0][:, 1].square())
+        return RadialLocalityResult(
+            loss=loss,
+            max_condition=self.max_condition,
+            by_channel={},
+        )
+
+
 class NamedLegacyComponentsTest(unittest.TestCase):
     def test_origin_only_named_components_preserve_total(self):
         loss, c = make_legacy_spillage()
@@ -326,6 +340,8 @@ class OptimizationLossTest(unittest.TestCase):
         self.assertEqual(result["constraint_dft"].item(), 0.0)
         self.assertEqual(result["constraint_dpsi"].item(), 0.0)
         self.assertEqual(result["regularization_dpsi"].item(), 0.0)
+        self.assertEqual(result["radial_tail"].item(), 0.0)
+        self.assertEqual(result["regularization_locality"].item(), 0.0)
         self.assertEqual(
             set(result),
             {
@@ -335,9 +351,66 @@ class OptimizationLossTest(unittest.TestCase):
                 "regularization_dpsi",
                 "constraint_dft",
                 "constraint_dpsi",
+                "radial_tail",
+                "regularization_locality",
                 "total",
             },
         )
+
+    def test_radial_tail_regularization_contributes_value_and_gradient(self):
+        st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
+        radial_tail = torch.tensor(
+            0.2, dtype=torch.float64, requires_grad=True
+        )
+        config = normalize_loss_config(
+            {
+                "mode": "st_dpsi_joint",
+                "joint_dpsi_weight": 0.0,
+                "radial_tail_weight": 2.5,
+                "radial_tail_radius": 4.0,
+            }
+        )
+
+        result = compose_loss(
+            "st_dpsi_joint",
+            st,
+            torch.tensor(1.0, dtype=torch.float64),
+            torch.tensor(1.0, dtype=torch.float64),
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            config,
+            radial_tail=radial_tail,
+        )
+        result["total"].backward()
+
+        self.assertAlmostEqual(result["radial_tail"].item(), 0.2)
+        self.assertAlmostEqual(
+            result["regularization_locality"].item(), 0.5
+        )
+        self.assertAlmostEqual(result["total"].item(), 0.8)
+        self.assertAlmostEqual(radial_tail.grad.item(), 2.5)
+
+    def test_positive_radial_tail_weight_requires_radius_and_metric(self):
+        with self.assertRaisesRegex(ValueError, "radial_tail_radius"):
+            normalize_loss_config(
+                {"mode": "st_only", "radial_tail_weight": 1.0}
+            )
+
+        config = normalize_loss_config(
+            {
+                "mode": "st_only",
+                "radial_tail_weight": 1.0,
+                "radial_tail_radius": 4.0,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "radial_tail"):
+            compose_loss(
+                "st_only",
+                torch.tensor(0.3),
+                torch.tensor(0.0),
+                torch.tensor(0.0),
+                {"dft_origin": 0.0, "dft_dpsi": 0.0},
+                config,
+            )
 
     def test_candidate_selection_matches_loss_mode(self):
         self.assertEqual(selection_component("st_only"), "sternheimer")
@@ -517,8 +590,9 @@ class ConvergeIntegrationTest(unittest.TestCase):
         expected_header = (
             "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
             "sternheimer\tregularization_dpsi\tconstraint_dft\t"
-            "constraint_dpsi\ttotal\t"
-            "max_st_condition\taccepted"
+            "constraint_dpsi\ttotal\tradial_tail\t"
+            "regularization_locality\tmax_st_condition\t"
+            "max_locality_condition\taccepted"
         )
         self.assertEqual(files[1].getvalue().splitlines()[0], expected_header)
         self.assertTrue(torch.equal(result["C"]["H"][0][:, 0], fixed_before))
@@ -528,6 +602,30 @@ class ConvergeIntegrationTest(unittest.TestCase):
         self.assertEqual(result["Loss"], result["loss_components"]["total"])
         self.assertEqual(result["Spillage"], result["loss_components"]["total"])
         self.assertEqual(result["max_st_condition"], 2.0)
+        self.assertEqual(result["max_locality_condition"], 1.0)
+
+    def test_locality_evaluator_regularizes_nonfixed_columns(self):
+        converge, c = make_converge_case(
+            "st_dpsi_joint",
+            max_steps=1,
+            freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+        )
+        converge.info_optimize[0]["loss"].update(
+            {
+                "radial_tail_weight": 0.5,
+                "radial_tail_radius": 4.0,
+                "radial_tail_condition_limit": 10.0,
+            }
+        )
+        converge.set_sternheimer_spillage(QuadraticSternheimer())
+        converge.set_radial_locality(QuadraticLocality())
+        before = c["H"][0][:, 1].detach().clone()
+
+        result = converge.cal_converge(c, self.files())
+
+        self.assertFalse(torch.equal(c["H"][0][:, 1], before))
+        self.assertGreaterEqual(result["loss_components"]["radial_tail"], 0.0)
+        self.assertEqual(result["max_locality_condition"], 3.0)
 
     def test_adam_one_step_selects_post_step_state(self):
         converge, c = make_converge_case("st_only", max_steps=1)
@@ -667,8 +765,9 @@ class ConvergeIntegrationTest(unittest.TestCase):
         header = (
             "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
             "sternheimer\tregularization_dpsi\tconstraint_dft\t"
-            "constraint_dpsi\ttotal\t"
-            "max_st_condition\taccepted"
+            "constraint_dpsi\ttotal\tradial_tail\t"
+            "regularization_locality\tmax_st_condition\t"
+            "max_locality_condition\taccepted"
         )
         lines = files[1].getvalue().splitlines()
         self.assertEqual(lines.count(header), 2)

@@ -166,6 +166,8 @@ def _read_loss_metadata(path):
         "dpsi regularization loss": "regularization_dpsi",
         "DFT constraint loss": "constraint_dft",
         "dpsi constraint loss": "constraint_dpsi",
+        "Radial tail fraction": "radial_tail",
+        "Radial locality regularization loss": "regularization_locality",
         "Total loss": "total",
     }
     values = {}
@@ -275,6 +277,8 @@ def summarize_campaign(
         "dft_origin",
         "dft_dpsi",
         "regularization_dpsi",
+        "radial_tail",
+        "regularization_locality",
         "constraint_dft",
         "constraint_dpsi",
     ):
