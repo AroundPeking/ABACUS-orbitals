@@ -19,6 +19,52 @@ def input_values(path):
 
 
 class H2GreedyResponseTemplatesTest(unittest.TestCase):
+    def test_compact_response_sos_uses_frozen_48_ao_frontiers(self):
+        campaign = SIAB_ROOT / "example_H_sternheimer" / (
+            "compact_response_sos"
+        )
+        runner = (campaign / "run_sos.slurm").read_text(encoding="utf-8")
+        readme = (campaign / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("#SBATCH --partition=normal", runner)
+        self.assertIn("#SBATCH --array=0-8", runner)
+        self.assertIn("#SBATCH --cpus-per-task=30", runner)
+        self.assertIn("#SBATCH --mem=110610M", runner)
+        self.assertIn("#SBATCH --time=1-00:00:00", runner)
+        self.assertIn(
+            "lanes=(tail_0p00 tail_0p00 tail_0p00 tail_0p10 tail_0p10 "
+            "tail_0p10 tail_0p30 tail_0p30 tail_0p30)",
+            runner,
+        )
+        self.assertIn(
+            "case_names=(H2 H H_ghost H2 H H_ghost H2 H H_ghost)",
+            runner,
+        )
+        self.assertIn("nbands=(96 48 96 96 48 96 96 48 96)", runner)
+        self.assertIn("expected_spins=(1 2 2 1 2 2 1 2 2)", runner)
+        self.assertIn("expected_electrons=(2 1 1 2 1 1 2 1 1)", runner)
+        self.assertIn("ao_budget_reached", runner)
+        self.assertIn('last["ao_function_count"] != 48', runner)
+        self.assertIn('config["optimizer_loss"]["radial_tail_weight"]', runner)
+        self.assertIn("ORBITAL_1U.dat", runner)
+        self.assertIn("optimizer_steps", runner)
+        self.assertIn("held_out_h2_sos_greedy_full/cases", runner)
+        self.assertIn("exx_pca_threshold", runner)
+        self.assertIn("H_empty", runner)
+        self.assertIn("fixed_abs", runner)
+        self.assertIn(
+            "d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f",
+            runner,
+        )
+        self.assertIn("v1_coulomb_full_iq_1_rank0.dat", runner)
+        self.assertIn("libRPA finished successfully", runner)
+        self.assertIn("version_exception=historical_exact_sos_binary", runner)
+
+        self.assertIn("H2/H/H+ghost", readme)
+        self.assertIn("48 AO/H", readme)
+        self.assertIn("96/48/96", readme)
+        self.assertIn("does not feed back", readme)
+
     def test_full_greedy_basis_sos_uses_all_bands_and_fixed_abs(self):
         campaign = SIAB_ROOT / "example_H_sternheimer" / (
             "held_out_h2_sos_greedy_full"
