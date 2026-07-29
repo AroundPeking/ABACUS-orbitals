@@ -64,7 +64,13 @@ def _load_selection_contract(path, lane):
         raise ValueError(f"{path}: expected 48 AO/H")
     if not isinstance(payload["selection_steps"], int) or payload["selection_steps"] <= 0:
         raise ValueError(f"{path}: invalid selection step count")
-    if not isinstance(payload["nu"], list) or len(payload["nu"]) != 5:
+    nu = payload["nu"]
+    if (
+        not isinstance(nu, dict)
+        or set(nu) != {"H"}
+        or not isinstance(nu["H"], list)
+        or len(nu["H"]) != 5
+    ):
         raise ValueError(f"{path}: invalid compact basis multiplicities")
     expected_weight = EXPECTED_WEIGHTS.get(lane)
     if expected_weight is None:
@@ -180,7 +186,7 @@ def _markdown(payload):
         binding = row["binding"]
         basis = "".join(
             f"{count}{label}"
-            for count, label in zip(selection["nu"], "spdfg")
+            for count, label in zip(selection["nu"]["H"], "spdfg")
             if count
         )
         lines.append(

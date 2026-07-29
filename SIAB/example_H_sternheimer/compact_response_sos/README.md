@@ -32,3 +32,22 @@ The analyzer rejects missing or duplicate ABACUS/LibRPA logs, inconsistent
 selection contracts, non-48-AO frontiers, absent completion markers, and
 changed production-output checksums before reporting raw, counterpoise, and
 BSSE-resolved binding energies.
+
+## Result
+
+df_dcu `normal` array job `21432376_[0-8]` completed all nine ABACUS and
+LibRPA calculations. The matched summary is:
+
+| lane | basis | ST loss | tail loss | D raw | D CP | BSSE |
+|---|---|---:|---:|---:|---:|---:|
+| `tail_0p00` | `5s4p3d1f1g` | 0.41438274 | 0.08430701 | 340.958699 | -172.950771 | 513.909471 |
+| `tail_0p10` | `5s4p3d1f1g` | 0.40970024 | 0.07117532 | 121.444926 | 99.780911 | 21.664015 |
+| `tail_0p30` | `5s4p3d1f1g` | 0.41189892 | 0.06466732 | 123.946980 | 99.379716 | 24.567264 |
+
+Energies are in kcal/mol. The unregularized lane is numerically unusable.
+The two tail-regularized lanes still miss the approximately 108.72-kcal/mol
+Delta-ST reference by 8.94 and 9.34 kcal/mol after counterpoise correction.
+The compact ST-spillage objective therefore did not produce an RPA-quality
+SOS virtual space. Do not continue shell growth from these three lanes without
+changing the response objective and first running a same-auxiliary-space TZDP
+control.

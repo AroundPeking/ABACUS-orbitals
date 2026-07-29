@@ -95,7 +95,7 @@ rpa_ccp_rmesh_times 5
             running = self.write_file(
                 directory,
                 "running_scf.log",
-                f" !FINAL_ETOT_IS {-1.0 * HARTREE_TO_EV:.15f} eV\n",
+                " !FINAL_ETOT_IS -27.211396000000000 eV\n",
             )
 
             result = parse_abacus_energy(stdout, running)

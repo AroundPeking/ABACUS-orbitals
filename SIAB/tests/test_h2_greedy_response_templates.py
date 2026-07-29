@@ -122,7 +122,7 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
                             "selection_status": "ao_budget_reached",
                             "selection_steps": 9,
                             "ao_function_count": 48,
-                            "nu": [5, 4, 3, 1, 1],
+                            "nu": {"H": [5, 4, 3, 1, 1]},
                             "orbital_sha256": "a" * 64,
                             "optimization_metrics": {
                                 "sternheimer": 0.51,
@@ -147,7 +147,7 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
                     encoding="utf-8",
                 )
                 (output_dir / "running_scf.log").write_text(
-                    f" !FINAL_ETOT_IS {dft_total * 27.211386245988:.15f} eV\n",
+                    f" !FINAL_ETOT_IS {dft_total * 27.211396:.15f} eV\n",
                     encoding="utf-8",
                 )
                 (case_dir / "librpa.1.out").write_text(
