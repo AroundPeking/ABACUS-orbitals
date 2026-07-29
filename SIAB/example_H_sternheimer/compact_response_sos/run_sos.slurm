@@ -11,7 +11,7 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v1_20260729
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_source_v2_20260729
 selection_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_campaign_v1_20260729
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_compact_response_sos_campaign_v1_20260729

@@ -188,8 +188,8 @@ def _markdown(payload):
             "{raw:.6f} | {cp:.6f} | {bsse:.6f} |".format(
                 lane=row["lane"],
                 basis=basis,
-                st=float(metrics.get("sternheimer_loss", float("nan"))),
-                tail=float(metrics.get("radial_tail_loss", float("nan"))),
+                st=float(metrics.get("sternheimer", float("nan"))),
+                tail=float(metrics.get("radial_tail", float("nan"))),
                 raw=binding["raw_total_kcal_mol"],
                 cp=binding["cp_total_kcal_mol"],
                 bsse=binding["bsse_total_kcal_mol"],

@@ -14,7 +14,7 @@ COMPACT_SOS = SIAB_ROOT / "example_H_sternheimer" / "compact_response_sos"
 if str(COMPACT_SOS) not in sys.path:
     sys.path.insert(0, str(COMPACT_SOS))
 
-from analyze_results import summarize_campaign  # noqa: E402
+from analyze_results import _markdown, summarize_campaign  # noqa: E402
 
 
 def input_values(path):
@@ -39,6 +39,7 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
         self.assertIn("#SBATCH --cpus-per-task=30", runner)
         self.assertIn("#SBATCH --mem=110610M", runner)
         self.assertIn("#SBATCH --time=1-00:00:00", runner)
+        self.assertIn("siab_compact_response_sos_source_v2_20260729", runner)
         self.assertIn(
             "lanes=(tail_0p00 tail_0p00 tail_0p00 tail_0p10 tail_0p10 "
             "tail_0p10 tail_0p30 tail_0p30 tail_0p30)",
@@ -95,6 +96,10 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
                             "ao_function_count": 48,
                             "nu": [5, 4, 3, 1, 1],
                             "orbital_sha256": "a" * 64,
+                            "optimization_metrics": {
+                                "sternheimer": 0.51,
+                                "radial_tail": 0.08,
+                            },
                         }
                     )
                     + "\n",
@@ -139,6 +144,9 @@ class H2GreedyResponseTemplatesTest(unittest.TestCase):
             self.assertAlmostEqual(
                 row["binding"]["cp_total_ha"], 0.14, places=14
             )
+            markdown = _markdown(result)
+            self.assertIn("| tail_0p00 | 5s4p3d1f1g | 0.51000000 |", markdown)
+            self.assertNotIn("nan", markdown)
 
             (lane / "H_ghost/librpa.1.out").write_text(
                 "| Total EcRPA: -0.08\n",
