@@ -9,6 +9,7 @@ from unittest import mock
 import torch
 
 from common import info
+import optimization_loss
 from freeze_orbitals import validate_freeze_orbitals, zero_frozen_gradients
 from IO.read_json import read_json
 from optimization_loss import (
@@ -294,6 +295,112 @@ class FreezeOrbitalsTest(unittest.TestCase):
 
 
 class OptimizationLossTest(unittest.TestCase):
+    def test_low_frequency_guard_value_and_gradient(self):
+        st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
+        low = torch.tensor(0.27, dtype=torch.float64, requires_grad=True)
+        config = normalize_loss_config(
+            {
+                "mode": "st_only",
+                "low_frequency_guard_weight": 10.0,
+                "low_frequency_guard_tolerance": 0.0,
+            }
+        )
+        baseline = {
+            "dft_origin": 1.0,
+            "dft_dpsi": 1.0,
+            "sternheimer_lowest_frequency": 0.25,
+        }
+
+        result = compose_loss(
+            "st_only",
+            st,
+            torch.tensor(0.0, dtype=torch.float64),
+            torch.tensor(0.0, dtype=torch.float64),
+            baseline,
+            config,
+            st_low_frequency=low,
+        )
+        result["total"].backward()
+
+        expected = 10.0 * (0.27 / 0.25 - 1.0) ** 2
+        expected_gradient = 20.0 * (0.27 / 0.25 - 1.0) / 0.25
+        self.assertAlmostEqual(
+            result["sternheimer_lowest_frequency"].item(), 0.27
+        )
+        self.assertAlmostEqual(
+            result["regularization_low_frequency"].item(), expected
+        )
+        self.assertAlmostEqual(result["total"].item(), 0.3 + expected)
+        self.assertAlmostEqual(st.grad.item(), 1.0)
+        self.assertAlmostEqual(low.grad.item(), expected_gradient)
+
+        improved = compose_loss(
+            "st_only",
+            torch.tensor(0.3, dtype=torch.float64),
+            torch.tensor(0.0, dtype=torch.float64),
+            torch.tensor(0.0, dtype=torch.float64),
+            baseline,
+            config,
+            st_low_frequency=torch.tensor(0.24, dtype=torch.float64),
+        )
+        self.assertEqual(improved["regularization_low_frequency"].item(), 0.0)
+
+    def test_low_frequency_guard_feasibility_boundary(self):
+        config = normalize_loss_config(
+            {
+                "mode": "st_only",
+                "low_frequency_guard_weight": 10.0,
+                "low_frequency_guard_tolerance": 0.02,
+            }
+        )
+        baseline = {
+            "dft_origin": 0.0,
+            "dft_dpsi": 0.0,
+            "sternheimer_lowest_frequency": 0.25,
+        }
+
+        self.assertTrue(
+            optimization_loss.low_frequency_guard_satisfied(
+                torch.tensor(0.255, dtype=torch.float64), baseline, config
+            )
+        )
+        self.assertFalse(
+            optimization_loss.low_frequency_guard_satisfied(
+                torch.tensor(0.255001, dtype=torch.float64), baseline, config
+            )
+        )
+
+    def test_low_frequency_guard_rejects_invalid_inputs(self):
+        invalid = (
+            {"low_frequency_guard_weight": -1.0},
+            {"low_frequency_guard_weight": True},
+            {"low_frequency_guard_weight": float("nan")},
+            {"low_frequency_guard_tolerance": -1.0},
+            {"low_frequency_guard_tolerance": float("inf")},
+        )
+        for options in invalid:
+            with self.subTest(options=options):
+                with self.assertRaises((TypeError, ValueError)):
+                    normalize_loss_config({"mode": "st_only", **options})
+
+        active = normalize_loss_config(
+            {"mode": "st_only", "low_frequency_guard_weight": 1.0}
+        )
+        with self.assertRaisesRegex(ValueError, "must exceed epsilon"):
+            compose_loss(
+                "st_only",
+                torch.tensor(0.3),
+                torch.tensor(0.0),
+                torch.tensor(0.0),
+                {
+                    "dft_origin": 0.0,
+                    "dft_dpsi": 0.0,
+                    "sternheimer_lowest_frequency": 0.0,
+                },
+                active,
+                st_low_frequency=torch.tensor(0.2),
+            )
+
     def test_joint_dpsi_regularization_is_active_inside_hard_gate(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
         dft = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)

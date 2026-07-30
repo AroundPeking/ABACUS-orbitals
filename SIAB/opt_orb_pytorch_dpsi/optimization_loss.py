@@ -15,6 +15,8 @@ LOSS_DEFAULTS = {
     "radial_tail_weight": 0.0,
     "radial_tail_radius": 0.0,
     "radial_tail_condition_limit": 1.0e10,
+    "low_frequency_guard_weight": 0.0,
+    "low_frequency_guard_tolerance": 0.0,
 }
 
 _LOSS_MODES = frozenset({"st_only", "st_constrained", "st_dpsi_joint"})
@@ -70,6 +72,16 @@ def normalize_loss_config(config):
         normalized["radial_tail_condition_limit"],
         1.0,
     )
+    _validate_real(
+        "low_frequency_guard_weight",
+        normalized["low_frequency_guard_weight"],
+        0.0,
+    )
+    _validate_real(
+        "low_frequency_guard_tolerance",
+        normalized["low_frequency_guard_tolerance"],
+        0.0,
+    )
     if (
         normalized["radial_tail_weight"] > 0.0
         and normalized["radial_tail_radius"] <= 0.0
@@ -118,7 +130,15 @@ def _ratios(dft, dpsi, baseline, config):
 
 
 def compose_loss(
-    mode, st, dft, dpsi, baseline, config, radial_tail=None
+    mode,
+    st,
+    dft,
+    dpsi,
+    baseline,
+    config,
+    radial_tail=None,
+    *,
+    st_low_frequency=None,
 ):
     _validate_mode(mode)
     normalized = normalize_loss_config(config)
@@ -143,13 +163,44 @@ def compose_loss(
     regularization_locality = (
         normalized["radial_tail_weight"] * radial_tail
     )
+    guard_active = normalized["low_frequency_guard_weight"] > 0.0
+    if guard_active:
+        if st_low_frequency is None:
+            raise ValueError(
+                "st_low_frequency is required when the low-frequency guard "
+                "is active"
+            )
+        _validate_loss_tensor(
+            "sternheimer_lowest_frequency", st_low_frequency
+        )
+        baseline_low_frequency = _baseline_tensor(
+            "sternheimer_lowest_frequency", baseline, st_low_frequency
+        )
+        if not bool(baseline_low_frequency > normalized["epsilon"]):
+            raise ValueError(
+                "baseline sternheimer_lowest_frequency must exceed epsilon "
+                "when the low-frequency guard is active"
+            )
+        low_frequency_excess = torch.relu(
+            st_low_frequency / baseline_low_frequency
+            - 1.0
+            - normalized["low_frequency_guard_tolerance"]
+        )
+        regularization_low_frequency = (
+            normalized["low_frequency_guard_weight"]
+            * low_frequency_excess.square()
+        )
+    else:
+        regularization_low_frequency = torch.zeros_like(st)
     if mode == "st_only":
         constraint_dft = torch.zeros_like(dft)
         constraint_dpsi = torch.zeros_like(dpsi)
         total = (
             st
-            if normalized["radial_tail_weight"] == 0.0
-            else st + regularization_locality
+            if normalized["radial_tail_weight"] == 0.0 and not guard_active
+            else st
+            + regularization_locality
+            + regularization_low_frequency
         )
     else:
         constraint_dft = normalized["constraint_penalty_dft"] * torch.relu(
@@ -164,11 +215,12 @@ def compose_loss(
             st
             + regularization_dpsi
             + regularization_locality
+            + regularization_low_frequency
             + constraint_dft
             + constraint_dpsi
         )
 
-    return {
+    components = {
         "dft_origin": dft,
         "dft_dpsi": dpsi,
         "sternheimer": st,
@@ -177,8 +229,14 @@ def compose_loss(
         "constraint_dpsi": constraint_dpsi,
         "radial_tail": radial_tail,
         "regularization_locality": regularization_locality,
-        "total": total,
     }
+    if guard_active:
+        components["sternheimer_lowest_frequency"] = st_low_frequency
+        components["regularization_low_frequency"] = (
+            regularization_low_frequency
+        )
+    components["total"] = total
+    return components
 
 
 def selection_component(mode):
@@ -195,3 +253,21 @@ def constraints_satisfied(dft, dpsi, baseline, config):
         (dft_ratio <= 1.0 + normalized["tau_dft"])
         & (dpsi_ratio <= 1.0 + normalized["tau_dpsi"])
     )
+
+
+def low_frequency_guard_satisfied(current, baseline, config):
+    normalized = normalize_loss_config(config)
+    if normalized["low_frequency_guard_weight"] == 0.0:
+        return True
+    _validate_loss_tensor("sternheimer_lowest_frequency", current)
+    reference = _baseline_tensor(
+        "sternheimer_lowest_frequency", baseline, current
+    )
+    if not bool(reference > normalized["epsilon"]):
+        raise ValueError(
+            "baseline sternheimer_lowest_frequency must exceed epsilon "
+            "when the low-frequency guard is active"
+        )
+    limit = (1.0 + normalized["low_frequency_guard_tolerance"]) * reference
+    allowance = 1.0e-12 * torch.maximum(limit.abs(), torch.ones_like(limit))
+    return bool(current <= limit + allowance)
