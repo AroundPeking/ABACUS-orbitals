@@ -265,7 +265,7 @@ def fixed_context(target, coefficients):
     }
 
 
-def evaluate_extra_orbitals(target, coefficients, context):
+def _extra_orbital_residual(target, coefficients, context):
     fixed_counts = {0: 2, 1: 1}
     variable = assemble_projector(
         target,
@@ -281,9 +281,37 @@ def evaluate_extra_orbitals(target, coefficients, context):
     qbar = target.q @ variable - context["q0"] @ context["s00_inverse"] @ s01
     solve = np.linalg.solve((sbar + sbar.conj().T) / 2.0, qbar.conj().T)
     represented = np.real(np.einsum("ij,ji->i", qbar, solve))
-    residual = np.maximum(context["nbar"] - represented, 0.0)
+    return np.maximum(context["nbar"] - represented, 0.0)
+
+
+def evaluate_extra_orbitals(target, coefficients, context):
+    residual = _extra_orbital_residual(target, coefficients, context)
     weighted_residual = float(np.sum(target.weight * residual))
     return weighted_residual / context["weighted_norm"]
+
+
+def evaluate_extra_orbitals_by_frequency(target, coefficients, context):
+    residual = _extra_orbital_residual(target, coefficients, context)
+    result = []
+    for frequency in np.unique(target.frequency_ha):
+        selected = target.frequency_ha == frequency
+        projected_norm = float(
+            np.sum(target.occupation[selected] * context["nbar"][selected])
+        )
+        if not math.isfinite(projected_norm) or projected_norm <= 0.0:
+            raise ValueError(
+                "frequency-resolved projected norm must be finite and positive"
+            )
+        projected_residual = float(
+            np.sum(target.occupation[selected] * residual[selected])
+        )
+        result.append(
+            {
+                "frequency_ha": float(frequency),
+                "loss": projected_residual / projected_norm,
+            }
+        )
+    return result
 
 
 def radial_residual_spectrum(
@@ -657,6 +685,12 @@ def main():
     context = fixed_context(target, initial_coefficients)
     initial_loss = evaluate_extra_orbitals(target, initial_coefficients, context)
     optimized_loss = evaluate_extra_orbitals(target, optimized_coefficients, context)
+    initial_frequency_loss = evaluate_extra_orbitals_by_frequency(
+        target, initial_coefficients, context
+    )
+    optimized_frequency_loss = evaluate_extra_orbitals_by_frequency(
+        target, optimized_coefficients, context
+    )
     spectra = {
         l: radial_residual_spectrum(
             target,
@@ -675,9 +709,20 @@ def main():
     ) / context["weighted_norm"]
 
     fixed_max_difference = {}
+    fixed_coefficient_max_difference = {}
     for key in ((0, 0), (0, 1), (1, 0)):
         fixed_max_difference[f"l{key[0]}_zeta{key[1] + 1}"] = float(
             np.max(np.abs(initial_orbitals[key] - optimized_orbitals[key]))
+        )
+        fixed_coefficient_max_difference[
+            f"l{key[0]}_zeta{key[1] + 1}"
+        ] = float(
+            np.max(
+                np.abs(
+                    initial_coefficients[("H", key[0])][:, key[1]]
+                    - optimized_coefficients[("H", key[0])][:, key[1]]
+                )
+            )
         )
 
     mode_overlaps = {}
@@ -725,11 +770,24 @@ def main():
             "remaining_same_size_st_only_headroom": optimized_loss - rank1_floor,
             "full_sp_primitive_floor": full_sp_primitive_floor,
         },
+        "frequency_resolved_sternheimer_loss": [
+            {
+                "frequency_ha": initial["frequency_ha"],
+                "initial": initial["loss"],
+                "optimized": optimized["loss"],
+            }
+            for initial, optimized in zip(
+                initial_frequency_loss, optimized_frequency_loss
+            )
+        ],
         "mode_overlap": {
             "s": mode_overlaps[0],
             "p": mode_overlaps[1],
         },
         "fixed_dzp_max_abs_difference": fixed_max_difference,
+        "fixed_dzp_coefficient_max_abs_difference": (
+            fixed_coefficient_max_difference
+        ),
         "radial_nodes": {
             "initial_3s": _nodes(initial_orbitals[(0, 2)]),
             "optimized_3s": _nodes(optimized_orbitals[(0, 2)]),

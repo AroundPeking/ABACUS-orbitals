@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -26,6 +27,44 @@ def load_analysis_module():
 
 
 class FixedDzpTzdpAnalysisTest(unittest.TestCase):
+    def test_frequency_resolved_loss_keeps_greenx_weight_out_of_local_ratio(self):
+        analysis = load_analysis_module()
+        target = analysis.TargetArrays(
+            blocks=(
+                SimpleNamespace(
+                    element="H", l=0, n_primitive=3, offset=0
+                ),
+            ),
+            q=np.array(
+                [[0.0, 0.0, 1.0], [0.0, 0.0, 0.5]],
+                dtype=np.complex128,
+            ),
+            overlap=np.eye(3, dtype=np.complex128),
+            norm=np.ones(2),
+            occupation=np.array([1.0, 2.0]),
+            frequency_weight=np.array([0.25, 0.75]),
+            frequency_ha=np.array([0.1, 0.4]),
+            auxiliary_channel=np.zeros(2, dtype=np.int64),
+        )
+        coefficients = {("H", 0): np.eye(3)}
+        context = analysis.fixed_context(target, coefficients)
+
+        local = analysis.evaluate_extra_orbitals_by_frequency(
+            target, coefficients, context
+        )
+
+        self.assertEqual(
+            local,
+            [
+                {"frequency_ha": 0.1, "loss": 0.0},
+                {"frequency_ha": 0.4, "loss": 0.75},
+            ],
+        )
+        self.assertAlmostEqual(
+            analysis.evaluate_extra_orbitals(target, coefficients, context),
+            1.125 / 1.75,
+        )
+
     def test_read_orbitals_keeps_l_and_zero_based_zeta(self):
         analysis = load_analysis_module()
         with tempfile.TemporaryDirectory() as directory:
