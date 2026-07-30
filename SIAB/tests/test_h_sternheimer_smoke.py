@@ -819,6 +819,36 @@ class ExampleInputTest(unittest.TestCase):
         self.assertIn("prefix_coul_full = v1_coulomb_full_iq_", run_script)
         self.assertIn("libRPA finished successfully", run_script)
 
+    def test_guarded_fixed_dzp_sos_reuses_exact_three_case_physics_contract(self):
+        run_script = (
+            FIXED_DZP_TZDP_SOS / "run_guarded_sos_cp.slurm"
+        ).read_text()
+
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --array=0-2", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("case_names=(H2 H H_ghost)", run_script)
+        self.assertIn("nbands=(18 9 18)", run_script)
+        self.assertIn("expected_spins=(1 2 2)", run_script)
+        self.assertIn("expected_electrons=(2 1 1)", run_script)
+        self.assertIn(
+            "H_gga_8au_100Ry_guarded_fixed_dzp_joint_3s2p.orb",
+            run_script,
+        )
+        self.assertIn(
+            "81c3f21a817d30d9d6802529650c4f177e27a62b39bea5d9d9de8f6c425d5330",
+            run_script,
+        )
+        self.assertIn(
+            "H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs", run_script
+        )
+        self.assertIn("exx_pca_threshold", run_script)
+        self.assertIn('"10"', run_script)
+        self.assertIn("nfreq = 16", run_script)
+        self.assertIn("prefix_coul_full = v1_coulomb_full_iq_", run_script)
+        self.assertIn("libRPA finished successfully", run_script)
+
     def test_expanded_held_out_uses_every_4s3p_band(self):
         for case_name, nbands in (("H2", 26), ("H", 13)):
             with self.subTest(case=case_name):
