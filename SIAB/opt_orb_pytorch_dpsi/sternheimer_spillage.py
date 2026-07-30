@@ -20,6 +20,30 @@ class SternheimerLossResult:
     weighted_residual: torch.Tensor
     weighted_norm: torch.Tensor
     max_condition: float
+    frequency_ha: object = None
+    frequency_residual: object = None
+    frequency_norm: object = None
+    frequency_loss: object = None
+
+    def _lowest_positive_frequency_index(self):
+        if self.frequency_ha is None or self.frequency_loss is None:
+            raise RuntimeError(
+                "Sternheimer result does not contain frequency-resolved loss"
+            )
+        positive = torch.nonzero(self.frequency_ha > 0.0, as_tuple=False)
+        if positive.numel() == 0:
+            raise RuntimeError(
+                "low-frequency guard requires a positive frequency"
+            )
+        return positive[0, 0]
+
+    @property
+    def lowest_frequency_ha(self):
+        return self.frequency_ha[self._lowest_positive_frequency_index()]
+
+    @property
+    def lowest_frequency_loss(self):
+        return self.frequency_loss[self._lowest_positive_frequency_index()]
 
 
 @dataclass(frozen=True)
@@ -220,6 +244,28 @@ def _clamp_roundoff_negative(values, local_scale, name, detail):
             f"tolerance {float(tolerance[row].item()):.6g}); {detail}"
         )
     return torch.clamp(values, min=0.0)
+
+
+def _frequency_resolved_loss(data, norm, residual):
+    frequencies, inverse = torch.unique(
+        data.frequency_ha, sorted=True, return_inverse=True
+    )
+    frequency_norm = torch.zeros_like(frequencies).scatter_add_(
+        0, inverse, data.occupation * norm
+    )
+    frequency_residual = torch.zeros_like(frequencies).scatter_add_(
+        0, inverse, data.occupation * residual
+    )
+    if not bool(torch.all(torch.isfinite(frequency_norm))):
+        raise RuntimeError("frequency-resolved projected norm must be finite")
+    if not bool(torch.all(frequency_norm > 0.0)):
+        raise RuntimeError("frequency-resolved projected norm must be positive")
+    if not bool(torch.all(torch.isfinite(frequency_residual))):
+        raise RuntimeError("frequency-resolved projected residual must be finite")
+    frequency_loss = frequency_residual / frequency_norm
+    if not bool(torch.all(torch.isfinite(frequency_loss))):
+        raise RuntimeError("frequency-resolved loss must be finite")
+    return frequencies, frequency_residual, frequency_norm, frequency_loss
 
 
 def _normalize_spectrum_tolerances(
@@ -665,11 +711,16 @@ def evaluate_spillage_for_columns(
     weighted_residual = torch.sum(weight * residual)
     if not bool(torch.isfinite(weighted_residual)):
         raise RuntimeError("weighted selected-projector residual must be finite")
+    frequency = _frequency_resolved_loss(data, data.norm, residual)
     return SternheimerLossResult(
         loss=weighted_residual / weighted_norm,
         weighted_residual=weighted_residual,
         weighted_norm=weighted_norm,
         max_condition=condition,
+        frequency_ha=frequency[0],
+        frequency_residual=frequency[1],
+        frequency_norm=frequency[2],
+        frequency_loss=frequency[3],
     )
 
 
@@ -734,11 +785,16 @@ def evaluate_spillage_for_columns_rank_revealing(
             "weighted rank-revealing projector residual must be finite"
         )
     condition = largest / float(eigenvalues[keep][0].item())
+    frequency = _frequency_resolved_loss(data, data.norm, residual)
     return SternheimerLossResult(
         loss=weighted_residual / weighted_norm,
         weighted_residual=weighted_residual,
         weighted_norm=weighted_norm,
         max_condition=condition,
+        frequency_ha=frequency[0],
+        frequency_residual=frequency[1],
+        frequency_norm=frequency[2],
+        frequency_loss=frequency[3],
     )
 
 
@@ -861,10 +917,17 @@ class SternheimerSpillage:
         if not bool(torch.isfinite(weighted_residual)):
             raise RuntimeError("weighted projected residual must be finite")
         loss = weighted_residual / weighted_norm
+        frequency = _frequency_resolved_loss(
+            self._data, self._nbar, residual
+        )
 
         return SternheimerLossResult(
             loss=loss,
             weighted_residual=weighted_residual,
             weighted_norm=weighted_norm,
             max_condition=max(self._fixed_condition, variable_condition),
+            frequency_ha=frequency[0],
+            frequency_residual=frequency[1],
+            frequency_norm=frequency[2],
+            frequency_loss=frequency[3],
         )

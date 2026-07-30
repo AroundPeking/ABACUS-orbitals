@@ -18,6 +18,19 @@ def target_data():
     )
 
 
+def two_frequency_target_data():
+    return make_sternheimer_data(
+        [PrimitiveBlock("H", 0, 0, 0, 3, 0)],
+        [
+            [math.sqrt(2.0), math.sqrt(6.0), 0.0],
+            [1.0, math.sqrt(3.0), 0.0],
+        ],
+        norm=[10.0, 8.0],
+        frequency_ha=[0.1, 0.4],
+        frequency_weight=[0.2, 0.8],
+    )
+
+
 def fixed_dzp():
     return {
         "H": [
@@ -78,6 +91,36 @@ class NormalizedPhysicalFamilySpillageTest(unittest.TestCase):
                 fixed_dzp(),
                 self.fixed_specs,
             )
+
+    def test_averages_frequency_local_loss_across_physical_families(self):
+        data = two_frequency_target_data()
+        families = (
+            ResponseTargetFamily("atom", (data,), "physical"),
+            ResponseTargetFamily("multicenter", (data,), "physical"),
+        )
+        evaluator = NormalizedPhysicalFamilySpillage(
+            families,
+            current_basis(),
+            fixed_dzp(),
+            self.fixed_specs,
+        )
+
+        result = evaluator.evaluate(current_basis())
+
+        torch.testing.assert_close(
+            result.frequency_ha,
+            torch.tensor([0.1, 0.4], dtype=torch.float64),
+        )
+        torch.testing.assert_close(
+            result.frequency_loss,
+            torch.tensor([0.25, 4.0 / 7.0], dtype=torch.float64),
+        )
+        torch.testing.assert_close(
+            result.frequency_residual, result.frequency_loss
+        )
+        torch.testing.assert_close(
+            result.frequency_norm, torch.ones(2, dtype=torch.float64)
+        )
 
 
 if __name__ == "__main__":

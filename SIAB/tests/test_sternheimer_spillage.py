@@ -22,6 +22,7 @@ def make_sternheimer_data(
     overlap=None,
     occupation=None,
     frequency_weight=None,
+    frequency_ha=None,
 ):
     q = torch.as_tensor(q, dtype=torch.complex128)
     if q.ndim == 1:
@@ -44,6 +45,10 @@ def make_sternheimer_data(
         frequency_weight = torch.as_tensor(
             frequency_weight, dtype=torch.float64
         )
+    if frequency_ha is None:
+        frequency_ha = torch.zeros(n_reference, dtype=torch.float64)
+    else:
+        frequency_ha = torch.as_tensor(frequency_ha, dtype=torch.float64)
 
     return SternheimerData(
         format_version=1,
@@ -51,7 +56,7 @@ def make_sternheimer_data(
         blocks=tuple(blocks),
         occupied_state=torch.arange(n_reference, dtype=torch.int64),
         auxiliary_channel=torch.zeros(n_reference, dtype=torch.int64),
-        frequency_ha=torch.zeros(n_reference, dtype=torch.float64),
+        frequency_ha=frequency_ha,
         occupation=occupation,
         frequency_weight=frequency_weight,
         norm=norm,
@@ -112,6 +117,140 @@ def make_s_and_d_spectrum_data(d_eigenvalues):
 
 
 class SternheimerSpillageTest(unittest.TestCase):
+    @staticmethod
+    def _two_frequency_case():
+        q = torch.tensor(
+            [
+                [0.2**0.5, 0.3**0.5, 0.0],
+                [0.1**0.5, 0.4**0.5, 0.0],
+                [1j * 0.4**0.5, 1j * 0.1**0.5, 0.0],
+                [-1j * 0.2**0.5, 1j * 0.3**0.5, 0.0],
+            ],
+            dtype=torch.complex128,
+        )
+        data = make_sternheimer_data(
+            [h_s_block(3)],
+            q,
+            norm=[1.0, 1.2, 1.0, 0.9],
+            occupation=[1.0, 2.0, 3.0, 4.0],
+            frequency_weight=[0.25, 0.75, 0.25, 0.75],
+            frequency_ha=[0.1, 0.4, 0.1, 0.4],
+        )
+        coefficient = torch.tensor(
+            [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+            dtype=torch.float64,
+        )
+        fixed = (OrbitalColumn("H", 0, 0, 0, 1),)
+        return data, {"H": [coefficient]}, fixed
+
+    def test_reports_frequency_local_losses(self):
+        data, coefficient, fixed = self._two_frequency_case()
+
+        result = SternheimerSpillage(data, coefficient, fixed).evaluate(
+            coefficient
+        )
+
+        expected_frequency = torch.tensor([0.1, 0.4], dtype=torch.float64)
+        expected_norm = torch.tensor([2.6, 5.0], dtype=torch.float64)
+        expected_residual = torch.tensor([2.0, 3.0], dtype=torch.float64)
+        torch.testing.assert_close(result.frequency_ha, expected_frequency)
+        torch.testing.assert_close(result.frequency_norm, expected_norm)
+        torch.testing.assert_close(
+            result.frequency_residual, expected_residual
+        )
+        torch.testing.assert_close(
+            result.frequency_loss, expected_residual / expected_norm
+        )
+        torch.testing.assert_close(
+            result.loss,
+            torch.tensor(
+                (0.25 * 2.0 + 0.75 * 3.0)
+                / (0.25 * 2.6 + 0.75 * 5.0),
+                dtype=torch.float64,
+            ),
+        )
+        self.assertAlmostEqual(result.lowest_frequency_ha.item(), 0.1)
+        self.assertAlmostEqual(
+            result.lowest_frequency_loss.item(), 2.0 / 2.6
+        )
+
+    def test_frequency_local_losses_are_invariant_to_row_phase(self):
+        data, coefficient, fixed = self._two_frequency_case()
+        phase = torch.exp(torch.tensor(0.37j, dtype=torch.complex128))
+        phased_q = data.q.clone()
+        phased_q[data.frequency_ha == 0.1] *= phase
+        phased = make_sternheimer_data(
+            data.blocks,
+            phased_q,
+            norm=data.norm,
+            overlap=data.overlap,
+            occupation=data.occupation,
+            frequency_weight=data.frequency_weight,
+            frequency_ha=data.frequency_ha,
+        )
+
+        reference = SternheimerSpillage(data, coefficient, fixed).evaluate(
+            coefficient
+        )
+        rotated = SternheimerSpillage(phased, coefficient, fixed).evaluate(
+            coefficient
+        )
+
+        torch.testing.assert_close(
+            rotated.frequency_residual,
+            reference.frequency_residual,
+            rtol=0.0,
+            atol=1.0e-14,
+        )
+        torch.testing.assert_close(
+            rotated.frequency_loss,
+            reference.frequency_loss,
+            rtol=0.0,
+            atol=1.0e-14,
+        )
+
+    def test_lowest_frequency_loss_gradient_matches_finite_difference(self):
+        data, coefficient, fixed = self._two_frequency_case()
+        q = data.q.clone()
+        q[:, 2] = torch.tensor(
+            [0.1, 0.2, 0.15j, -0.1j], dtype=torch.complex128
+        )
+        data = make_sternheimer_data(
+            data.blocks,
+            q,
+            norm=data.norm,
+            overlap=data.overlap,
+            occupation=data.occupation,
+            frequency_weight=data.frequency_weight,
+            frequency_ha=data.frequency_ha,
+        )
+        initial = coefficient["H"][0].clone()
+        initial[2, 1] = 0.3
+        variable = initial.clone().requires_grad_(True)
+        evaluator = SternheimerSpillage(
+            data, {"H": [initial]}, fixed
+        )
+
+        result = evaluator.evaluate({"H": [variable]})
+        result.lowest_frequency_loss.backward()
+        derivative = variable.grad[2, 1].item()
+
+        epsilon = 1.0e-6
+        plus = initial.clone()
+        minus = initial.clone()
+        plus[2, 1] += epsilon
+        minus[2, 1] -= epsilon
+        finite_difference = (
+            evaluator.evaluate({"H": [plus]}).lowest_frequency_loss.item()
+            - evaluator.evaluate({"H": [minus]}).lowest_frequency_loss.item()
+        ) / (2.0 * epsilon)
+        self.assertNotEqual(derivative, 0.0)
+        self.assertAlmostEqual(
+            derivative,
+            finite_difference,
+            delta=1.0e-8 + 1.0e-6 * abs(finite_difference),
+        )
+
     def test_rank_revealing_projector_drops_duplicate_orbital_columns(self):
         data = make_sternheimer_data(
             (h_s_block(2),),

@@ -99,8 +99,12 @@ class NormalizedPhysicalFamilySpillage:
     def evaluate(self, coefficients):
         total = None
         max_condition = 0.0
+        reference_frequencies = None
+        family_frequency_losses = []
         for _, evaluators, denominator in self._families:
             residual = None
+            frequency_residual = None
+            frequency_norm = None
             for evaluator in evaluators:
                 value = evaluator.evaluate(coefficients)
                 residual = (
@@ -109,14 +113,38 @@ class NormalizedPhysicalFamilySpillage:
                     else residual + value.weighted_residual
                 )
                 max_condition = max(max_condition, value.max_condition)
+                if reference_frequencies is None:
+                    reference_frequencies = value.frequency_ha
+                elif not torch.equal(reference_frequencies, value.frequency_ha):
+                    raise RuntimeError(
+                        "physical target families use different frequency grids"
+                    )
+                frequency_residual = (
+                    value.frequency_residual
+                    if frequency_residual is None
+                    else frequency_residual + value.frequency_residual
+                )
+                frequency_norm = (
+                    value.frequency_norm
+                    if frequency_norm is None
+                    else frequency_norm + value.frequency_norm
+                )
             family_loss = residual / denominator
             total = family_loss if total is None else total + family_loss
+            family_frequency_losses.append(
+                frequency_residual / frequency_norm
+            )
 
         if total is None or not bool(torch.isfinite(total)):
             raise RuntimeError("normalized physical-family loss must be finite")
+        frequency_loss = torch.stack(family_frequency_losses).mean(dim=0)
         return SternheimerLossResult(
             loss=total,
             weighted_residual=total,
             weighted_norm=torch.ones_like(total),
             max_condition=max_condition,
+            frequency_ha=reference_frequencies,
+            frequency_residual=frequency_loss,
+            frequency_norm=torch.ones_like(frequency_loss),
+            frequency_loss=frequency_loss,
         )
