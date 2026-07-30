@@ -28,6 +28,7 @@ EXAMPLE = ROOT / "example_H_sternheimer"
 GREEDY_RESPONSE = EXAMPLE / "greedy_response_selection"
 LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 HELD_OUT_SOS = EXAMPLE / "held_out_h2_sos"
+FIXED_DZP_TZDP_SOS = EXAMPLE / "fixed_dzp_tzdp_sos"
 HELD_OUT_SOS_4S3P = EXAMPLE / "held_out_h2_sos_4s3p"
 HELD_OUT_SOS_4S3P3D = EXAMPLE / "held_out_h2_sos_4s3p3d"
 REAL_H_TZDP = (
@@ -749,6 +750,35 @@ class ExampleInputTest(unittest.TestCase):
             "30b7e5e3d80b59778b0fee836fcd0315c0cfd827621806eb3f2c9e659b8118a7",
             run_script,
         )
+        self.assertIn("libRPA finished successfully", run_script)
+
+    def test_fixed_dzp_tzdp_sos_is_a_same_size_fixed_abs_cp_comparison(self):
+        run_script = (FIXED_DZP_TZDP_SOS / "run_sos_cp.slurm").read_text()
+
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH --array=0-5", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn(
+            "lanes=(initial_tzdp initial_tzdp initial_tzdp "
+            "fixed_dzp_joint fixed_dzp_joint fixed_dzp_joint)",
+            run_script,
+        )
+        self.assertIn("case_names=(H2 H H_ghost H2 H H_ghost)", run_script)
+        self.assertIn("nbands=(10 5 10 10 5 10)", run_script)
+        self.assertIn("H_gga_8au_100Ry_3s2p.orb", run_script)
+        self.assertIn("H_gga_8au_100Ry_fixed_dzp_joint_3s2p.orb", run_script)
+        self.assertIn(
+            "python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python",
+            run_script,
+        )
+        self.assertIn(
+            "H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs", run_script
+        )
+        self.assertIn("exx_pca_threshold", run_script)
+        self.assertIn('"10"', run_script)
+        self.assertIn("nfreq = 16", run_script)
+        self.assertIn("prefix_coul_full = v1_coulomb_full_iq_", run_script)
         self.assertIn("libRPA finished successfully", run_script)
 
     def test_expanded_held_out_uses_every_4s3p_band(self):
