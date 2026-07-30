@@ -6,6 +6,7 @@ from freeze_orbitals import validate_freeze_orbitals, zero_frozen_gradients
 from optimization_loss import (
 	compose_loss,
 	constraints_satisfied,
+	low_frequency_guard_satisfied,
 	normalize_loss_config,
 	selection_component,
 )
@@ -132,6 +133,11 @@ class Opt_Orbital_Converge:
 					"dft_origin": baseline_components["dft_origin"].detach().clone(),
 					"dft_dpsi": baseline_components["dft_dpsi"].detach().clone(),
 				}
+				if loss_config["low_frequency_guard_weight"] > 0.0:
+					baseline_st = evaluator.evaluate(C_initial)
+					loss_baselines[stage_index][
+						"sternheimer_lowest_frequency"
+					] = baseline_st.lowest_frequency_loss.detach().clone()
 
 		best_accepted = None
 		best_violation = None
@@ -143,14 +149,30 @@ class Opt_Orbital_Converge:
 			"regularization_locality", "max_st_condition",
 			"max_locality_condition", "accepted",
 		)
+		guarded_header = (
+			"istep_big", "istep_small", "istep_all", "dft_origin",
+			"dft_dpsi", "sternheimer", "sternheimer_lowest_frequency",
+			"regularization_low_frequency", "regularization_dpsi",
+			"constraint_dft", "constraint_dpsi", "total", "radial_tail",
+			"regularization_locality", "max_st_condition",
+			"max_locality_condition", "accepted",
+		)
 		legacy_header = ("istep_big", "istep_small", "istep_all", "Spillage")
 
 		for stage_index, info_opt in enumerate(self.info_optimize):
 			new_loss_stage = stage_index in loss_configs
+			guard_active = (
+				new_loss_stage
+				and loss_configs[stage_index]["low_frequency_guard_weight"] > 0.0
+			)
 			print( 'See "Spillage.dat" for detail status:', file=files[0], flush=True )
 			print( "istep", "Spillage", sep="\t", file=files[0], flush=True )
 			if new_loss_stage:
-				print(*new_header, sep="\t", file=files[1])
+				print(
+					*(guarded_header if guard_active else new_header),
+					sep="\t",
+					file=files[1],
+				)
 				detail_schema = "new"
 			elif detail_schema == "new":
 				print(*legacy_header, sep="\t", file=files[1])
@@ -203,6 +225,11 @@ class Opt_Orbital_Converge:
 						loss_baseline,
 						loss_config,
 						radial_tail=locality_result.loss,
+						st_low_frequency=(
+							st_result.lowest_frequency_loss
+							if guard_active
+							else None
+						),
 					)
 					return (
 						legacy_components,
@@ -236,8 +263,20 @@ class Opt_Orbital_Converge:
 						locality_result.max_condition
 						<= loss_config["radial_tail_condition_limit"]
 					)
+					low_frequency_ok = low_frequency_guard_satisfied(
+						(
+							st_result.lowest_frequency_loss
+							if guard_active
+							else st_result.loss
+						),
+						loss_baseline,
+						loss_config,
+					)
 					accepted = (
-						constraints_ok and condition_ok and locality_condition_ok
+						constraints_ok
+						and condition_ok
+						and locality_condition_ok
+						and low_frequency_ok
 					)
 
 					baseline_dft = max(
@@ -266,18 +305,33 @@ class Opt_Orbital_Converge:
 						/ loss_config["radial_tail_condition_limit"]
 						- 1.0,
 					)
+					if guard_active:
+						baseline_low_frequency = loss_baseline[
+							"sternheimer_lowest_frequency"
+						].item()
+						low_frequency_violation = max(
+							0.0,
+							st_result.lowest_frequency_loss.item()
+							/ baseline_low_frequency
+							- 1.0
+							- loss_config["low_frequency_guard_tolerance"],
+						)
+					else:
+						low_frequency_violation = 0.0
 					violation_key = (
 						max(
 							dft_violation,
 							dpsi_violation,
 							condition_violation,
 							locality_condition_violation,
+							low_frequency_violation,
 						),
 						(
 							dft_violation
 							+ dpsi_violation
 							+ condition_violation
 							+ locality_condition_violation
+							+ low_frequency_violation
 						),
 					)
 					if best_violation is None or violation_key < best_violation["key"]:
@@ -287,6 +341,7 @@ class Opt_Orbital_Converge:
 							"dpsi": dpsi_violation,
 							"condition": condition_violation,
 							"locality_condition": locality_condition_violation,
+							"low_frequency": low_frequency_violation,
 							"max_st_condition": st_result.max_condition,
 							"condition_limit": loss_config["condition_limit"],
 							"max_locality_condition": locality_result.max_condition,
@@ -295,25 +350,39 @@ class Opt_Orbital_Converge:
 							),
 						}
 
-					print(
+					row = [
 						istep_big,
 						closure_count,
 						data_transmit["istep_all"],
 						components["dft_origin"].item(),
 						components["dft_dpsi"].item(),
 						components["sternheimer"].item(),
-						components["regularization_dpsi"].item(),
-						components["constraint_dft"].item(),
-						components["constraint_dpsi"].item(),
-						components["total"].item(),
-						components["radial_tail"].item(),
-						components["regularization_locality"].item(),
-						st_result.max_condition,
-						locality_result.max_condition,
-						str(accepted).lower(),
-						sep="\t",
-						file=files[1],
+					]
+					if guard_active:
+						row.extend(
+							[
+								components[
+									"sternheimer_lowest_frequency"
+								].item(),
+								components[
+									"regularization_low_frequency"
+								].item(),
+							]
+						)
+					row.extend(
+						[
+							components["regularization_dpsi"].item(),
+							components["constraint_dft"].item(),
+							components["constraint_dpsi"].item(),
+							components["total"].item(),
+							components["radial_tail"].item(),
+							components["regularization_locality"].item(),
+							st_result.max_condition,
+							locality_result.max_condition,
+							str(accepted).lower(),
+						]
 					)
+					print(*row, sep="\t", file=files[1])
 					data_transmit["istep_all"] += 1
 					data_transmit.update(
 						{
@@ -342,6 +411,24 @@ class Opt_Orbital_Converge:
 								locality_result.max_condition
 							),
 						}
+						if guard_active:
+							best_accepted["low_frequency_diagnostics"] = {
+								"lowest_st_frequency_ha": (
+									st_result.lowest_frequency_ha.item()
+								),
+								"initial_lowest_st_loss": loss_baseline[
+									"sternheimer_lowest_frequency"
+								].item(),
+								"final_lowest_st_loss": (
+									st_result.lowest_frequency_loss.item()
+								),
+								"low_frequency_guard_tolerance": loss_config[
+									"low_frequency_guard_tolerance"
+								],
+								"low_frequency_guard_weight": loss_config[
+									"low_frequency_guard_weight"
+								],
+							}
 						data_transmit["flag_finish"] = 0
 					else:
 						data_transmit["flag_finish"] += 1
@@ -450,6 +537,7 @@ class Opt_Orbital_Converge:
 					"violation candidate: "
 					f"dft={best_violation['dft']:.8g}, "
 					f"dpsi={best_violation['dpsi']:.8g}, "
+					f"low_frequency={best_violation['low_frequency']:.8g}, "
 					f"condition={best_violation['condition']:.8g}; "
 					f"locality_condition={best_violation['locality_condition']:.8g}; "
 					f"max_st_condition={best_violation['max_st_condition']:.8g}, "

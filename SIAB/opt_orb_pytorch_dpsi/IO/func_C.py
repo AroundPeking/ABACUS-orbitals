@@ -19,10 +19,36 @@ _LOSS_COMPONENTS = (
 	("total", "Total loss"),
 )
 
+_GUARDED_LOSS_COMPONENTS = (
+	("sternheimer_lowest_frequency", "Lowest-frequency ST loss"),
+	(
+		"regularization_low_frequency",
+		"Low-frequency ST regularization loss",
+	),
+)
+
 _LOSS_DIAGNOSTICS = (
 	("max_st_condition", "Maximum ST overlap condition"),
 	("max_locality_condition", "Maximum radial locality condition"),
 )
+
+_GUARDED_LOSS_DIAGNOSTICS = (
+	("lowest_st_frequency_ha", "Lowest ST frequency (Ha)"),
+	("initial_lowest_st_loss", "Initial lowest-frequency ST loss"),
+	("final_lowest_st_loss", "Final lowest-frequency ST loss"),
+	("low_frequency_guard_tolerance", "Low-frequency guard tolerance"),
+	("low_frequency_guard_weight", "Low-frequency guard weight"),
+)
+
+
+def _component_schema(guarded):
+	if not guarded:
+		return _LOSS_COMPONENTS
+	return (
+		_LOSS_COMPONENTS[:3]
+		+ _GUARDED_LOSS_COMPONENTS
+		+ _LOSS_COMPONENTS[3:]
+	)
 
 
 @dataclass(frozen=True)
@@ -40,15 +66,26 @@ def _validate_loss_metadata(loss_components, mode):
 		raise ValueError(f"invalid mode {mode!r}")
 	if not isinstance(loss_components, Mapping):
 		raise TypeError("loss_components must be a mapping")
-	expected = {name for name, _ in _LOSS_COMPONENTS}
-	if set(loss_components) != expected:
+	base = {name for name, _ in _LOSS_COMPONENTS}
+	guard = {name for name, _ in _GUARDED_LOSS_COMPONENTS}
+	provided = set(loss_components)
+	if provided == base:
+		guarded = False
+	elif provided == base | guard:
+		guarded = True
+	elif provided & guard:
+		raise ValueError(
+			"guarded loss components must contain exactly "
+			+ ", ".join(name for name, _ in _GUARDED_LOSS_COMPONENTS)
+		)
+	else:
 		raise ValueError(
 			"loss_components must contain exactly "
 			+ ", ".join(name for name, _ in _LOSS_COMPONENTS)
 		)
 
 	validated = {}
-	for name, _ in _LOSS_COMPONENTS:
+	for name, _ in _component_schema(guarded):
 		value = loss_components[name]
 		if (
 			isinstance(value, bool)
@@ -66,8 +103,19 @@ def _validate_loss_diagnostics(diagnostics):
 		return None
 	if not isinstance(diagnostics, Mapping):
 		raise TypeError("loss diagnostics must be a mapping")
-	expected = {name for name, _ in _LOSS_DIAGNOSTICS}
-	if set(diagnostics) != expected:
+	base = {name for name, _ in _LOSS_DIAGNOSTICS}
+	guard = {name for name, _ in _GUARDED_LOSS_DIAGNOSTICS}
+	provided = set(diagnostics)
+	if provided == base:
+		guarded = False
+	elif provided == base | guard:
+		guarded = True
+	elif provided & guard:
+		raise ValueError(
+			"guarded loss diagnostics must contain exactly "
+			+ ", ".join(name for name, _ in _GUARDED_LOSS_DIAGNOSTICS)
+		)
+	else:
 		raise ValueError(
 			"loss diagnostics must contain exactly "
 			+ ", ".join(name for name, _ in _LOSS_DIAGNOSTICS)
@@ -83,6 +131,19 @@ def _validate_loss_diagnostics(diagnostics):
 		):
 			raise ValueError(f"{name} diagnostic must be finite and at least one")
 		validated[name] = float(value)
+	if guarded:
+		for name, _ in _GUARDED_LOSS_DIAGNOSTICS:
+			value = diagnostics[name]
+			if (
+				isinstance(value, bool)
+				or not isinstance(value, numbers.Real)
+				or not math.isfinite(value)
+				or value < 0.0
+			):
+				raise ValueError(
+					f"{name} diagnostic must be finite and nonnegative"
+				)
+			validated[name] = float(value)
 	return validated
 
 def random_C_init(info_element):
@@ -222,6 +283,17 @@ def write_C(
 	diagnostics = _validate_loss_diagnostics(diagnostics)
 	if diagnostics is not None and loss_components is None:
 		raise ValueError("loss diagnostics require loss_components")
+	guarded_components = (
+		loss_components is not None
+		and "sternheimer_lowest_frequency" in loss_components
+	)
+	guarded_diagnostics = (
+		diagnostics is not None and "lowest_st_frequency_ha" in diagnostics
+	)
+	if guarded_components and not guarded_diagnostics:
+		raise ValueError("guarded loss components require guarded diagnostics")
+	if guarded_diagnostics and not guarded_components:
+		raise ValueError("guarded diagnostics require guarded loss components")
 	with open(file_name,"w") as file:
 		print("<Coefficient>", file=file)
 		#print("\tTotal number of radial orbitals.", file=file)
@@ -245,10 +317,13 @@ def write_C(
 		print("Left spillage = %.10e"%Spillage, file=file)
 		if loss_components is not None:
 			print(f"Mode = {mode}", file=file)
-			for name, label in _LOSS_COMPONENTS:
+			for name, label in _component_schema(guarded_components):
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
 			if diagnostics is not None:
-				for name, label in _LOSS_DIAGNOSTICS:
+				diagnostic_schema = _LOSS_DIAGNOSTICS
+				if guarded_diagnostics:
+					diagnostic_schema += _GUARDED_LOSS_DIAGNOSTICS
+				for name, label in diagnostic_schema:
 					print(f"{label} = {diagnostics[name]:.10e}", file=file)
 		print("</Mkb>", file=file)
 

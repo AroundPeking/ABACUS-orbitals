@@ -185,6 +185,26 @@ class SingleOrbitalSternheimer:
         )
 
 
+class OpposingFrequencySternheimer:
+    def evaluate(self, c):
+        x = c["H"][0][0, 0]
+        loss = x.square()
+        low_frequency_loss = 0.4 - 0.2 * x
+        one = torch.ones_like(loss).reshape(1)
+        return SternheimerLossResult(
+            loss=loss,
+            weighted_residual=loss,
+            weighted_norm=torch.ones_like(loss),
+            max_condition=1.0,
+            frequency_ha=torch.tensor(
+                [0.1], dtype=loss.dtype, device=loss.device
+            ),
+            frequency_residual=low_frequency_loss.reshape(1),
+            frequency_norm=one,
+            frequency_loss=low_frequency_loss.reshape(1),
+        )
+
+
 class QuadraticLocality:
     def __init__(self, max_condition=3.0):
         self.max_condition = max_condition
@@ -710,6 +730,69 @@ class ConvergeIntegrationTest(unittest.TestCase):
         self.assertEqual(result["Spillage"], result["loss_components"]["total"])
         self.assertEqual(result["max_st_condition"], 2.0)
         self.assertEqual(result["max_locality_condition"], 1.0)
+
+    def test_low_frequency_guard_rejects_regressed_candidate(self):
+        converge, c = make_converge_case("st_only", max_steps=1)
+        converge.info_optimize[0]["loss"].update(
+            {
+                "low_frequency_guard_weight": 10.0,
+                "low_frequency_guard_tolerance": 0.0,
+            }
+        )
+        evaluator = OpposingFrequencySternheimer()
+        converge.set_sternheimer_spillage(evaluator)
+
+        class RegressingStep:
+            def zero_grad(self):
+                c["H"][0].grad = None
+
+            def step(self, closure):
+                closure()
+                with torch.no_grad():
+                    c["H"][0][0, 0] = 0.5
+
+        files = self.files()
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=RegressingStep(),
+        ):
+            result = converge.cal_converge(c, files)
+
+        self.assertAlmostEqual(evaluator.evaluate(c).loss.item(), 0.25)
+        self.assertAlmostEqual(
+            evaluator.evaluate(c).lowest_frequency_loss.item(), 0.30
+        )
+        self.assertAlmostEqual(result["C"]["H"][0][0, 0].item(), 1.0)
+        self.assertAlmostEqual(
+            result["loss_baseline"]["sternheimer_lowest_frequency"], 0.20
+        )
+        self.assertAlmostEqual(
+            result["loss_components"]["sternheimer_lowest_frequency"], 0.20
+        )
+        self.assertEqual(
+            result["low_frequency_diagnostics"],
+            {
+                "lowest_st_frequency_ha": 0.1,
+                "initial_lowest_st_loss": 0.2,
+                "final_lowest_st_loss": 0.2,
+                "low_frequency_guard_tolerance": 0.0,
+                "low_frequency_guard_weight": 10.0,
+            },
+        )
+
+        lines = files[1].getvalue().splitlines()
+        header = lines[0].split("\t")
+        rows = [
+            dict(zip(header, line.split("\t")))
+            for line in lines[1:]
+            if line.split("\t", 1)[0].lstrip("-").isdigit()
+        ]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["accepted"], "true")
+        self.assertEqual(rows[1]["accepted"], "false")
+        self.assertAlmostEqual(
+            float(rows[1]["sternheimer_lowest_frequency"]), 0.30
+        )
 
     def test_locality_evaluator_regularizes_nonfixed_columns(self):
         converge, c = make_converge_case(

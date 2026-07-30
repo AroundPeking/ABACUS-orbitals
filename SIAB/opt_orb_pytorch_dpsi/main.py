@@ -366,22 +366,25 @@ def main():
 		info_radial["Rcut"],
 		info_radial["dr"])
 
+	loss_diagnostics = None
+	if "loss_components" in data_transmit:
+		loss_diagnostics = {
+			"max_st_condition": data_transmit["max_st_condition"],
+			"max_locality_condition": data_transmit[
+				"max_locality_condition"
+			],
+		}
+		loss_diagnostics.update(
+			data_transmit.get("low_frequency_diagnostics", {})
+		)
+
 	IO.func_C.write_C(
 		"ORBITAL_RESULTS.txt",
 		data_transmit["C"],
 		data_transmit["Spillage"],
 		loss_components=data_transmit.get("loss_components"),
 		mode=data_transmit.get("loss_mode"),
-		diagnostics=(
-			{
-				"max_st_condition": data_transmit["max_st_condition"],
-				"max_locality_condition": data_transmit[
-					"max_locality_condition"
-				],
-			}
-			if "loss_components" in data_transmit
-			else None
-		),
+		diagnostics=loss_diagnostics,
 	)
 
 	print("Time (PyTorch):     %s\n"%(time.time()-time_start) )

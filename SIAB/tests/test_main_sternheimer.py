@@ -49,6 +49,22 @@ COMPONENTS = {
     "dft_origin": 0.3,
 }
 
+GUARDED_COMPONENTS = dict(
+    COMPONENTS,
+    sternheimer_lowest_frequency=0.23,
+    regularization_low_frequency=0.04,
+)
+
+GUARDED_DIAGNOSTICS = {
+    "max_st_condition": 12.0,
+    "max_locality_condition": 8.0,
+    "lowest_st_frequency_ha": 0.068706555678,
+    "initial_lowest_st_loss": 0.247384,
+    "final_lowest_st_loss": 0.247300,
+    "low_frequency_guard_tolerance": 0.0,
+    "low_frequency_guard_weight": 10.0,
+}
+
 
 @contextlib.contextmanager
 def working_directory(path):
@@ -466,6 +482,69 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
             torch.testing.assert_close(parsed["H"][0], self.c["H"][0])
             self.assertEqual(indices, {("H", 0, 0), ("H", 0, 1)})
 
+    def test_guarded_metadata_uses_complete_explicit_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "guarded.dat"
+            write_C(
+                output,
+                self.c,
+                0.6,
+                loss_components=GUARDED_COMPONENTS,
+                mode="st_dpsi_joint",
+                diagnostics=GUARDED_DIAGNOSTICS,
+            )
+            text = output.read_text()
+            expected_lines = (
+                "Sternheimer loss = 2.5000000000e-01",
+                "Lowest-frequency ST loss = 2.3000000000e-01",
+                "Low-frequency ST regularization loss = 4.0000000000e-02",
+                "dpsi regularization loss = 0.0000000000e+00",
+                "Lowest ST frequency (Ha) = 6.8706555678e-02",
+                "Initial lowest-frequency ST loss = 2.4738400000e-01",
+                "Final lowest-frequency ST loss = 2.4730000000e-01",
+                "Low-frequency guard tolerance = 0.0000000000e+00",
+                "Low-frequency guard weight = 1.0000000000e+01",
+            )
+            positions = [text.index(line) for line in expected_lines]
+            self.assertEqual(positions, sorted(positions))
+
+    def test_rejects_partial_or_mismatched_guarded_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "bad_guarded.dat"
+            partial_components = dict(
+                COMPONENTS, sternheimer_lowest_frequency=0.23
+            )
+            with self.assertRaisesRegex(ValueError, "guarded loss components"):
+                write_C(
+                    output,
+                    self.c,
+                    0.6,
+                    loss_components=partial_components,
+                    mode="st_only",
+                )
+
+            partial_diagnostics = dict(GUARDED_DIAGNOSTICS)
+            partial_diagnostics.pop("final_lowest_st_loss")
+            with self.assertRaisesRegex(ValueError, "guarded loss diagnostics"):
+                write_C(
+                    output,
+                    self.c,
+                    0.6,
+                    loss_components=GUARDED_COMPONENTS,
+                    mode="st_only",
+                    diagnostics=partial_diagnostics,
+                )
+
+            with self.assertRaisesRegex(ValueError, "guarded diagnostics"):
+                write_C(
+                    output,
+                    self.c,
+                    0.6,
+                    loss_components=COMPONENTS,
+                    mode="st_only",
+                    diagnostics=GUARDED_DIAGNOSTICS,
+                )
+
     def test_rejects_incomplete_or_malformed_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "bad.dat"
@@ -603,6 +682,58 @@ class MainIntegrationTest(unittest.TestCase):
             self.assertIn("Mode = st_only", result_text)
             self.assertIn("DFT origin loss = 0.0000000000e+00", result_text)
             self.assertIn("DFT dpsi loss = 0.0000000000e+00", result_text)
+
+    def test_main_persists_complete_low_frequency_guard_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            st_path = path / "sternheimer.dat"
+            write_sternheimer(st_path)
+            write_initial_coefficient(path / "C_init.dat")
+            value = input_value(
+                sternheimer_marker=[str(st_path)], loss=True
+            )
+            value["file_list"] = {"sternheimer": [str(st_path)]}
+            value["weight"] = {}
+            value["loss"].update(
+                {
+                    "low_frequency_guard_weight": 10.0,
+                    "low_frequency_guard_tolerance": 0.0,
+                }
+            )
+            (path / "INPUT").write_text(json.dumps(value))
+
+            with working_directory(path), mock.patch.object(
+                siab_main.orbital, "normalize", return_value=None
+            ), mock.patch.object(
+                siab_main.orbital, "generate_orbital", return_value={"H": [[]]}
+            ), mock.patch.object(
+                siab_main.orbital, "orth", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "print_orbital", return_value=None
+            ), mock.patch.object(
+                siab_main.IO.print_orbital, "plot_orbital", return_value=None
+            ):
+                siab_main.main()
+
+            header = (path / "Spillage.dat").read_text().splitlines()[0].split()
+            self.assertIn("sternheimer_lowest_frequency", header)
+            self.assertIn("regularization_low_frequency", header)
+
+            metadata = {}
+            for line in (path / "ORBITAL_RESULTS.txt").read_text().splitlines():
+                if " = " in line:
+                    label, raw = line.split(" = ", 1)
+                    try:
+                        metadata[label] = float(raw)
+                    except ValueError:
+                        pass
+            self.assertEqual(metadata["Lowest ST frequency (Ha)"], 0.5)
+            self.assertEqual(metadata["Low-frequency guard weight"], 10.0)
+            self.assertEqual(metadata["Low-frequency guard tolerance"], 0.0)
+            self.assertLessEqual(
+                metadata["Final lowest-frequency ST loss"],
+                metadata["Initial lowest-frequency ST loss"] * (1.0 + 1.0e-12),
+            )
 
     def test_constrained_main_still_requires_legacy_files(self):
         with tempfile.TemporaryDirectory() as directory:
