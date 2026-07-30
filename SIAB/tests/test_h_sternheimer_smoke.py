@@ -578,6 +578,44 @@ class ExplicitFreezeInitializationTest(unittest.TestCase):
 
 
 class ExampleInputTest(unittest.TestCase):
+    def test_low_frequency_guard_changes_only_guard_options(self):
+        joint = json.loads((EXAMPLE / "INPUT.st_dpsi_joint").read_text())
+        guarded = json.loads(
+            (EXAMPLE / "INPUT.st_dpsi_joint_low_frequency_guard").read_text()
+        )
+        expected = copy.deepcopy(joint)
+        expected["loss"].update(
+            {
+                "low_frequency_guard_weight": 10.0,
+                "low_frequency_guard_tolerance": 0.0,
+            }
+        )
+
+        self.assertEqual(guarded, expected)
+        self.assertEqual(guarded["seed"], SEED)
+        self.assertEqual(guarded["element"]["Nu"], {"H": [3, 2]})
+        self.assertEqual(guarded["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(guarded["radial"]["Rcut"], 8)
+        self.assertEqual(guarded["radial"]["Ecut"], 100)
+        self.assertEqual(guarded["radial"]["smearing_sigma"], 0.1)
+
+    def test_guarded_joint_runner_uses_full_normal_node_and_checks_guard(self):
+        run_script = (
+            EXAMPLE / "run_joint_low_frequency_guard.slurm"
+        ).read_text()
+
+        self.assertIn("#SBATCH -p normal", run_script)
+        self.assertIn("#SBATCH -N 1", run_script)
+        self.assertIn("#SBATCH --ntasks=1", run_script)
+        self.assertIn("#SBATCH --cpus-per-task=30", run_script)
+        self.assertIn("#SBATCH --mem=110610M", run_script)
+        self.assertIn("#SBATCH -t 1-00:00:00", run_script)
+        self.assertIn("export OMP_NUM_THREADS=30", run_script)
+        self.assertIn("Low-frequency guard weight", run_script)
+        self.assertIn("Low-frequency guard tolerance", run_script)
+        self.assertIn("Final lowest-frequency ST loss", run_script)
+        self.assertIn("Initial lowest-frequency ST loss", run_script)
+
     def test_inputs_match_exact_campaign_contract(self):
         st_only = json.loads((EXAMPLE / "INPUT.st_only").read_text())
         expanded = json.loads((EXAMPLE / "INPUT.st_response_4s3p").read_text())

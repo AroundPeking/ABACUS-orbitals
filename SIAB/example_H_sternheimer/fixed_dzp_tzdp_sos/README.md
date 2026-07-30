@@ -29,6 +29,34 @@ BSSE  = D_raw - D_CP
 The comparison is a held-out physics gate. A lower SIAB training loss alone
 does not establish that the optimized basis improves SOS-RPA.
 
+## Low-frequency guard A/B
+
+`INPUT.st_dpsi_joint_low_frequency_guard` keeps the existing integrated
+GreenX-weighted Sternheimer objective and all fixed-DZP `3s2p` settings. Its
+only two changes relative to `INPUT.st_dpsi_joint` are a guard weight of `10`
+and zero allowed regression at the smallest positive imaginary frequency.
+The optimizer reports the local loss at every frequency and rejects any
+candidate whose lowest-frequency loss exceeds the initial TZDP value, even if
+its integrated loss is lower.
+
+Run this guarded lane with `run_joint_low_frequency_guard.slurm` from a fresh,
+immutable campaign directory containing `INPUT`, `SOURCE_COMMIT`,
+`SOURCE_MANIFEST.sha256`, and the same producer data used by the unguarded
+lane. The pre-SOS checks are:
+
+```text
+fixed 1s/2s/1p coefficient difference <= 1e-12
+final lowest-frequency loss <= initial lowest-frequency loss * (1 + 1e-12)
+integrated Sternheimer loss <= 0.4095114289
+DFT loss ratio <= 1.05
+dpsi loss ratio <= 1.10
+same 3s2p orbital count and 8-bohr cutoff
+```
+
+Passing these checks only authorizes the held-out H2/H/H+ghost calculation.
+The physical decision still uses the full-Coulomb, 16-frequency raw and
+counterpoise-corrected SOS-RPA binding energies defined below.
+
 ## Result
 
 The first submitted array, `21438056_[0-5]`, used `10/5/10` bands because it
