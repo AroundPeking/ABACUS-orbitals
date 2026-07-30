@@ -83,6 +83,57 @@ The archived text evidence and parser outputs are under
 The complete reader-v1 matrices remain on `df_dcu` under
 `/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_campaign_v2_20260730`.
 
+### Low-frequency guard result
+
+The guarded optimizer job `21440455` used commit `f17a794d`, one `normal`
+node, 30 CPU threads, and 110610 MB. It reduced the integrated Sternheimer
+loss from `0.4428607140` to `0.4043507842`. At the lowest positive frequency,
+`0.06870656 Ha`, the local loss changed from `0.2473837784` to
+`0.2473437354`; all 16 frequency-local losses decreased. The DFT and dpsi
+losses also decreased to `0.668756` and `0.655032` of their initial values,
+respectively. The fixed `1s/2s/1p` coefficient differences are exactly zero,
+and the largest fixed-radial difference is `1.03e-14`.
+
+The held-out array `21440627_[0-2]` then ran H2, H, and H+ghost with the exact
+control settings above. All three tasks completed with exit code zero in
+`3:06`, `2:47`, and `5:47`. The LibRPA correlation energies were
+
+```text
+EcRPA(H2)      = -0.069303873 Ha
+EcRPA(H)       = -0.016647081 Ha
+EcRPA(H+ghost) = -0.017462704 Ha
+```
+
+For each geometry, the explicit ABS, pseudopotential, KPT, `librpa.in`,
+`basis_aux_out`, and full-Coulomb matrix are byte-identical to the current
+fixed-DZP joint control. The guarded physical result is:
+
+| basis | D raw | D CP | BSSE | D CP - 108.72 |
+|---|---:|---:|---:|---:|
+| initial TZDP | 106.635342 | 105.556881 | 1.078461 | -3.163119 |
+| fixed-DZP joint `3s2p` | 106.886054 | 105.853882 | 1.032171 | -2.866118 |
+| low-frequency-guarded `3s2p` | 106.881909 | 105.843252 | 1.038657 | -2.876748 |
+
+All values are in kcal/mol. Relative to the unguarded joint basis, the guard
+changes the raw binding by `-0.004145`, the CP binding by `-0.010631`, and
+BSSE by `+0.006486` kcal/mol. The CP zero-order term changes by only
+`+0.000063`, while the CP RPAc term changes by `-0.010694` kcal/mol. Therefore
+the guarded basis passes every software and training-loss gate but does not
+pass the held-out physical-improvement gate. It remains better than the
+initial TZDP control, but it must not replace the unguarded joint basis as the
+current best same-size result.
+
+This negative result is also the practical conclusion of the A/B test:
+frequency-local wavefunction spillage is not an RPA-energy variational
+objective. Requiring every local spillage to decrease still does not constrain
+the Coulomb-weighted response spectrum or the H2-minus-H cancellation tightly
+enough to make the CP RPA binding improve.
+
+The compact evidence bundle is under
+`/Users/ghj/同步空间/AITP_project/sternheimer_abacus/results/siab_h_low_frequency_guard_21440455_21440627_text`.
+The complete server campaign is under
+`/work1/ghj/sternheimer_abacus_tests/siab_low_frequency_guard_sos_campaign_f17a794d_20260730`.
+
 ## Orbital and response-space diagnostic
 
 `analyze_orbitals.py` compares the exact exported radial orbitals and evaluates
