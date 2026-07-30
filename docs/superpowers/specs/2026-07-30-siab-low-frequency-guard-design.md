@@ -159,7 +159,8 @@ The zero weight is the default. With this default:
 - the scalar integrated Sternheimer loss is numerically unchanged;
 - candidate acceptance and selection are unchanged;
 - existing inputs require no edits;
-- existing spillage columns retain their values.
+- `Spillage.dat` and `ORBITAL_RESULTS.txt` retain their existing field sets and
+  values, so strict external parsers do not need edits.
 
 When the weight is positive, the optimizer records two additional components:
 
