@@ -54,3 +54,45 @@ The archived text evidence and parser outputs are under
 `/Users/ghj/同步空间/AITP_project/sternheimer_abacus/results/siab_h_fixed_dzp_tzdp_sos_21438483_text`.
 The complete reader-v1 matrices remain on `df_dcu` under
 `/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_campaign_v2_20260730`.
+
+## Orbital and response-space diagnostic
+
+`analyze_orbitals.py` compares the exact exported radial orbitals and evaluates
+the Sternheimer target with the same fixed `1s,2s,1p` DZP projector. Run it
+from the `ABACUS-orbitals` root with a Python environment containing NumPy,
+SciPy, Matplotlib, and PyTorch:
+
+```bash
+/Users/ghj/apps/anaconda3/bin/python3 \
+  SIAB/example_H_sternheimer/fixed_dzp_tzdp_sos/analyze_orbitals.py
+```
+
+At the declared relative primitive-rank tolerance `1e-4`, the reproduced ST
+losses are `0.4428607140` for the initial TZDP and `0.4054568603` for the
+jointly optimized TZDP. The best ST-only projector containing exactly one
+additional shared s radial function and one additional shared p radial
+function has loss `0.3944469227`. The current joint result therefore has only
+`0.0110099376` absolute ST-loss headroom at the same `3s2p` size. This is a
+lower bound for the ST objective, not a guarantee that the same value can be
+reached while retaining the DFT/dpsi constraints.
+
+The metric overlap with the leading fixed-DZP-projected residual response mode
+changes from `0.972241` to `0.972743` for `3s`, and from `0.952821` to
+`0.992838` for `2p`. Thus the useful shape change is predominantly in `2p`;
+the initial `3s` was already close to the best rank-one s direction. Even an
+unlimited number of stable s/p primitive directions has a loss floor
+`0.3028482444`, dominated by response angular momentum absent from this
+four-block s/p target. Reoptimizing only the same two radial functions cannot
+remove that floor.
+
+The target stores `Q=<delta_psi|primitive>`, the primitive overlap `S`, and the
+exact reference norm, but not the full three-dimensional grid wavefunction.
+The plotted reference is therefore the rank-revealing primitive projection
+`c=S^+ Q^H`, not an unprojected grid dump. For the displayed representative s
+and p channels at `0.0687`, `1.305`, and `8.366 Ha`, this projection captures
+between `99.656%` and `99.9996%` of the corresponding reference norm. The
+original server directory also contains no full Sternheimer wavefunction file;
+showing the unprojected grid reference would require a new diagnostic output.
+
+Generated figures and the machine-readable summary are under
+`results/fixed_dzp_tzdp_orbital_analysis/` in the parent project.
