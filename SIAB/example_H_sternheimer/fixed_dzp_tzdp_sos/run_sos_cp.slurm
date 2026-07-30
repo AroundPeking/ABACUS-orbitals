@@ -13,8 +13,8 @@
 set -euo pipefail
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
 
-source_root=/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_source_v1_20260730
-campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_campaign_v1_20260730
+source_root=/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_source_v2_20260730
+campaign_root=/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_campaign_v2_20260730
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 joint_root=/work1/ghj/sternheimer_abacus_tests/h_siab_joint_d41f975e_20260719/source/SIAB/example_H_sternheimer
 template_root=$source_root/SIAB/example_H_sternheimer/held_out_h2_sos_greedy_full/cases
@@ -22,7 +22,8 @@ python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
 
 lanes=(initial_tzdp initial_tzdp initial_tzdp fixed_dzp_joint fixed_dzp_joint fixed_dzp_joint)
 case_names=(H2 H H_ghost H2 H H_ghost)
-nbands=(10 5 10 10 5 10)
+# Each H has 3 s functions and 2 complete p shells: 3 + 2 * 3 = 9 AO.
+nbands=(18 9 18 18 9 18)
 expected_spins=(1 2 2 1 2 2)
 expected_electrons=(2 1 1 2 1 1)
 expected_orbital_entries=(1 1 2 1 1 2)

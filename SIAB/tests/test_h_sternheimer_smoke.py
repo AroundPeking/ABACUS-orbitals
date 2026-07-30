@@ -765,7 +765,7 @@ class ExampleInputTest(unittest.TestCase):
             run_script,
         )
         self.assertIn("case_names=(H2 H H_ghost H2 H H_ghost)", run_script)
-        self.assertIn("nbands=(10 5 10 10 5 10)", run_script)
+        self.assertIn("nbands=(18 9 18 18 9 18)", run_script)
         self.assertIn("H_gga_8au_100Ry_3s2p.orb", run_script)
         self.assertIn("H_gga_8au_100Ry_fixed_dzp_joint_3s2p.orb", run_script)
         self.assertIn(
