@@ -62,6 +62,30 @@ class ReadSternheimerTest(unittest.TestCase):
         self.assertEqual(data.q.dtype, torch.complex128)
         self.assertEqual(data.overlap.dtype, torch.complex128)
 
+    def test_repeated_reads_are_bitwise_compatible(self):
+        first = read_sternheimer(FIXTURE)
+        second = read_sternheimer(FIXTURE)
+
+        self.assertEqual(first.format_version, second.format_version)
+        self.assertEqual(first.grid_volume_bohr3, second.grid_volume_bohr3)
+        self.assertEqual(first.blocks, second.blocks)
+        self.assertEqual(first.provenance, second.provenance)
+        for field in (
+            "occupied_state",
+            "auxiliary_channel",
+            "frequency_ha",
+            "occupation",
+            "frequency_weight",
+            "norm",
+            "q",
+            "overlap",
+        ):
+            first_value = getattr(first, field)
+            second_value = getattr(second, field)
+            self.assertEqual(first_value.dtype, second_value.dtype)
+            self.assertEqual(first_value.device, second_value.device)
+            self.assertTrue(torch.equal(first_value, second_value))
+
     def test_direct_data_rejects_non_finite_frequency(self):
         data = read_sternheimer(FIXTURE)
         frequency_ha = data.frequency_ha.clone()
