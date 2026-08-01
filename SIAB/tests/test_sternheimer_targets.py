@@ -10,7 +10,11 @@ if str(OPT_DIR) not in sys.path:
     sys.path.insert(0, str(OPT_DIR))
 
 from sternheimer_data import PrimitiveBlock
-from sternheimer_targets import apply_target_element_aliases, parse_target_entries
+from sternheimer_targets import (
+    SternheimerTargetEntry,
+    apply_target_element_aliases,
+    parse_target_entries,
+)
 from test_sternheimer_spillage import make_sternheimer_data
 
 
@@ -18,10 +22,37 @@ class SternheimerTargetEntryTest(unittest.TestCase):
     def test_wraps_legacy_path_as_default_physical_family(self):
         entries = parse_target_entries(["atom.dat"])
 
-        self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0].path, Path("atom.dat"))
-        self.assertEqual(entries[0].family, "default")
-        self.assertEqual(entries[0].role, "physical")
+        self.assertEqual(
+            entries,
+            (
+                SternheimerTargetEntry(
+                    path=Path("atom.dat"),
+                    family="default",
+                    role="physical",
+                ),
+            ),
+        )
+
+    def test_parses_source_and_zero_order_audit_paths(self):
+        entry = parse_target_entries(
+            [
+                {
+                    "path": "H/sternheimer_matrix.dat",
+                    "source_path": "H/STERNHEIMER_SIAB_SOURCE_V1.dat",
+                    "zero_order_audit_path": "H_zero_order_identity.json",
+                    "family": "H",
+                    "role": "physical",
+                }
+            ]
+        )[0]
+
+        self.assertEqual(entry.path, Path("H/sternheimer_matrix.dat"))
+        self.assertEqual(
+            entry.source_path, Path("H/STERNHEIMER_SIAB_SOURCE_V1.dat")
+        )
+        self.assertEqual(
+            entry.zero_order_audit_path, Path("H_zero_order_identity.json")
+        )
 
     def test_parses_named_target_families(self):
         entries = parse_target_entries(
@@ -54,6 +85,12 @@ class SternheimerTargetEntryTest(unittest.TestCase):
             ],
         )
         self.assertEqual(entries[2].element_aliases, (("H_empty", "H"),))
+        self.assertTrue(
+            all(entry.source_path is None for entry in entries)
+        )
+        self.assertTrue(
+            all(entry.zero_order_audit_path is None for entry in entries)
+        )
 
     def test_applies_explicit_ghost_element_alias_without_changing_atom_index(self):
         data = make_sternheimer_data(
@@ -137,6 +174,33 @@ class SternheimerTargetEntryTest(unittest.TestCase):
                     }
                 ]
             )
+
+    def test_rejects_empty_source_or_audit_paths(self):
+        base = {
+            "path": "h2.dat",
+            "family": "H2",
+            "role": "physical",
+            "source_path": "h2_source.dat",
+            "zero_order_audit_path": "h2_audit.json",
+        }
+        for field in ("source_path", "zero_order_audit_path"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field):
+                    parse_target_entries([{**base, field: "  "}])
+
+    def test_rejects_source_or_audit_paths_on_ghost_target(self):
+        base = {
+            "path": "ghost.dat",
+            "family": "fragment_ghost",
+            "role": "ghost",
+        }
+        for field, value in (
+            ("source_path", "ghost_source.dat"),
+            ("zero_order_audit_path", "ghost_audit.json"),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, "ghost.*source.*audit"):
+                    parse_target_entries([{**base, field: value}])
 
     def test_rejects_duplicate_family_role_path(self):
         entry = {
