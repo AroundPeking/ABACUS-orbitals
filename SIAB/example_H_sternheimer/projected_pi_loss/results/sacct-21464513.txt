@@ -1,0 +1,4 @@
+JobID|JobName|Partition|State|ExitCode|Elapsed|TotalCPU|AllocCPUS|ReqMem|MaxRSS|NodeList
+21464513|siab_pi_rank|normal|COMPLETED|0:0|00:01:28|03:50.283|30|110610M||h05r2n00
+21464513.batch|batch||COMPLETED|0:0|00:01:28|03:50.282|30||142976K|h05r2n00
+21464513.extern|extern||COMPLETED|0:0|00:01:28|00:00.001|30||1484K|h05r2n00

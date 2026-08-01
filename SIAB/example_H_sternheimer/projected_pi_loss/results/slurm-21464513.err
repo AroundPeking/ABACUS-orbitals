@@ -1,0 +1,23 @@
+	Command being timed: "/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/code/SIAB/example_H_sternheimer/projected_pi_loss/analyze_projected_pi.py --h-response /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H_sternheimer_matrix.dat --h-source /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H_STERNHEIMER_SIAB_SOURCE_V1.dat --h-audit /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H_zero_order_identity.json --h2-response /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H2_sternheimer_matrix.dat --h2-source /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H2_STERNHEIMER_SIAB_SOURCE_V1.dat --h2-audit /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/H2_zero_order_identity.json --initial /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/initial_tzdp_ORBITAL_RESULTS.txt --joint /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/fixed_dzp_joint_ORBITAL_RESULTS.txt --guarded /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/inputs/low_frequency_guarded_ORBITAL_RESULTS.txt --output-dir /work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801/projected_pi_result"
+	User time (seconds): 211.73
+	System time (seconds): 8.98
+	Percent of CPU this job got: 297%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:14.30
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1905692
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 9
+	Minor (reclaiming a frame) page faults: 1049199
+	Voluntary context switches: 43283
+	Involuntary context switches: 2799
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

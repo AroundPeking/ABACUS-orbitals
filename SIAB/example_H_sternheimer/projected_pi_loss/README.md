@@ -39,3 +39,35 @@ python analyze_projected_pi.py \
   --guarded low_frequency_guarded_ORBITAL_RESULTS.txt \
   --output-dir projected_pi_result
 ```
+
+## Physical ranking result
+
+Commit `ecedcd80` was staged under
+`/work1/ghj/sternheimer_abacus_tests/siab_projected_pi_feasibility_20260801`.
+Job `21464513` completed on one `normal` node with 30 CPUs and 110610 MB. The
+analysis took 74.30 s and used 1,905,692 KiB maximum resident memory according
+to `/usr/bin/time -v`. Both strict pairs and zero-order audits passed without
+warnings, fixed `1s,2s,1p` differences were exactly zero, and the decision was
+`pass`.
+
+At the nominal primitive-overlap rank threshold `1e-12`:
+
+| basis | H loss | H2 loss | equal-family total | H/H2 rank | max condition | held-out D CP |
+|---|---:|---:|---:|---:|---:|---:|
+| initial TZDP | 0.1422168377 | 0.0912063047 | 0.2334231424 | 534/1032 | 3.073394e4 | 105.556881 |
+| fixed-DZP joint `3s2p` | 0.1329357582 | 0.0816364120 | 0.2145721702 | 534/1032 | 5.562937e3 | 105.853882 |
+| low-frequency-guarded `3s2p` | 0.1333449050 | 0.0821021186 | 0.2154470237 | 534/1032 | 5.397578e3 | 105.843252 |
+
+The CP values are independent held-out SOS-RPA results in kcal/mol; they were
+not read by the projected-Pi command. The projected-Pi order is joint,
+guarded, initial from best to worst, matching the held-out CP order. The same
+strict order holds at all 16 frequencies for both H and H2. Across rank
+thresholds `1e-10`, `1e-11`, and `1e-12`, the maximum relative loss spread is
+`9.6355e-7`, well below the 1% gate. Candidate and reference Hermitian errors
+are zero at stored precision.
+
+This result validates projected-Pi as a training-target candidate; it does not
+create or validate a new orbital basis. The next implementation is specified
+in `docs/superpowers/plans/2026-08-01-siab-pi-dpsi-joint.md`. Raw JSON,
+Markdown, plots, scheduler records, and input/code hashes are preserved under
+`results/`.

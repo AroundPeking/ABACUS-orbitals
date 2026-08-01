@@ -129,6 +129,13 @@ objective. Requiring every local spillage to decrease still does not constrain
 the Coulomb-weighted response spectrum or the H2-minus-H cancellation tightly
 enough to make the CP RPA binding improve.
 
+A later source-aware projected-Pi feasibility test uses these three held-out
+CP values only after computing its ranking. At every tested primitive-rank
+threshold it orders fixed-DZP joint, guarded, and initial from best to worst,
+which matches this independent SOS-RPA order. The metric definition, immutable
+inputs, and outputs are in `../projected_pi_loss/`; this correlation authorizes
+the separate `pi_dpsi_joint` design but is not itself a new basis result.
+
 The compact evidence bundle is under
 `/Users/ghj/同步空间/AITP_project/sternheimer_abacus/results/siab_h_low_frequency_guard_21440455_21440627_text`.
 The complete server campaign is under
