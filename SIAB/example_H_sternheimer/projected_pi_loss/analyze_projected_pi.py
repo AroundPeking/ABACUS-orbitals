@@ -6,7 +6,6 @@ import json
 import math
 import os
 from pathlib import Path
-import re
 import sys
 
 import torch
@@ -21,6 +20,7 @@ import util
 from IO.func_C import read_C_init
 from IO.read_sternheimer import read_sternheimer
 from IO.read_sternheimer_source import read_sternheimer_source
+from IO.read_zero_order_audit import read_zero_order_audit
 from projected_pi import NormalizedPhysicalFamilyProjectedPi
 from sternheimer_source_pair import pair_response_and_source
 
@@ -32,25 +32,6 @@ BASIS_NAMES = (
     "low_frequency_guarded",
 )
 FAMILY_NAMES = ("H", "H2")
-ZERO_ORDER_CHECKS = (
-    "abacus_finish_marker",
-    "charge_grid_exact",
-    "final_total_energy_le_1e_12_ha",
-    "nbands_exact",
-    "new_scf_complete",
-    "occupations_le_1e_14",
-    "occupied_eigenvalues_le_1e_12_ha",
-    "occupied_state_count_exact",
-    "old_scf_complete",
-    "wavefunction_grid_exact",
-)
-ZERO_ORDER_FILES = (
-    "new_eig_occ",
-    "new_running_scf_log",
-    "old_eig_occ",
-    "old_running_scf_log",
-)
-HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def parse_arguments(argv=None):
@@ -79,130 +60,6 @@ def _sha256(path):
 def _require_file(path, label):
     if not path.is_file():
         raise ValueError(f"{label} is not a readable file: {path}")
-
-
-def _finite_number(value, label):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{label} must be a finite number")
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError(f"{label} must be a finite number")
-    return value
-
-
-def _read_zero_order_audit(path, expected_case):
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"zero-order audit {expected_case} is not valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"zero-order audit {expected_case} must be an object")
-    if payload.get("format") != "sternheimer_siab_zero_order_identity_v1":
-        raise ValueError(f"zero-order audit {expected_case} has wrong format")
-    if payload.get("case") != expected_case:
-        raise ValueError(f"zero-order audit {expected_case} has wrong case")
-    if payload.get("pass") is not True:
-        raise ValueError(f"zero-order audit {expected_case} did not pass")
-
-    checks = payload.get("checks")
-    if not isinstance(checks, dict):
-        raise ValueError(f"zero-order audit {expected_case} checks are missing")
-    for key in ZERO_ORDER_CHECKS:
-        if checks.get(key) is not True:
-            raise ValueError(
-                f"zero-order audit {expected_case} check failed: {key}"
-            )
-
-    eig = payload.get("eig_occ_comparison")
-    running = payload.get("running_log_comparison")
-    if not isinstance(eig, dict) or not isinstance(running, dict):
-        raise ValueError(
-            f"zero-order audit {expected_case} comparisons are missing"
-        )
-    occupation_difference = _finite_number(
-        eig.get("max_occupation_abs_diff"),
-        f"zero-order audit {expected_case} occupation difference",
-    )
-    eigenvalue_difference = _finite_number(
-        eig.get("max_occupied_eigenvalue_abs_diff_ha"),
-        f"zero-order audit {expected_case} eigenvalue difference",
-    )
-    energy_difference = _finite_number(
-        running.get("final_total_energy_abs_diff_ha"),
-        f"zero-order audit {expected_case} energy difference",
-    )
-    if occupation_difference > 1.0e-14:
-        raise ValueError(
-            f"zero-order audit {expected_case} occupation difference exceeds 1e-14"
-        )
-    if eigenvalue_difference > 1.0e-12:
-        raise ValueError(
-            f"zero-order audit {expected_case} eigenvalue difference exceeds 1e-12 Ha"
-        )
-    if energy_difference > 1.0e-12:
-        raise ValueError(
-            f"zero-order audit {expected_case} energy difference exceeds 1e-12 Ha"
-        )
-    occupied_count = eig.get("occupied_state_count")
-    if type(occupied_count) is not int or occupied_count <= 0:
-        raise ValueError(
-            f"zero-order audit {expected_case} occupied_state_count is invalid"
-        )
-    charge_grid = running.get("charge_grid")
-    wavefunction_grid = running.get("wavefunction_grid")
-    for label, grid in (
-        ("charge_grid", charge_grid),
-        ("wavefunction_grid", wavefunction_grid),
-    ):
-        if (
-            not isinstance(grid, list)
-            or len(grid) != 3
-            or any(type(value) is not int or value <= 0 for value in grid)
-        ):
-            raise ValueError(
-                f"zero-order audit {expected_case} {label} is invalid"
-            )
-    if charge_grid != wavefunction_grid:
-        raise ValueError(
-            f"zero-order audit {expected_case} charge and wavefunction grids differ"
-        )
-
-    files = payload.get("files")
-    if not isinstance(files, dict):
-        raise ValueError(f"zero-order audit {expected_case} files are missing")
-    for key in ZERO_ORDER_FILES:
-        record = files.get(key)
-        if (
-            not isinstance(record, dict)
-            or not isinstance(record.get("path"), str)
-            or not HASH_PATTERN.fullmatch(str(record.get("sha256", "")))
-        ):
-            raise ValueError(
-                f"zero-order audit {expected_case} file record is invalid: {key}"
-            )
-
-    thresholds = payload.get("thresholds")
-    required_thresholds = {
-        "final_total_energy_abs_diff_ha": 1.0e-12,
-        "occupation_abs_diff": 1.0e-14,
-        "occupied_eigenvalue_abs_diff_ha": 1.0e-12,
-    }
-    if not isinstance(thresholds, dict):
-        raise ValueError(
-            f"zero-order audit {expected_case} thresholds are missing"
-        )
-    for key, maximum in required_thresholds.items():
-        value = _finite_number(
-            thresholds.get(key),
-            f"zero-order audit {expected_case} threshold {key}",
-        )
-        if value <= 0.0 or value > maximum:
-            raise ValueError(
-                f"zero-order audit {expected_case} threshold is too loose: {key}"
-            )
-    return payload
 
 
 def _coefficient_metadata():
@@ -467,8 +324,8 @@ def run(args):
         _require_file(path, label)
 
     audits = {
-        "H": _read_zero_order_audit(args.h_audit, "H"),
-        "H2": _read_zero_order_audit(args.h2_audit, "H2"),
+        "H": read_zero_order_audit(args.h_audit, "H"),
+        "H2": read_zero_order_audit(args.h2_audit, "H2"),
     }
     pairs = {}
     reader_warnings = {}
@@ -526,7 +383,7 @@ def run(args):
             "H2": input_sha256["H2_audit"],
         },
         "zero_order_audit_status": {
-            name: "pass" if audit["pass"] else "fail"
+            name: "pass" if audit.passed else "fail"
             for name, audit in audits.items()
         },
         "reader_warnings": reader_warnings,
