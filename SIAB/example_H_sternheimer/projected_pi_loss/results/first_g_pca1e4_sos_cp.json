@@ -1,0 +1,38 @@
+{
+  "auxiliary_basis_contract": {
+    "explicit_abfs_orbital": false,
+    "exx_pca_threshold": 0.0001
+  },
+  "basis_results": {
+    "3s2p2d1f": {
+      "auxiliary_dimensions": {"H": 182, "H2": 364, "H_ghost": 364},
+      "bands": {"H": 26, "H2": 52, "H_ghost": 52},
+      "bsse_kcal_mol": 0.9404724628844313,
+      "cp_correlation_kcal_mol": 23.281085925054985,
+      "cp_total_kcal_mol": 107.62640170861724,
+      "cp_zero_order_kcal_mol": 84.34531578356224,
+      "raw_total_kcal_mol": 108.56687417150167
+    },
+    "3s2p2d1f1g": {
+      "auxiliary_dimensions": {"H": 294, "H2": 588, "H_ghost": 588},
+      "bands": {"H": 35, "H2": 70, "H_ghost": 70},
+      "bsse_kcal_mol": 1.070331990266924,
+      "cp_correlation_kcal_mol": 23.540417392910516,
+      "cp_total_kcal_mol": 107.88847388347496,
+      "cp_zero_order_kcal_mol": 84.34805649056445,
+      "orbital_sha256": "6e5775670067ea42a36474a042b353c8bf630948b46beaa1cbb7190e5b668503",
+      "raw_total_kcal_mol": 108.9588058737419
+    }
+  },
+  "decision": "select_3s2p2d1f1g_then_add_second_f_residual_shell",
+  "format_version": 1,
+  "jobs": {"optimizer": "21474631", "sos": "21474637_[0-2]"},
+  "next_residual_ranking": {
+    "l3_second_mode_gain_per_ao": 0.004104505015750957,
+    "l3_second_mode_leading_eigenvalue": 0.028731535110256695,
+    "l4_second_mode_gain_per_ao": 0.0020672032602871925,
+    "l4_second_mode_leading_eigenvalue": 0.01860482934258473,
+    "selected_next_shell": "second_f"
+  },
+  "reference_binding_kcal_mol": 108.72
+}

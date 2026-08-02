@@ -338,12 +338,12 @@ cores and 110610 MB in 7:03. It stopped after 520 accepted steps. The total
 loss decreased from `0.0786841309` to `0.0733168681`; the final projected-Pi
 loss is `0.0612267667`, split into `0.0420124701` for H and `0.0192142965` for
 H2. The fixed `1s,2s,1p` coefficient differences are exactly zero. The final
-orbital has 22 AO per H and SHA256
+orbital has 26 AO per H and SHA256
 `4171a07bc752256aca4d64df02a8de773f367a3b9501678a4aa6c11118477249`.
 
 The independent PCA-1e-4 SOS/CP arrays `21474591_[0-2]` and
-`21474592_[0-2]` completed successfully. They used all `30/15/30` bands for
-the two-d H2/H/H+ghost control and all `44/22/44` bands for the f candidate.
+`21474592_[0-2]` completed successfully. They used all `38/19/38` bands for
+the two-d H2/H/H+ghost control and all `52/26/52` bands for the f candidate.
 The regenerated auxiliary dimensions are `222/111/222` and `364/182/364`,
 respectively. Thus the comparison fixes the PCA threshold, not the auxiliary
 dimension.
@@ -374,6 +374,33 @@ construction to any available angular channel. For the selected l=4 mode it
 starts from the final `3s2p2d1f` coefficients, appends exactly one g radial
 column, and produces SHA256
 `9e3773070807be301bb4b5beed8865a1204f57507316bcdac8c54b0eafe1a0e0`.
-The resulting `3s2p2d1f1g` candidate has 31 AO per H, keeps the same frozen
+The resulting `3s2p2d1f1g` candidate has 35 AO per H, keeps the same frozen
 DZP and `joint_dpsi_weight=0.02` contract, and remains unselected until its
 independent all-band PCA-1e-4 SOS/CP gate is complete.
+
+Production optimizer job `21474631` completed on one normal node with 30 CPU
+cores and 110610 MB in 6:00. It stopped after 352 accepted steps. Total loss
+decreased from `0.0709582372` to `0.0694982341`; projected-Pi changed from
+`0.0509582372` to `0.0513963414`, while the dpsi regularizer decreased from
+`0.0200000000` to `0.0181018927`. The fixed `1s,2s,1p` coefficient
+differences remain exactly zero. The final 35-AO-per-H orbital has SHA256
+`6e5775670067ea42a36474a042b353c8bf630948b46beaa1cbb7190e5b668503`.
+
+The independent array `21474637_[0-2]` used all `70/35/70` H2/H/H+ghost
+bands. Regenerated PCA-1e-4 auxiliary dimensions are `588/294/588`.
+
+| basis, regenerated PCA `1e-4` | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| projected-Pi joint `3s2p2d1f` | 108.566874 | 107.626402 | 0.940472 | 84.345316 | 23.281086 |
+| projected-Pi joint `3s2p2d1f1g` | 108.958806 | **107.888474** | 1.070332 | 84.348056 | 23.540417 |
+
+The first g shell raises CP binding by `0.262072` kcal/mol: zero order and
+RPA correlation contribute `0.002741` and `0.259331` kcal/mol. BSSE increases
+by `0.129860` kcal/mol, so the raw `108.958806` kcal/mol value is again not a
+convergence result. The CP gap to 108.72 kcal/mol is still `0.831526`
+kcal/mol, but the g shell passes and is retained.
+
+After reoptimization, the next f residual mode has eigenvalue `0.0287315351`
+and gain `0.0041045050` per AO. The next g residual mode has eigenvalue
+`0.0186048293` and gain `0.0020672033` per AO. The next greedy extension is
+therefore a second f radial shell, giving the frozen `3s2p2d2f1g` candidate.

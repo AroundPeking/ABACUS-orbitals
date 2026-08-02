@@ -11,9 +11,9 @@
         "H_ghost": 222
       },
       "bands": {
-        "H": 15,
-        "H2": 30,
-        "H_ghost": 30
+        "H": 19,
+        "H2": 38,
+        "H_ghost": 38
       },
       "bsse_kcal_mol": 0.7907478203507253,
       "cp_correlation_kcal_mol": 23.070107199723385,
@@ -28,9 +28,9 @@
         "H_ghost": 364
       },
       "bands": {
-        "H": 22,
-        "H2": 44,
-        "H_ghost": 44
+        "H": 26,
+        "H2": 52,
+        "H_ghost": 52
       },
       "bsse_kcal_mol": 0.9404724628844313,
       "cp_correlation_kcal_mol": 23.281085925054985,
