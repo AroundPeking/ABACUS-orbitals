@@ -19,14 +19,17 @@ LOSS_DEFAULTS = {
     "low_frequency_guard_tolerance": 0.0,
 }
 
-_LOSS_MODES = frozenset({"st_only", "st_constrained", "st_dpsi_joint"})
+_LOSS_MODES = frozenset(
+    {"st_only", "st_constrained", "st_dpsi_joint", "pi_dpsi_joint"}
+)
+_PROJECTED_PI_RANK_TOLERANCE = 1.0e-12
 
 
 def _validate_mode(mode):
     if not isinstance(mode, str) or mode not in _LOSS_MODES:
         raise ValueError(
             f"invalid loss mode {mode!r}; expected st_only, st_constrained, "
-            "or st_dpsi_joint"
+            "st_dpsi_joint, or pi_dpsi_joint"
         )
 
 
@@ -44,7 +47,7 @@ def _validate_real(name, value, minimum, strict=False):
 def normalize_loss_config(config):
     if not isinstance(config, dict):
         raise TypeError("loss config must be a dictionary")
-    allowed = set(LOSS_DEFAULTS) | {"mode"}
+    allowed = set(LOSS_DEFAULTS) | {"mode", "projected_pi_rank_tolerance"}
     unknown = set(config) - allowed
     if unknown:
         raise ValueError(f"unknown loss config keys: {sorted(unknown)!r}")
@@ -54,6 +57,15 @@ def normalize_loss_config(config):
     _validate_mode(config["mode"])
     normalized = dict(LOSS_DEFAULTS)
     normalized.update(config)
+    if normalized["mode"] == "pi_dpsi_joint":
+        normalized.setdefault(
+            "projected_pi_rank_tolerance",
+            _PROJECTED_PI_RANK_TOLERANCE,
+        )
+    elif "projected_pi_rank_tolerance" in config:
+        raise ValueError(
+            "projected_pi_rank_tolerance is valid only for pi_dpsi_joint"
+        )
     _validate_real("epsilon", normalized["epsilon"], 0.0, strict=True)
     _validate_real("condition_limit", normalized["condition_limit"], 1.0)
     _validate_real("tau_dft", normalized["tau_dft"], 0.0)
@@ -82,6 +94,25 @@ def normalize_loss_config(config):
         normalized["low_frequency_guard_tolerance"],
         0.0,
     )
+    if normalized["mode"] == "pi_dpsi_joint":
+        _validate_real(
+            "projected_pi_rank_tolerance",
+            normalized["projected_pi_rank_tolerance"],
+            0.0,
+            strict=True,
+        )
+        if normalized["projected_pi_rank_tolerance"] >= 1.0:
+            raise ValueError(
+                "projected_pi_rank_tolerance must be less than one"
+            )
+        for name in (
+            "low_frequency_guard_weight",
+            "low_frequency_guard_tolerance",
+            "radial_tail_weight",
+            "radial_tail_radius",
+        ):
+            if normalized[name] != 0.0:
+                raise ValueError(f"{name} must be zero for pi_dpsi_joint")
     if (
         normalized["radial_tail_weight"] > 0.0
         and normalized["radial_tail_radius"] <= 0.0
@@ -146,7 +177,10 @@ def compose_loss(
         raise ValueError(
             f"loss mode {mode!r} does not match config mode {normalized['mode']!r}"
         )
-    _validate_loss_tensor("sternheimer", st)
+    primary_name = (
+        "projected_pi" if mode == "pi_dpsi_joint" else "sternheimer"
+    )
+    _validate_loss_tensor(primary_name, st)
     _validate_loss_tensor("dft_origin", dft)
     _validate_loss_tensor("dft_dpsi", dpsi)
     if radial_tail is None:
@@ -209,7 +243,7 @@ def compose_loss(
         constraint_dpsi = normalized["constraint_penalty_dpsi"] * torch.relu(
             dpsi_ratio - 1.0 - normalized["tau_dpsi"]
         ).square()
-        if mode == "st_dpsi_joint":
+        if mode in ("st_dpsi_joint", "pi_dpsi_joint"):
             regularization_dpsi = normalized["joint_dpsi_weight"] * dpsi_ratio
         total = (
             st
@@ -223,13 +257,14 @@ def compose_loss(
     components = {
         "dft_origin": dft,
         "dft_dpsi": dpsi,
-        "sternheimer": st,
+        primary_name: st,
         "regularization_dpsi": regularization_dpsi,
         "constraint_dft": constraint_dft,
         "constraint_dpsi": constraint_dpsi,
-        "radial_tail": radial_tail,
-        "regularization_locality": regularization_locality,
     }
+    if mode != "pi_dpsi_joint":
+        components["radial_tail"] = radial_tail
+        components["regularization_locality"] = regularization_locality
     if guard_active:
         components["sternheimer_lowest_frequency"] = st_low_frequency
         components["regularization_low_frequency"] = (
@@ -241,7 +276,11 @@ def compose_loss(
 
 def selection_component(mode):
     _validate_mode(mode)
-    return "total" if mode == "st_dpsi_joint" else "sternheimer"
+    return (
+        "total"
+        if mode in ("st_dpsi_joint", "pi_dpsi_joint")
+        else "sternheimer"
+    )
 
 
 def constraints_satisfied(dft, dpsi, baseline, config):

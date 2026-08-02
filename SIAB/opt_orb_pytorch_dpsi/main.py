@@ -5,19 +5,28 @@ import IO.print_QSV
 import IO.func_C
 import IO.read_json
 import IO.read_sternheimer
+import IO.read_sternheimer_source
 import IO.print_orbital
 import IO.cal_weight
 import IO.change_info
 import orbital
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
 from attribute_dict import AttributeDict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
+from IO.read_zero_order_audit import read_zero_order_audit
 from optimization_loss import normalize_loss_config
+from projected_pi_optimization import (
+	NormalizedPhysicalFamilyProjectedPiOptimization,
+)
 from radial_locality import RadialSubspaceLocality
 from response_family_spillage import NormalizedPhysicalFamilySpillage
 from response_selection import ResponseTargetFamily
 from sternheimer_spillage import OrbitalColumn
+from sternheimer_source_pair import pair_response_and_source
 from sternheimer_targets import apply_target_element_aliases, parse_target_entries
 
 import numpy as np
@@ -31,6 +40,67 @@ import sys
 class LoadedSternheimerTargets:
 	entries: tuple
 	families: tuple
+	projected_pi_pairs: tuple = ()
+	zero_order_audits: tuple = ()
+
+
+def _sha256(path):
+	digest = hashlib.sha256()
+	with Path(path).open("rb") as stream:
+		for block in iter(lambda: stream.read(1024 * 1024), b""):
+			digest.update(block)
+	return digest.hexdigest()
+
+
+def _write_projected_pi_metadata(path, targets, data_transmit):
+	diagnostics = data_transmit["projected_pi_diagnostics"]
+	pairs = dict(targets.projected_pi_pairs)
+	audits = dict(targets.zero_order_audits)
+	entries = {entry.family: entry for entry in targets.entries}
+	inputs = {}
+	for family in ("H", "H2"):
+		entry = entries[family]
+		audit = audits[family]
+		pair = pairs[family]
+		inputs[family] = {
+			"response_path": str(entry.path),
+			"response_sha256": _sha256(entry.path),
+			"source_path": str(entry.source_path),
+			"source_sha256": _sha256(entry.source_path),
+			"zero_order_audit_path": str(entry.zero_order_audit_path),
+			"zero_order_audit_sha256": _sha256(
+				entry.zero_order_audit_path
+			),
+			"zero_order_identity": {
+				"passed": audit.passed,
+				"occupied_state_count": audit.occupied_state_count,
+				"grid": list(audit.grid),
+				"max_occupation_abs_diff": audit.max_occupation_abs_diff,
+				"max_occupied_eigenvalue_abs_diff_ha": (
+					audit.max_occupied_eigenvalue_abs_diff_ha
+				),
+				"final_total_energy_abs_diff_ha": (
+					audit.final_total_energy_abs_diff_ha
+				),
+				"source_file_sha256": dict(audit.source_file_sha256),
+			},
+			"response_provenance": pair.response.provenance,
+			"source_provenance": pair.source.provenance,
+			"provenance_warnings": list(pair.provenance_warnings),
+		}
+	payload = {
+		"schema_version": 1,
+		"mode": "pi_dpsi_joint",
+		"loss_components": data_transmit["loss_components"],
+		"projected_pi": diagnostics,
+		"inputs": inputs,
+		"uses_sos_energy": False,
+		"uses_ghost_family": False,
+	}
+	Path(path).write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + "\n",
+		encoding="utf-8",
+	)
 
 
 def _load_sternheimer_data(file_list, info_optimize):
@@ -39,6 +109,12 @@ def _load_sternheimer_data(file_list, info_optimize):
 		for stage in info_optimize
 		if "loss" in stage
 	]
+	modes = {stage["mode"] for stage in stages}
+	projected_pi_mode = "pi_dpsi_joint" in modes
+	if projected_pi_mode and modes != {"pi_dpsi_joint"}:
+		raise ValueError(
+			"cannot mix pi_dpsi_joint and legacy Sternheimer loss stages"
+		)
 	if "sternheimer" in file_list:
 		values = file_list["sternheimer"]
 		if not isinstance(values, (list, tuple)) or not values:
@@ -48,6 +124,64 @@ def _load_sternheimer_data(file_list, info_optimize):
 			raise ValueError(
 				"sternheimer data requires a Sternheimer loss stage"
 			)
+		if projected_pi_mode:
+			if any(entry.role == "ghost" for entry in entries):
+				raise ValueError(
+					"pi_dpsi_joint cannot consume ghost Sternheimer targets"
+				)
+			for entry in entries:
+				if entry.source_path is None:
+					raise ValueError(
+						f"pi_dpsi_joint target {entry.family} requires source_path"
+					)
+				if entry.zero_order_audit_path is None:
+					raise ValueError(
+						"pi_dpsi_joint target "
+						f"{entry.family} requires zero_order_audit_path"
+					)
+			family_names = [entry.family for entry in entries]
+			if (
+				len(entries) != 2
+				or len(set(family_names)) != 2
+				or set(family_names) != {"H", "H2"}
+			):
+				raise ValueError(
+					"pi_dpsi_joint requires exactly one H and one H2 target"
+				)
+
+			response_by_family = {}
+			pairs = []
+			audits = []
+			entry_by_family = {entry.family: entry for entry in entries}
+			for family in ("H", "H2"):
+				entry = entry_by_family[family]
+				response = apply_target_element_aliases(
+					IO.read_sternheimer.read_sternheimer(entry.path), entry
+				)
+				source = apply_target_element_aliases(
+					IO.read_sternheimer_source.read_sternheimer_source(
+						entry.source_path
+					),
+					entry,
+				)
+				pair = pair_response_and_source(response, source)
+				audit = read_zero_order_audit(
+					entry.zero_order_audit_path, family
+				)
+				response_by_family[family] = response
+				pairs.append((family, pair))
+				audits.append((family, audit))
+			families = tuple(
+				ResponseTargetFamily(name, (response_by_family[name],), "physical")
+				for name in ("H", "H2")
+			)
+			return LoadedSternheimerTargets(
+				entries,
+				families,
+				tuple(pairs),
+				tuple(audits),
+			), stages
+
 		physical = {}
 		for entry in entries:
 			if entry.role != "physical":
@@ -208,10 +342,17 @@ def main():
 		else None
 	)
 	has_legacy_origin = "origin" in file_list
+	uses_projected_pi = any(
+		stage["mode"] == "pi_dpsi_joint" for stage in sternheimer_stages
+	)
 	if not has_legacy_origin:
 		if sternheimer_data is None or not sternheimer_stages:
 			raise ValueError("SIAB input without origin requires Sternheimer data")
 		if any(stage["mode"] != "st_only" for stage in sternheimer_stages):
+			if uses_projected_pi:
+				raise ValueError(
+					"pi_dpsi_joint requires origin and dpsi data"
+				)
 			raise ValueError(
 				"st_constrained and st_dpsi_joint require origin and dpsi data"
 			)
@@ -221,11 +362,14 @@ def main():
 		info_stru = []
 		info_element = _sternheimer_info_element(sternheimer_data, info_true)
 	else:
-		if (
-			any(stage["mode"] == "st_dpsi_joint" for stage in sternheimer_stages)
-			and "linear" not in file_list
-		):
-			raise ValueError("st_dpsi_joint requires linear dpsi data")
+		joint_modes = {
+			stage["mode"]
+			for stage in sternheimer_stages
+			if stage["mode"] in ("st_dpsi_joint", "pi_dpsi_joint")
+		}
+		if joint_modes and "linear" not in file_list:
+			mode = sorted(joint_modes)[0]
+			raise ValueError(f"{mode} requires linear dpsi data")
 		weight = IO.cal_weight.cal_weight(
 			info_weight, info_V["same_band"], file_list["origin"]
 		)
@@ -307,6 +451,7 @@ def main():
 		)
 
 	sternheimer_spillage = None
+	projected_pi_objective = None
 	if sternheimer_targets is not None:
 		freeze_specs = info_C_init.get("freeze_orbitals")
 		if not freeze_specs:
@@ -316,13 +461,34 @@ def main():
 		condition_limit = max(
 			stage["condition_limit"] for stage in sternheimer_stages
 		)
-		sternheimer_spillage = NormalizedPhysicalFamilySpillage(
-			sternheimer_targets.families,
-			C,
-			C,
-			freeze_specs,
-			condition_limit=condition_limit,
-		)
+		if uses_projected_pi:
+			rank_tolerances = {
+				stage["projected_pi_rank_tolerance"]
+				for stage in sternheimer_stages
+			}
+			if len(rank_tolerances) != 1:
+				raise ValueError(
+					"all pi_dpsi_joint stages must use one "
+					"projected_pi_rank_tolerance"
+				)
+			projected_pi_objective = (
+				NormalizedPhysicalFamilyProjectedPiOptimization(
+					*sternheimer_targets.projected_pi_pairs,
+					relative_rank_tolerance=rank_tolerances.pop(),
+					condition_limit=condition_limit,
+				)
+			)
+			for family, pair in sternheimer_targets.projected_pi_pairs:
+				for warning in pair.provenance_warnings:
+					print(f"projected-Pi {family} warning: {warning}")
+		else:
+			sternheimer_spillage = NormalizedPhysicalFamilySpillage(
+				sternheimer_targets.families,
+				C,
+				C,
+				freeze_specs,
+				condition_limit=condition_limit,
+			)
 
 	opt_orb_conv = Opt_Orbital_Converge()
 	opt_orb_conv.set_info(file_list, info_optimize, info_stru, info_C_init, info_V)
@@ -331,6 +497,8 @@ def main():
 		opt_orb_conv.set_QSVI(QI, SI, VI_origin)
 	if sternheimer_spillage is not None:
 		opt_orb_conv.set_sternheimer_spillage(sternheimer_spillage)
+	if projected_pi_objective is not None:
+		opt_orb_conv.set_projected_pi_objective(projected_pi_objective)
 	if radial_locality is not None:
 		opt_orb_conv.set_radial_locality(radial_locality)
 	if "linear" in file_list.keys():
@@ -368,15 +536,32 @@ def main():
 
 	loss_diagnostics = None
 	if "loss_components" in data_transmit:
-		loss_diagnostics = {
-			"max_st_condition": data_transmit["max_st_condition"],
-			"max_locality_condition": data_transmit[
-				"max_locality_condition"
-			],
-		}
-		loss_diagnostics.update(
-			data_transmit.get("low_frequency_diagnostics", {})
-		)
+		if data_transmit.get("loss_mode") == "pi_dpsi_joint":
+			pi_diagnostics = data_transmit["projected_pi_diagnostics"]
+			loss_diagnostics = {
+				"max_projected_pi_condition": data_transmit[
+					"max_projected_pi_condition"
+				],
+				"lowest_projected_pi_frequency_ha": pi_diagnostics[
+					"lowest_frequency_ha"
+				],
+				"lowest_projected_pi_loss": pi_diagnostics[
+					"lowest_frequency_loss"
+				],
+				"projected_pi_rank_tolerance": pi_diagnostics[
+					"rank_tolerance"
+				],
+			}
+		else:
+			loss_diagnostics = {
+				"max_st_condition": data_transmit["max_st_condition"],
+				"max_locality_condition": data_transmit[
+					"max_locality_condition"
+				],
+			}
+			loss_diagnostics.update(
+				data_transmit.get("low_frequency_diagnostics", {})
+			)
 
 	IO.func_C.write_C(
 		"ORBITAL_RESULTS.txt",
@@ -386,6 +571,12 @@ def main():
 		mode=data_transmit.get("loss_mode"),
 		diagnostics=loss_diagnostics,
 	)
+	if data_transmit.get("loss_mode") == "pi_dpsi_joint":
+		_write_projected_pi_metadata(
+			"PROJECTED_PI_METADATA.json",
+			sternheimer_targets,
+			data_transmit,
+		)
 
 	print("Time (PyTorch):     %s\n"%(time.time()-time_start) )
 

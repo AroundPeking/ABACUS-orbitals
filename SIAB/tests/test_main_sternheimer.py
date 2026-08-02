@@ -65,6 +65,23 @@ GUARDED_DIAGNOSTICS = {
     "low_frequency_guard_weight": 10.0,
 }
 
+PROJECTED_PI_COMPONENTS = {
+    "dft_origin": 0.3,
+    "dft_dpsi": 0.2,
+    "projected_pi": 0.214,
+    "regularization_dpsi": 0.2,
+    "constraint_dft": 0.0,
+    "constraint_dpsi": 0.0,
+    "total": 0.414,
+}
+
+PROJECTED_PI_DIAGNOSTICS = {
+    "max_projected_pi_condition": 5562.0,
+    "lowest_projected_pi_frequency_ha": 0.0687,
+    "lowest_projected_pi_loss": 0.19,
+    "projected_pi_rank_tolerance": 1.0e-12,
+}
+
 
 @contextlib.contextmanager
 def working_directory(path):
@@ -379,6 +396,190 @@ class MainRoutingTest(unittest.TestCase):
         self.assertEqual(reader.call_count, 3)
         self.assertEqual(len(loaded.entries), 4)
 
+    @staticmethod
+    def projected_pi_targets():
+        return [
+            {
+                "path": "H_response.dat",
+                "source_path": "H_source.dat",
+                "zero_order_audit_path": "H_audit.json",
+                "family": "H",
+                "role": "physical",
+            },
+            {
+                "path": "H2_response.dat",
+                "source_path": "H2_source.dat",
+                "zero_order_audit_path": "H2_audit.json",
+                "family": "H2",
+                "role": "physical",
+            },
+        ]
+
+    def test_loads_one_strict_source_response_audit_pair_per_family(self):
+        targets = self.projected_pi_targets()
+        responses = ("H response", "H2 response")
+        sources = ("H source", "H2 source")
+        pairs = ("H pair", "H2 pair")
+        audits = ("H audit", "H2 audit")
+        with mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            side_effect=responses,
+        ) as response_reader, mock.patch.object(
+            siab_main.IO.read_sternheimer_source,
+            "read_sternheimer_source",
+            side_effect=sources,
+        ) as source_reader, mock.patch.object(
+            siab_main,
+            "apply_target_element_aliases",
+            side_effect=lambda data, entry: data,
+        ) as aliases, mock.patch.object(
+            siab_main,
+            "pair_response_and_source",
+            side_effect=pairs,
+        ) as pairer, mock.patch.object(
+            siab_main,
+            "read_zero_order_audit",
+            side_effect=audits,
+        ) as audit_reader:
+            loaded, stages = siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": {"mode": "pi_dpsi_joint"}}],
+            )
+
+        self.assertEqual(stages[0]["mode"], "pi_dpsi_joint")
+        self.assertEqual(loaded.projected_pi_pairs, tuple(zip(("H", "H2"), pairs)))
+        self.assertEqual(loaded.zero_order_audits, tuple(zip(("H", "H2"), audits)))
+        self.assertEqual(response_reader.call_count, 2)
+        self.assertEqual(source_reader.call_count, 2)
+        self.assertEqual(aliases.call_count, 4)
+        pairer.assert_has_calls(
+            [mock.call(responses[0], sources[0]), mock.call(responses[1], sources[1])]
+        )
+        audit_reader.assert_has_calls(
+            [
+                mock.call(Path("H_audit.json"), "H"),
+                mock.call(Path("H2_audit.json"), "H2"),
+            ]
+        )
+
+    def test_projected_pi_rejects_incomplete_or_nonphysical_targets(self):
+        targets = self.projected_pi_targets()
+        invalid_campaigns = (
+            ([{key: value for key, value in targets[0].items() if key != "source_path"}, targets[1]], "source_path"),
+            ([{key: value for key, value in targets[0].items() if key != "zero_order_audit_path"}, targets[1]], "zero_order_audit_path"),
+            ([targets[0]], "one H and one H2"),
+            ([targets[0], {**targets[1], "family": "H"}], "one H and one H2"),
+            ([targets[0], {**targets[1], "role": "ghost", "source_path": None, "zero_order_audit_path": None}], "ghost"),
+        )
+        for campaign, message in invalid_campaigns:
+            campaign = [
+                {key: value for key, value in target.items() if value is not None}
+                for target in campaign
+            ]
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    siab_main._load_sternheimer_data(
+                        {"sternheimer": campaign},
+                        [{"loss": {"mode": "pi_dpsi_joint"}}],
+                    )
+
+    def test_rejects_mixed_projected_pi_and_legacy_stages(self):
+        with self.assertRaisesRegex(ValueError, "cannot mix.*pi_dpsi_joint"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": self.projected_pi_targets()},
+                [
+                    {"loss": {"mode": "pi_dpsi_joint"}},
+                    {"loss": {"mode": "st_dpsi_joint"}},
+                ],
+            )
+
+    def test_projected_pi_json_records_full_training_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entries = []
+            pairs = []
+            audits = []
+            for family in ("H", "H2"):
+                response = root / f"{family}_response.dat"
+                source = root / f"{family}_source.dat"
+                audit_path = root / f"{family}_audit.json"
+                response.write_text(f"{family} response\n")
+                source.write_text(f"{family} source\n")
+                audit_path.write_text(f"{family} audit\n")
+                entries.append(
+                    types.SimpleNamespace(
+                        family=family,
+                        path=response,
+                        source_path=source,
+                        zero_order_audit_path=audit_path,
+                    )
+                )
+                pairs.append(
+                    (
+                        family,
+                        types.SimpleNamespace(
+                            response=types.SimpleNamespace(
+                                provenance={"kernel": "full_coulomb"}
+                            ),
+                            source=types.SimpleNamespace(
+                                provenance={"kernel": "full_coulomb"}
+                            ),
+                            provenance_warnings=(),
+                        ),
+                    )
+                )
+                audits.append(
+                    (
+                        family,
+                        types.SimpleNamespace(
+                            passed=True,
+                            occupied_state_count=1,
+                            grid=(180, 180, 180),
+                            max_occupation_abs_diff=0.0,
+                            max_occupied_eigenvalue_abs_diff_ha=0.0,
+                            final_total_energy_abs_diff_ha=0.0,
+                            source_file_sha256=(("old_eig_occ", "1" * 64),),
+                        ),
+                    )
+                )
+            targets = siab_main.LoadedSternheimerTargets(
+                tuple(entries), (), tuple(pairs), tuple(audits)
+            )
+            output = root / "PROJECTED_PI_METADATA.json"
+            diagnostics = {
+                "frequency_ha": [0.1, 1.0],
+                "frequency_loss": [0.2, 0.1],
+                "lowest_frequency_ha": 0.1,
+                "lowest_frequency_loss": 0.2,
+                "max_condition": 10.0,
+                "rank_tolerance": 1.0e-12,
+                "family_names": ["H", "H2"],
+                "families": {"H": {"loss": 0.1}, "H2": {"loss": 0.11}},
+            }
+
+            siab_main._write_projected_pi_metadata(
+                output,
+                targets,
+                {
+                    "loss_components": PROJECTED_PI_COMPONENTS,
+                    "projected_pi_diagnostics": diagnostics,
+                },
+            )
+
+            payload = json.loads(output.read_text())
+            self.assertEqual(payload["mode"], "pi_dpsi_joint")
+            self.assertEqual(payload["projected_pi"], diagnostics)
+            self.assertFalse(payload["uses_sos_energy"])
+            self.assertFalse(payload["uses_ghost_family"])
+            for family in ("H", "H2"):
+                record = payload["inputs"][family]
+                self.assertEqual(len(record["response_sha256"]), 64)
+                self.assertEqual(len(record["source_sha256"]), 64)
+                self.assertEqual(len(record["zero_order_audit_sha256"]), 64)
+                self.assertEqual(record["response_provenance"]["kernel"], "full_coulomb")
+                self.assertTrue(record["zero_order_identity"]["passed"])
+
     def test_rejects_targets_without_a_physical_family(self):
         target = {
             "path": "ghost.dat",
@@ -507,6 +708,38 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
             )
             positions = [text.index(line) for line in expected_lines]
             self.assertEqual(positions, sorted(positions))
+
+    def test_projected_pi_metadata_has_separate_explicit_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "projected_pi.dat"
+            write_C(
+                output,
+                self.c,
+                PROJECTED_PI_COMPONENTS["total"],
+                loss_components=PROJECTED_PI_COMPONENTS,
+                mode="pi_dpsi_joint",
+                diagnostics=PROJECTED_PI_DIAGNOSTICS,
+            )
+            text = output.read_text()
+
+            expected_lines = (
+                "Mode = pi_dpsi_joint",
+                "Projected Pi loss = 2.1400000000e-01",
+                "Total loss = 4.1400000000e-01",
+                "Lowest projected Pi frequency (Ha) = 6.8700000000e-02",
+                "Lowest-frequency projected Pi loss = 1.9000000000e-01",
+                "Maximum projected Pi overlap condition = 5.5620000000e+03",
+                "Projected Pi rank tolerance = 1.0000000000e-12",
+            )
+            positions = [text.index(line) for line in expected_lines]
+            self.assertEqual(positions, sorted(positions))
+            self.assertNotIn("Sternheimer loss =", text)
+
+            parsed, indices = read_C_init(
+                output, {"H": info(Nl=1, Ne=2, Nu=[2])}
+            )
+            torch.testing.assert_close(parsed["H"][0], self.c["H"][0])
+            self.assertEqual(indices, {("H", 0, 0), ("H", 0, 1)})
 
     def test_rejects_partial_or_mismatched_guarded_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -19,6 +19,16 @@ _LOSS_COMPONENTS = (
 	("total", "Total loss"),
 )
 
+_PROJECTED_PI_LOSS_COMPONENTS = (
+	("dft_origin", "DFT origin loss"),
+	("dft_dpsi", "DFT dpsi loss"),
+	("projected_pi", "Projected Pi loss"),
+	("regularization_dpsi", "dpsi regularization loss"),
+	("constraint_dft", "DFT constraint loss"),
+	("constraint_dpsi", "dpsi constraint loss"),
+	("total", "Total loss"),
+)
+
 _GUARDED_LOSS_COMPONENTS = (
 	("sternheimer_lowest_frequency", "Lowest-frequency ST loss"),
 	(
@@ -40,8 +50,20 @@ _GUARDED_LOSS_DIAGNOSTICS = (
 	("low_frequency_guard_weight", "Low-frequency guard weight"),
 )
 
+_PROJECTED_PI_LOSS_DIAGNOSTICS = (
+	("lowest_projected_pi_frequency_ha", "Lowest projected Pi frequency (Ha)"),
+	("lowest_projected_pi_loss", "Lowest-frequency projected Pi loss"),
+	(
+		"max_projected_pi_condition",
+		"Maximum projected Pi overlap condition",
+	),
+	("projected_pi_rank_tolerance", "Projected Pi rank tolerance"),
+)
 
-def _component_schema(guarded):
+
+def _component_schema(guarded, mode=None):
+	if mode == "pi_dpsi_joint":
+		return _PROJECTED_PI_LOSS_COMPONENTS
 	if not guarded:
 		return _LOSS_COMPONENTS
 	return (
@@ -62,14 +84,33 @@ def _validate_loss_metadata(loss_components, mode):
 		return None
 	if loss_components is None or mode is None:
 		raise ValueError("mode and loss_components must be supplied together")
-	if mode not in ("st_only", "st_constrained", "st_dpsi_joint"):
+	if mode not in (
+		"st_only",
+		"st_constrained",
+		"st_dpsi_joint",
+		"pi_dpsi_joint",
+	):
 		raise ValueError(f"invalid mode {mode!r}")
 	if not isinstance(loss_components, Mapping):
 		raise TypeError("loss_components must be a mapping")
-	base = {name for name, _ in _LOSS_COMPONENTS}
+	base = {
+		name
+		for name, _ in (
+			_PROJECTED_PI_LOSS_COMPONENTS
+			if mode == "pi_dpsi_joint"
+			else _LOSS_COMPONENTS
+		)
+	}
 	guard = {name for name, _ in _GUARDED_LOSS_COMPONENTS}
 	provided = set(loss_components)
-	if provided == base:
+	if mode == "pi_dpsi_joint" and provided == base:
+		guarded = False
+	elif mode == "pi_dpsi_joint":
+		raise ValueError(
+			"pi_dpsi_joint loss_components must contain exactly "
+			+ ", ".join(name for name, _ in _PROJECTED_PI_LOSS_COMPONENTS)
+		)
+	elif provided == base:
 		guarded = False
 	elif provided == base | guard:
 		guarded = True
@@ -85,7 +126,7 @@ def _validate_loss_metadata(loss_components, mode):
 		)
 
 	validated = {}
-	for name, _ in _component_schema(guarded):
+	for name, _ in _component_schema(guarded, mode):
 		value = loss_components[name]
 		if (
 			isinstance(value, bool)
@@ -98,11 +139,37 @@ def _validate_loss_metadata(loss_components, mode):
 	return validated
 
 
-def _validate_loss_diagnostics(diagnostics):
+def _validate_loss_diagnostics(diagnostics, mode):
 	if diagnostics is None:
 		return None
 	if not isinstance(diagnostics, Mapping):
 		raise TypeError("loss diagnostics must be a mapping")
+	if mode == "pi_dpsi_joint":
+		expected = {name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS}
+		if set(diagnostics) != expected:
+			raise ValueError(
+				"pi_dpsi_joint loss diagnostics must contain exactly "
+				+ ", ".join(
+					name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS
+				)
+			)
+		validated = {}
+		for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS:
+			value = diagnostics[name]
+			minimum = 1.0 if name == "max_projected_pi_condition" else 0.0
+			if (
+				isinstance(value, bool)
+				or not isinstance(value, numbers.Real)
+				or not math.isfinite(value)
+				or value < minimum
+				or (name == "projected_pi_rank_tolerance" and value >= 1.0)
+			):
+				raise ValueError(
+					f"{name} diagnostic is outside the valid range"
+				)
+			validated[name] = float(value)
+		return validated
+
 	base = {name for name, _ in _LOSS_DIAGNOSTICS}
 	guard = {name for name, _ in _GUARDED_LOSS_DIAGNOSTICS}
 	provided = set(diagnostics)
@@ -280,7 +347,7 @@ def write_C(
 	diagnostics=None,
 ):
 	loss_components = _validate_loss_metadata(loss_components, mode)
-	diagnostics = _validate_loss_diagnostics(diagnostics)
+	diagnostics = _validate_loss_diagnostics(diagnostics, mode)
 	if diagnostics is not None and loss_components is None:
 		raise ValueError("loss diagnostics require loss_components")
 	guarded_components = (
@@ -317,12 +384,15 @@ def write_C(
 		print("Left spillage = %.10e"%Spillage, file=file)
 		if loss_components is not None:
 			print(f"Mode = {mode}", file=file)
-			for name, label in _component_schema(guarded_components):
+			for name, label in _component_schema(guarded_components, mode):
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
 			if diagnostics is not None:
-				diagnostic_schema = _LOSS_DIAGNOSTICS
-				if guarded_diagnostics:
-					diagnostic_schema += _GUARDED_LOSS_DIAGNOSTICS
+				if mode == "pi_dpsi_joint":
+					diagnostic_schema = _PROJECTED_PI_LOSS_DIAGNOSTICS
+				else:
+					diagnostic_schema = _LOSS_DIAGNOSTICS
+					if guarded_diagnostics:
+						diagnostic_schema += _GUARDED_LOSS_DIAGNOSTICS
 				for name, label in diagnostic_schema:
 					print(f"{label} = {diagnostics[name]:.10e}", file=file)
 		print("</Mkb>", file=file)

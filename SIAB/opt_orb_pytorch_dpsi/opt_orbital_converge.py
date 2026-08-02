@@ -11,11 +11,41 @@ from optimization_loss import (
 	selection_component,
 )
 from radial_locality import RadialLocalityResult
+from projected_pi_optimization import ProjectedPiOptimizationResult
 from sternheimer_spillage import SternheimerLossResult
 
 import math
 import torch
 import numpy as np
+
+
+def _projected_pi_diagnostics(result, rank_tolerance):
+	families = {}
+	for name, family in result.family_results.items():
+		record = {}
+		if hasattr(family, "loss"):
+			record["loss"] = float(family.loss)
+		if hasattr(family, "reference_rank"):
+			record["reference_rank"] = int(family.reference_rank)
+		if hasattr(family, "max_candidate_condition"):
+			record["max_candidate_condition"] = float(
+				family.max_candidate_condition
+			)
+		if hasattr(family, "frequency_loss"):
+			record["frequency_loss"] = [
+				float(value) for value in family.frequency_loss
+			]
+		families[name] = record
+	return {
+		"frequency_ha": [float(value) for value in result.frequency_ha],
+		"frequency_loss": [float(value) for value in result.frequency_loss],
+		"lowest_frequency_ha": float(result.lowest_frequency_ha),
+		"lowest_frequency_loss": float(result.lowest_frequency_loss),
+		"max_condition": float(result.max_condition),
+		"rank_tolerance": float(rank_tolerance),
+		"family_names": list(result.family_results),
+		"families": families,
+	}
 
 
 class Opt_Orbital_Converge:
@@ -47,6 +77,9 @@ class Opt_Orbital_Converge:
 
 	def set_sternheimer_spillage(self, sternheimer_spillage):
 		self.sternheimer_spillage = sternheimer_spillage
+
+	def set_projected_pi_objective(self, projected_pi_objective):
+		self.projected_pi_objective = projected_pi_objective
 
 	def set_radial_locality(self, radial_locality):
 		self.radial_locality = radial_locality
@@ -98,14 +131,22 @@ class Opt_Orbital_Converge:
 				)
 
 		if new_stage_indices:
-			evaluator = getattr(self, "sternheimer_spillage", None)
-			if not callable(getattr(evaluator, "evaluate", None)):
-				raise ValueError(
-					"Sternheimer loss stage requires a Sternheimer evaluator; "
-					"call set_sternheimer_spillage first"
-				)
 			for stage_index in new_stage_indices:
 				loss_config = loss_configs[stage_index]
+				if loss_config["mode"] == "pi_dpsi_joint":
+					evaluator = getattr(self, "projected_pi_objective", None)
+					if not callable(getattr(evaluator, "evaluate", None)):
+						raise ValueError(
+							"pi_dpsi_joint requires a projected-Pi evaluator; "
+							"call set_projected_pi_objective first"
+						)
+				else:
+					evaluator = getattr(self, "sternheimer_spillage", None)
+					if not callable(getattr(evaluator, "evaluate", None)):
+						raise ValueError(
+							"Sternheimer loss stage requires a Sternheimer "
+							"evaluator; call set_sternheimer_spillage first"
+						)
 				if loss_config["radial_tail_radius"] > 0.0:
 					locality = getattr(self, "radial_locality", None)
 					if not callable(getattr(locality, "evaluate", None)):
@@ -121,7 +162,8 @@ class Opt_Orbital_Converge:
 				else:
 					if loss_config["mode"] != "st_only":
 						raise ValueError(
-							"st_constrained and st_dpsi_joint require legacy "
+							"st_constrained, st_dpsi_joint, and pi_dpsi_joint "
+							"require legacy "
 							"DFT and dpsi data"
 						)
 					zero = next(iter(C_initial.values()))[0].sum() * 0.0
@@ -157,10 +199,21 @@ class Opt_Orbital_Converge:
 			"regularization_locality", "max_st_condition",
 			"max_locality_condition", "accepted",
 		)
+		projected_pi_header = (
+			"istep_big", "istep_small", "istep_all", "dft_origin",
+			"dft_dpsi", "projected_pi",
+			"projected_pi_lowest_frequency", "regularization_dpsi",
+			"constraint_dft", "constraint_dpsi", "total",
+			"max_projected_pi_condition", "accepted",
+		)
 		legacy_header = ("istep_big", "istep_small", "istep_all", "Spillage")
 
 		for stage_index, info_opt in enumerate(self.info_optimize):
 			new_loss_stage = stage_index in loss_configs
+			pi_mode = (
+				new_loss_stage
+				and loss_configs[stage_index]["mode"] == "pi_dpsi_joint"
+			)
 			guard_active = (
 				new_loss_stage
 				and loss_configs[stage_index]["low_frequency_guard_weight"] > 0.0
@@ -169,7 +222,11 @@ class Opt_Orbital_Converge:
 			print( "istep", "Spillage", sep="\t", file=files[0], flush=True )
 			if new_loss_stage:
 				print(
-					*(guarded_header if guard_active else new_header),
+					*(
+						projected_pi_header
+						if pi_mode
+						else guarded_header if guard_active else new_header
+					),
 					sep="\t",
 					file=files[1],
 				)
@@ -186,13 +243,29 @@ class Opt_Orbital_Converge:
 				loss_baseline = loss_baselines[stage_index]
 
 				def calculate_components():
-					st_result = self.sternheimer_spillage.evaluate(C)
-					if not isinstance(st_result, SternheimerLossResult):
-						raise TypeError(
-							"Sternheimer evaluator must return SternheimerLossResult"
-						)
+					if pi_mode:
+						st_result = self.projected_pi_objective.evaluate(C)
+						if not isinstance(
+							st_result, ProjectedPiOptimizationResult
+						):
+							raise TypeError(
+								"projected-Pi evaluator must return "
+								"ProjectedPiOptimizationResult"
+							)
+					else:
+						st_result = self.sternheimer_spillage.evaluate(C)
+						if not isinstance(st_result, SternheimerLossResult):
+							raise TypeError(
+								"Sternheimer evaluator must return "
+								"SternheimerLossResult"
+							)
 					if not math.isfinite(st_result.max_condition):
-						raise ValueError("max_st_condition must be finite")
+						label = (
+							"max_projected_pi_condition"
+							if pi_mode
+							else "max_st_condition"
+						)
+						raise ValueError(f"{label} must be finite")
 					if spillage is None:
 						zero = torch.zeros_like(st_result.loss)
 						legacy_components = {
@@ -356,9 +429,13 @@ class Opt_Orbital_Converge:
 						data_transmit["istep_all"],
 						components["dft_origin"].item(),
 						components["dft_dpsi"].item(),
-						components["sternheimer"].item(),
+						components[
+							"projected_pi" if pi_mode else "sternheimer"
+						].item(),
 					]
-					if guard_active:
+					if pi_mode:
+						row.append(st_result.lowest_frequency_loss.item())
+					elif guard_active:
 						row.extend(
 							[
 								components[
@@ -375,13 +452,22 @@ class Opt_Orbital_Converge:
 							components["constraint_dft"].item(),
 							components["constraint_dpsi"].item(),
 							components["total"].item(),
-							components["radial_tail"].item(),
-							components["regularization_locality"].item(),
-							st_result.max_condition,
-							locality_result.max_condition,
-							str(accepted).lower(),
 						]
 					)
+					if pi_mode:
+						row.extend(
+							[st_result.max_condition, str(accepted).lower()]
+						)
+					else:
+						row.extend(
+							[
+								components["radial_tail"].item(),
+								components["regularization_locality"].item(),
+								st_result.max_condition,
+								locality_result.max_condition,
+								str(accepted).lower(),
+							]
+						)
 					print(*row, sep="\t", file=files[1])
 					data_transmit["istep_all"] += 1
 					data_transmit.update(
@@ -406,11 +492,26 @@ class Opt_Orbital_Converge:
 							"loss_baseline": {
 								name: value.item() for name, value in loss_baseline.items()
 							},
-							"max_st_condition": st_result.max_condition,
-							"max_locality_condition": (
-								locality_result.max_condition
-							),
 						}
+						if pi_mode:
+							best_accepted["max_projected_pi_condition"] = (
+								st_result.max_condition
+							)
+							best_accepted["projected_pi_diagnostics"] = (
+								_projected_pi_diagnostics(
+									st_result,
+									loss_config[
+										"projected_pi_rank_tolerance"
+									],
+								)
+							)
+						else:
+							best_accepted["max_st_condition"] = (
+								st_result.max_condition
+							)
+							best_accepted["max_locality_condition"] = (
+								locality_result.max_condition
+							)
 						if guard_active:
 							best_accepted["low_frequency_diagnostics"] = {
 								"lowest_st_frequency_ha": (

@@ -21,6 +21,7 @@ from optimization_loss import (
 )
 from opt_orbital_converge import Opt_Orbital_Converge
 from opt_orbital_spillage import Opt_Orbital_Spillage
+from projected_pi_optimization import ProjectedPiOptimizationResult
 from radial_locality import RadialLocalityResult
 from sternheimer_spillage import SternheimerLossResult
 
@@ -173,6 +174,25 @@ class QuadraticSternheimer:
         )
 
 
+class QuadraticProjectedPi:
+    def __init__(self, max_condition=2.0):
+        self.max_condition = max_condition
+
+    def evaluate(self, c):
+        target = torch.tensor(
+            [[0.75, 0.5], [0.25, 0.5]], dtype=c["H"][0].dtype
+        )
+        loss = torch.sum((c["H"][0] - target) ** 2)
+        frequency_loss = torch.stack((loss, 1.5 * loss))
+        return ProjectedPiOptimizationResult(
+            loss=loss,
+            max_condition=self.max_condition,
+            frequency_ha=torch.tensor([0.1, 1.0], dtype=loss.dtype),
+            frequency_loss=frequency_loss,
+            family_results={"H": object(), "H2": object()},
+        )
+
+
 class SingleOrbitalSternheimer:
     def evaluate(self, c):
         target = torch.tensor([[0.0], [1.0]], dtype=c["H"][0].dtype)
@@ -315,6 +335,61 @@ class FreezeOrbitalsTest(unittest.TestCase):
 
 
 class OptimizationLossTest(unittest.TestCase):
+    def test_pi_dpsi_joint_config_is_mode_specific_and_strict(self):
+        for old_mode in ("st_only", "st_constrained", "st_dpsi_joint"):
+            with self.subTest(old_mode=old_mode):
+                self.assertEqual(
+                    normalize_loss_config({"mode": old_mode}),
+                    {**LOSS_DEFAULTS, "mode": old_mode},
+                )
+
+        config = normalize_loss_config({"mode": "pi_dpsi_joint"})
+        self.assertEqual(config["projected_pi_rank_tolerance"], 1.0e-12)
+        for value in (0.0, 1.0, -1.0, float("nan"), True):
+            with self.subTest(rank_tolerance=value):
+                with self.assertRaises((TypeError, ValueError)):
+                    normalize_loss_config(
+                        {
+                            "mode": "pi_dpsi_joint",
+                            "projected_pi_rank_tolerance": value,
+                        }
+                    )
+        for field, value in (
+            ("low_frequency_guard_weight", 1.0),
+            ("low_frequency_guard_tolerance", 0.1),
+            ("radial_tail_weight", 1.0),
+            ("radial_tail_radius", 4.0),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field):
+                    normalize_loss_config(
+                        {"mode": "pi_dpsi_joint", field: value}
+                    )
+
+    def test_pi_dpsi_joint_uses_projected_pi_as_primary(self):
+        projected_pi = torch.tensor(
+            0.3, dtype=torch.float64, requires_grad=True
+        )
+        dft = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+        dpsi = torch.tensor(0.9, dtype=torch.float64, requires_grad=True)
+        config = normalize_loss_config({"mode": "pi_dpsi_joint"})
+
+        result = compose_loss(
+            "pi_dpsi_joint",
+            projected_pi,
+            dft,
+            dpsi,
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            config,
+        )
+        result["total"].backward()
+
+        self.assertNotIn("sternheimer", result)
+        self.assertIs(result["projected_pi"], projected_pi)
+        self.assertAlmostEqual(result["regularization_dpsi"].item(), 0.9)
+        self.assertAlmostEqual(result["total"].item(), 1.2)
+        self.assertAlmostEqual(projected_pi.grad.item(), 1.0)
+
     def test_low_frequency_guard_value_and_gradient(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
         low = torch.tensor(0.27, dtype=torch.float64, requires_grad=True)
@@ -543,6 +618,7 @@ class OptimizationLossTest(unittest.TestCase):
         self.assertEqual(selection_component("st_only"), "sternheimer")
         self.assertEqual(selection_component("st_constrained"), "sternheimer")
         self.assertEqual(selection_component("st_dpsi_joint"), "total")
+        self.assertEqual(selection_component("pi_dpsi_joint"), "total")
 
     def test_constrained_hinges_and_gradients(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)
@@ -730,6 +806,36 @@ class ConvergeIntegrationTest(unittest.TestCase):
         self.assertEqual(result["Spillage"], result["loss_components"]["total"])
         self.assertEqual(result["max_st_condition"], 2.0)
         self.assertEqual(result["max_locality_condition"], 1.0)
+
+    def test_pi_dpsi_joint_uses_objective_specific_schema(self):
+        converge, c = make_converge_case(
+            "pi_dpsi_joint",
+            max_steps=1,
+            freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+        )
+        evaluator = QuadraticProjectedPi()
+        converge.set_projected_pi_objective(evaluator)
+        files = self.files()
+
+        result = converge.cal_converge(c, files)
+
+        expected_header = (
+            "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
+            "projected_pi\tprojected_pi_lowest_frequency\t"
+            "regularization_dpsi\tconstraint_dft\tconstraint_dpsi\t"
+            "total\tmax_projected_pi_condition\taccepted"
+        )
+        self.assertEqual(files[1].getvalue().splitlines()[0], expected_header)
+        self.assertEqual(result["loss_mode"], "pi_dpsi_joint")
+        self.assertIn("projected_pi", result["loss_components"])
+        self.assertNotIn("sternheimer", result["loss_components"])
+        self.assertEqual(result["max_projected_pi_condition"], 2.0)
+        self.assertEqual(
+            result["projected_pi_diagnostics"]["frequency_ha"], [0.1, 1.0]
+        )
+        self.assertEqual(
+            result["projected_pi_diagnostics"]["family_names"], ["H", "H2"]
+        )
 
     def test_low_frequency_guard_rejects_regressed_candidate(self):
         converge, c = make_converge_case("st_only", max_steps=1)
