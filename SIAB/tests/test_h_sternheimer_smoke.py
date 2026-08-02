@@ -248,6 +248,44 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
                 self.assertIn(token, script)
         self.assertNotIn("H2_sternheimer_matrix", script)
 
+    def test_first_g_input_appends_only_the_l4_residual_shell(self):
+        value = json.loads(
+            (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p2d1f1g").read_text()
+        )
+
+        self.assertEqual(value["seed"], 20260718)
+        self.assertEqual(value["element"]["Nu"], {"H": [3, 2, 2, 1, 1]})
+        self.assertEqual(value["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(
+            value["C_init_info"]["C_init_file"],
+            "../inputs/projected_pi_joint_3s2p2d1f_plus_l4_residual_1g_ORBITAL_RESULTS.txt",
+        )
+        self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
+        self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 0.02)
+        self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
+        self.assertEqual(
+            value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
+        )
+
+    def test_generic_residual_seed_adds_one_ranked_angular_shell(self):
+        script_path = PROJECTED_PI_LOSS / "build_residual_shell_seed.py"
+        self.assertTrue(script_path.is_file())
+        script = script_path.read_text()
+
+        for token in (
+            "radial_residual_spectrum_many",
+            'parser.add_argument("--angular-momentum"',
+            'parser.add_argument("--expected-nu"',
+            "expected_nu[angular_momentum] += 1",
+            "2 * angular_momentum + 1",
+            '"gain_per_added_ao"',
+            '"source_family": "H"',
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, script)
+        self.assertNotIn("H2_sternheimer_matrix", script)
+
     def test_optimizer_slurm_uses_full_normal_node_and_hash_preflight(self):
         script = (PROJECTED_PI_LOSS / "run_pi_dpsi_joint.slurm").read_text()
         required = (

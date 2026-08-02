@@ -368,3 +368,12 @@ The latter is 5.11% larger, so the next greedy candidate is `3s2p2d1f1g`, not
 a second f shell. The Cartesian-grid magnetic-overlap deviation for l=4 is
 `1.23551e-4`; the seed construction therefore uses the predeclared `2e-4`
 uniform-grid tolerance while leaving the physical PCA threshold at `1e-4`.
+
+`build_residual_shell_seed.py` generalizes the deterministic atomic residual
+construction to any available angular channel. For the selected l=4 mode it
+starts from the final `3s2p2d1f` coefficients, appends exactly one g radial
+column, and produces SHA256
+`9e3773070807be301bb4b5beed8865a1204f57507316bcdac8c54b0eafe1a0e0`.
+The resulting `3s2p2d1f1g` candidate has 31 AO per H, keeps the same frozen
+DZP and `joint_dpsi_weight=0.02` contract, and remains unselected until its
+independent all-band PCA-1e-4 SOS/CP gate is complete.
