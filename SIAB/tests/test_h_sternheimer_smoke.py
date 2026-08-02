@@ -112,6 +112,44 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
         self.assertEqual(value["optimize"][0]["kwargs"], {"lr": 0.003})
         self.assertEqual(value["optimize"][0]["max_steps"], 3000)
 
+    def test_one_d_input_expands_only_the_response_space(self):
+        value = json.loads(
+            (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p1d").read_text()
+        )
+
+        self.assertEqual(value["seed"], 20260718)
+        self.assertEqual(value["element"]["Nu"], {"H": [3, 2, 1, 0, 0]})
+        self.assertEqual(value["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(value["radial"], {
+            "Rcut": 8,
+            "dr": 0.01,
+            "Ecut": 100,
+            "smearing_sigma": 0.1,
+        })
+        self.assertEqual(
+            value["C_init_info"]["C_init_file"],
+            "../inputs/projected_pi_joint_3s2p_plus_smooth_1d_ORBITAL_RESULTS.txt",
+        )
+        self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
+        self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 1.0)
+        self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
+        self.assertEqual(
+            value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
+        )
+        for paths in (
+            value["file_list"]["origin"],
+            value["file_list"]["linear"][0],
+        ):
+            self.assertEqual(len(paths), 3)
+            self.assertTrue(all("../inputs/l2/" in path for path in paths))
+        self.assertEqual(
+            value["file_list"]["sternheimer"],
+            json.loads(
+                (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint").read_text()
+            )["file_list"]["sternheimer"],
+        )
+
     def test_optimizer_slurm_uses_full_normal_node_and_hash_preflight(self):
         script = (PROJECTED_PI_LOSS / "run_pi_dpsi_joint.slurm").read_text()
         required = (
