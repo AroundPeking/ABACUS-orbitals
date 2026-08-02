@@ -202,6 +202,52 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             )["file_list"]["sternheimer"],
         )
 
+    def test_first_f_input_appends_only_the_l3_residual_shell(self):
+        value = json.loads(
+            (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p2d1f").read_text()
+        )
+
+        self.assertEqual(value["seed"], 20260718)
+        self.assertEqual(value["element"]["Nu"], {"H": [3, 2, 2, 1, 0]})
+        self.assertEqual(value["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(
+            value["C_init_info"]["C_init_file"],
+            "../inputs/projected_pi_joint_3s2p2d_plus_l3_residual_1f_ORBITAL_RESULTS.txt",
+        )
+        self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
+        self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 0.02)
+        self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
+        self.assertEqual(
+            value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
+        )
+        self.assertEqual(
+            value["file_list"]["sternheimer"],
+            json.loads(
+                (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p2d").read_text()
+            )["file_list"]["sternheimer"],
+        )
+
+    def test_first_f_seed_comes_from_the_atomic_l3_residual_spectrum(self):
+        script_path = PROJECTED_PI_LOSS / "build_l3_residual_seed.py"
+        self.assertTrue(script_path.is_file())
+        script = script_path.read_text()
+
+        for token in (
+            "radial_residual_spectrum_many",
+            'expected_nu=(3, 2, 2, 0, 0)',
+            "default=1.0e-4",
+            "current_specs",
+            "spectrum.coefficients[:, 0]",
+            'candidate["H"][3]',
+            '"gain_per_added_ao"',
+            '"added_ao": 7',
+            '"source_family": "H"',
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, script)
+        self.assertNotIn("H2_sternheimer_matrix", script)
+
     def test_optimizer_slurm_uses_full_normal_node_and_hash_preflight(self):
         script = (PROJECTED_PI_LOSS / "run_pi_dpsi_joint.slurm").read_text()
         required = (
@@ -251,6 +297,7 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             "Number of Gorbital-->",
             "expected_orbital_entries=(1 1 2)",
             '"ecutwfc": "100"',
+            '"exx_pca_threshold": "1e-4"',
             '"rpa_ccp_rmesh_times": "5"',
             '"nfreq = 16"',
             '"prefix_coul_full = v1_coulomb_full_iq_"',
@@ -261,6 +308,10 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, script)
         self.assertNotIn("--partition=debug", script)
+        self.assertNotIn("fixed_abs=", script)
+        self.assertNotIn("$fixed_abs", script)
+        self.assertIn('partition("\\nABFS_ORBITAL\\n")', script)
+        self.assertIn("STRU generated auxiliary basis count mismatch", script)
 
 
 def _minimal_input():

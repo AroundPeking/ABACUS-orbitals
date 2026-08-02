@@ -305,3 +305,30 @@ Projected-Pi training loss alone is no longer monotone with held-out CP once
 the third d is added. Further d shells are stopped; the next response-space
 screen must use the existing l=3 source blocks to construct and rank a first
 f residual mode before any new SOS calculation.
+
+## First f response shell and regenerated PCA auxiliary basis
+
+The auxiliary-basis contract is now fixed by the project requirement: every
+wave-function orbital is evaluated with the auxiliary basis generated from
+that orbital at `exx_pca_threshold=1e-4`. The SOS runner removes the template
+`ABFS_ORBITAL` block and no longer supplies the fixed 214-function-per-H ABS.
+Different wave-function bases may therefore produce different `basis_aux_out`
+dimensions. This is intentional. The earlier fixed-ABS energies remain useful
+response-space diagnostics, but the selected `3s2p2d` baseline must be rerun
+under this regenerated-PCA contract before comparison with the new f basis.
+
+`build_l3_residual_seed.py` projects the selected `3s2p2d` coefficients out of
+the spherical H target, diagonalizes the remaining l=3 radial covariance, and
+appends only its leading eigenmode. H2 is not used to define the shared radial
+metric because its Cartesian molecular environment splits the magnetic
+channels; H and H2 both remain in the subsequent projected-Pi optimization.
+For the current target, the leading f mode has eigenvalue `0.0765909347`,
+captures `0.6994582574` of the l=3 residual covariance, and gives a spectral
+gain of `0.0109415621` per added AO. The measured magnetic-channel overlap
+deviation is `3.76107e-5`, below the predeclared `1e-4` uniform-grid tolerance.
+
+The frozen candidate is `3s2p2d1f`: fixed `1s,2s,1p`, selected two-d basis as
+the starting point, one residual-derived f mode, `joint_dpsi_weight=0.02`, and
+no radial-tail or low-frequency penalty. Promotion still requires an
+independent all-band H2/H/H+ghost LibRPA SOS/CP calculation. Both the two-d
+control and the f candidate must regenerate their own PCA-1e-4 auxiliary basis.

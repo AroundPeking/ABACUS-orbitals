@@ -69,7 +69,6 @@ template_dir=$template_root/$case_name
 run_root=$campaign_root/$case_name
 
 pseudo_name=H_ONCV_PBE-1.0.upf
-fixed_abs=H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs
 abacus=/public/home/ghj/app/src/abacus-sternheimer-siab-task4-80a606f57a26/build-task4-o3-debug-info/abacus-80a606f57a26
 librpa=/public/home/ghj/app/src/LibRPA-sternheimer-rpa-20260707/build-sternheimer-fast/chi0_main.exe
 abacus_source_commit=80a606f57a2610bc2532468661b687b01f58074c
@@ -94,8 +93,6 @@ test ! -e "$run_root"
 check_hash "$orbital_sha256" "$orbital_source"
 check_hash 3f5deaaf57ff09d87da2c2c186eb1654d174fe385c9edc265036b3c8869286ef \
   "$asset_root/$pseudo_name"
-check_hash d5d12b2eb09716803784418848c9cec9ea5633069b5c014e0f4399eeaa9b106f \
-  "$asset_root/$fixed_abs"
 check_hash 2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d \
   "$abacus"
 check_hash defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c \
@@ -123,11 +120,11 @@ mkdir -p "$run_root"
 install -m 0644 "$template_dir/INPUT" "$template_dir/STRU" \
   "$template_dir/KPT" "$template_dir/librpa.in" "$run_root/"
 cp "$orbital_source" "$run_root/$orbital_name"
-cp "$asset_root/$pseudo_name" "$asset_root/$fixed_abs" "$run_root/"
+cp "$asset_root/$pseudo_name" "$run_root/"
 
-suffix="PI_DPSI_JOINT_${case_name}_BOX20A_FIXED_ABS_RMESH5"
+suffix="PI_DPSI_JOINT_${case_name}_BOX20A_PCA1E4_RMESH5"
 "$python" - "$run_root/INPUT" "$run_root/STRU" "$suffix" "$case_bands" \
-  "$orbital_name" "$fixed_abs" "$case_orbital_entries" <<'PY'
+  "$orbital_name" "$case_orbital_entries" <<'PY'
 from pathlib import Path
 import sys
 
@@ -136,11 +133,14 @@ stru_path = Path(sys.argv[2])
 suffix = sys.argv[3]
 nbands = sys.argv[4]
 orbital = sys.argv[5]
-fixed_abs = sys.argv[6]
-expected_orbital_count = int(sys.argv[7])
+expected_orbital_count = int(sys.argv[6])
 
 lines = input_path.read_text().splitlines()
-replacements = {"suffix": suffix, "nbands": nbands}
+replacements = {
+    "suffix": suffix,
+    "nbands": nbands,
+    "exx_pca_threshold": "1e-4",
+}
 counts = {key: 0 for key in replacements}
 output = []
 for line in lines:
@@ -151,7 +151,7 @@ for line in lines:
         counts[key] += 1
     else:
         output.append(line)
-if counts != {"suffix": 1, "nbands": 1}:
+if counts != {"suffix": 1, "nbands": 1, "exx_pca_threshold": 1}:
     raise SystemExit(f"INPUT rewrite count mismatch: {counts}")
 input_path.write_text("\n".join(output) + "\n")
 
@@ -160,8 +160,15 @@ old = "H_gga_8au_100Ry_13s11p10d5f4g.orb"
 if stru.count(old) != expected_orbital_count:
     raise SystemExit("STRU orbital rewrite count mismatch")
 stru = stru.replace(old, orbital)
-if stru.count(fixed_abs) != expected_orbital_count:
-    raise SystemExit("STRU fixed auxiliary basis count mismatch")
+head, marker, tail = stru.partition("\nABFS_ORBITAL\n")
+if not marker:
+    raise SystemExit("STRU is missing the template ABFS_ORBITAL block")
+generated_aux = [line.strip() for line in tail.splitlines() if line.strip()]
+if len(generated_aux) != expected_orbital_count:
+    raise SystemExit("STRU generated auxiliary basis count mismatch")
+stru = head.rstrip() + "\n"
+if "ABFS_ORBITAL" in stru:
+    raise SystemExit("STRU still contains an explicit auxiliary basis")
 stru_path.write_text(stru)
 PY
 
@@ -188,7 +195,7 @@ expected = {
     "ecutwfc": "100",
     "rpa": "1",
     "out_librpa_reader_version": "1",
-    "exx_pca_threshold": "10",
+    "exx_pca_threshold": "1e-4",
     "exx_singularity_correction": "massidda",
     "rpa_ccp_rmesh_times": "5",
 }
@@ -228,7 +235,7 @@ echo "orbital_sha256=$orbital_sha256"
 echo "abacus_source_commit=$abacus_source_commit"
 echo "librpa_reference_commit=$librpa_reference_commit"
 echo "version_exception=historical_exact_sos_binary"
-sha256sum INPUT STRU KPT librpa.in "$orbital_name" "$pseudo_name" "$fixed_abs"
+sha256sum INPUT STRU KPT librpa.in "$orbital_name" "$pseudo_name"
 
 /usr/bin/time -v -o abacus.time \
   mpirun -np 1 -ppn 1 "$abacus" \
