@@ -268,3 +268,40 @@ while BSSE increases by only `0.038304` kcal/mol. The CP improvement is
 therefore physical response-space progress rather than a smaller-BSSE
 artifact. The remaining gap to 108.72 kcal/mol is `1.476686` kcal/mol, so the
 next controlled extension is the third d radial shell.
+
+## Third d response shell: rejected by CP
+
+Commit `5d4e5f01` freezes the `3s2p3d` experiment before seeing its SOS
+energy. Its initial coefficients are exactly the selected `3s2p2d` result plus
+the third radial d mode from the old smooth response candidate. Server-side
+contract tests passed 6/6, and smoke job `21474153` verified all eight loaded
+coefficient columns. Production job `21474175` completed in 6:08.
+
+The third d lowers projected Pi from the selected two-d value `0.0815966206`
+to `0.0769860619`, a 5.65% reduction. DFT and ordinary-dpsi losses are
+`0.935664` and `0.525015` times their campaign initial values; the
+lowest-frequency diagnostic is `0.0063272859`, the maximum condition number
+is `1.4458e4`, and the fixed DZP coefficient differences remain exactly zero.
+The optimized third d is tight and nodal, with substantially larger radial
+curvature than the first two d functions, but it remains smooth on the
+0.01-bohr mesh.
+
+The independent array `21474238_[0-2]` used 24 AO per H and all
+`48/24/48` H2/H/H+ghost bands. It completed in 4:04, 3:22, and 8:44 under
+the same 20-Angstrom, 100-Ry, 16-frequency, fixed-ABS, and full-Coulomb
+contract. Auxiliary-basis and full-Coulomb hashes again match the two-d
+control byte for byte.
+
+| basis | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| projected-Pi joint `3s2p2d` | 108.134558 | **107.243314** | 0.891244 | 84.365262 | 22.878052 |
+| projected-Pi joint `3s2p3d` | 108.403727 | 107.220076 | 1.183651 | 84.363696 | 22.856381 |
+
+Although raw binding rises by `0.269170` kcal/mol, BSSE rises by `0.292407`
+kcal/mol. The CP result therefore decreases by `0.023238` kcal/mol, with
+zero-order and RPA-correlation CP changes of `-0.001566` and `-0.021671`
+kcal/mol. This candidate is rejected and `3s2p2d` remains the selected basis.
+Projected-Pi training loss alone is no longer monotone with held-out CP once
+the third d is added. Further d shells are stopped; the next response-space
+screen must use the existing l=3 source blocks to construct and rank a first
+f residual mode before any new SOS calculation.
