@@ -1,0 +1,143 @@
+from dataclasses import replace
+import unittest
+from unittest import mock
+
+import torch
+
+import common  # noqa: F401 - configures the optimizer import path
+from projected_pi import (
+    NormalizedPhysicalFamilyProjectedPi,
+    ProjectedPiFamilyResult,
+)
+from projected_pi_optimization import (
+    NormalizedPhysicalFamilyProjectedPiOptimization,
+)
+from sternheimer_source_pair import pair_response_and_source
+from test_projected_pi import coefficients, make_pair
+
+
+def modified_pair(pair, q_scale=1.0, frequencies=None, weights=None):
+    response = pair.response
+    replacements = {"q": response.q * q_scale}
+    if frequencies is not None:
+        replacements["frequency_ha"] = torch.tensor(
+            frequencies, dtype=torch.float64
+        )
+    if weights is not None:
+        replacements["frequency_weight"] = torch.tensor(
+            weights, dtype=torch.float64
+        )
+    return pair_response_and_source(
+        replace(response, **replacements), pair.source
+    )
+
+
+class ProjectedPiOptimizationTest(unittest.TestCase):
+    def setUp(self):
+        self.h, _, _ = make_pair()
+        self.h2 = modified_pair(self.h, q_scale=1.17)
+        self.coefficient = coefficients()["H"][0]
+
+    def adapter(self, *pairs, **kwargs):
+        if not pairs:
+            pairs = (("H", self.h), ("H2", self.h2))
+        return NormalizedPhysicalFamilyProjectedPiOptimization(
+            *pairs, **kwargs
+        )
+
+    def test_returns_equal_family_loss_and_frequency_diagnostics(self):
+        result = self.adapter().evaluate(coefficients(self.coefficient))
+        expected = NormalizedPhysicalFamilyProjectedPi(
+            (("H", self.h), ("H2", self.h2))
+        ).evaluate(coefficients(self.coefficient))
+
+        torch.testing.assert_close(result.loss, expected.loss)
+        self.assertEqual(tuple(result.family_results), ("H", "H2"))
+        torch.testing.assert_close(
+            result.frequency_ha,
+            expected.results["H"].frequency_ha,
+        )
+        torch.testing.assert_close(
+            result.frequency_loss,
+            (
+                expected.results["H"].frequency_loss
+                + expected.results["H2"].frequency_loss
+            )
+            / 2.0,
+        )
+        self.assertEqual(
+            result.max_condition, expected.max_candidate_condition
+        )
+        self.assertEqual(result.lowest_frequency_ha, result.frequency_ha[0])
+        self.assertEqual(
+            result.lowest_frequency_loss, result.frequency_loss[0]
+        )
+
+    def test_coefficient_gradient_matches_centered_difference(self):
+        candidate = coefficients(self.coefficient, requires_grad=True)
+        result = self.adapter().evaluate(candidate)
+        result.loss.backward()
+        analytic = float(candidate["H"][0].grad[1, 0])
+
+        step = 1.0e-6
+        plus = self.coefficient.clone()
+        minus = self.coefficient.clone()
+        plus[1, 0] += step
+        minus[1, 0] -= step
+        finite_difference = float(
+            (
+                self.adapter().evaluate(coefficients(plus)).loss
+                - self.adapter().evaluate(coefficients(minus)).loss
+            )
+            / (2.0 * step)
+        )
+        self.assertAlmostEqual(analytic, finite_difference, delta=3.0e-7)
+
+    def test_rejects_wrong_duplicate_or_ghost_families(self):
+        for pairs in (
+            (("H", self.h),),
+            (("H", self.h), ("H", self.h2)),
+            (("H", self.h), ("ghost", self.h2)),
+            (("H", self.h), ("H2", self.h2), ("H2", self.h2)),
+        ):
+            with self.subTest(pairs=tuple(name for name, _ in pairs)):
+                with self.assertRaisesRegex(ValueError, "exactly one.*H.*H2"):
+                    self.adapter(*pairs)
+
+    def test_rejects_unequal_frequency_grids_or_weights(self):
+        unequal_grid = modified_pair(
+            self.h,
+            frequencies=[0.5, 0.5, 2.0, 2.0],
+        )
+        unequal_weight = modified_pair(
+            self.h,
+            weights=[0.4, 0.4, 0.6, 0.6],
+        )
+        for pair, message in (
+            (unequal_grid, "frequency grids differ"),
+            (unequal_weight, "frequency weights differ"),
+        ):
+            with self.subTest(message=message):
+                adapter = self.adapter(("H", self.h), ("H2", pair))
+                with self.assertRaisesRegex(ValueError, message):
+                    adapter.evaluate(coefficients(self.coefficient))
+
+    def test_rejects_nonfinite_loss_and_excessive_condition(self):
+        adapter = self.adapter()
+        adapter._family = mock.Mock()
+        adapter._family.evaluate.return_value = ProjectedPiFamilyResult(
+            loss=torch.tensor(float("nan"), dtype=torch.float64),
+            results={},
+            max_candidate_condition=1.0,
+        )
+        with self.assertRaisesRegex(RuntimeError, "must be finite"):
+            adapter.evaluate(coefficients(self.coefficient))
+
+        with self.assertRaisesRegex(RuntimeError, "condition number"):
+            self.adapter(condition_limit=1.0).evaluate(
+                coefficients(self.coefficient)
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
