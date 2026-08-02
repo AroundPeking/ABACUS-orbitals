@@ -34,9 +34,12 @@ esac
 
 source_commit=$(cat "$case_root/SOURCE_COMMIT")
 test ${#source_commit} -eq 40
-test "$(git -C "$source_root" rev-parse HEAD)" = "$source_commit"
-git -C "$source_root" diff --quiet
-git -C "$source_root" diff --cached --quiet
+(
+  cd "$source_root"
+  test "$(git rev-parse HEAD)" = "$source_commit"
+  git diff --quiet
+  git diff --cached --quiet
+)
 
 (
   cd "$source_root"

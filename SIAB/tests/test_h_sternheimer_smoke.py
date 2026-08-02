@@ -137,6 +137,7 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, script)
         self.assertNotIn("--partition=debug", script)
+        self.assertNotIn("git -C", script)
 
 
 def _minimal_input():
