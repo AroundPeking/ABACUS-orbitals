@@ -21,9 +21,40 @@ reference_source=/work1/ghj/sternheimer_abacus_tests/siab_fixed_dzp_tzdp_sos_sou
 asset_root=/work1/ghj/sternheimer_abacus_tests/h_atom_st_rpa_pca1e-4_rmesh5_20260704/st_atom_nspin1_gauss_abfs
 template_root=$reference_source/SIAB/example_H_sternheimer/held_out_h2_sos_greedy_full/cases
 python=/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
+orbital_name=H_gga_8au_100Ry_pi_dpsi_joint.orb
+orbital_source=$train_root/run/ORBITAL_1U.dat
+
+orbitals_per_h=$("$python" - "$orbital_source" <<'PY'
+from pathlib import Path
+import sys
+
+labels = (
+    "Number of Sorbital-->",
+    "Number of Porbital-->",
+    "Number of Dorbital-->",
+    "Number of Forbital-->",
+    "Number of Gorbital-->",
+)
+counts = {}
+for line in Path(sys.argv[1]).read_text().splitlines():
+    for l, label in enumerate(labels):
+        if line.startswith(label):
+            if l in counts:
+                raise SystemExit(f"duplicate orbital count for l={l}")
+            counts[l] = int(line[len(label):].strip())
+if set(counts) != set(range(len(labels))):
+    raise SystemExit(f"incomplete orbital header: {counts}")
+if any(value < 0 for value in counts.values()):
+    raise SystemExit(f"negative orbital count: {counts}")
+total = sum(counts[l] * (2 * l + 1) for l in counts)
+if total <= 0:
+    raise SystemExit("orbital basis has no atomic orbitals")
+print(total)
+PY
+)
 
 case_names=(H2 H H_ghost)
-nbands=(18 9 18)
+nbands=("$((2 * orbitals_per_h))" "$orbitals_per_h" "$((2 * orbitals_per_h))")
 expected_spins=(1 2 2)
 expected_electrons=(2 1 1)
 expected_orbital_entries=(1 1 2)
@@ -37,8 +68,6 @@ case_orbital_entries=${expected_orbital_entries[$task]}
 template_dir=$template_root/$case_name
 run_root=$campaign_root/$case_name
 
-orbital_name=H_gga_8au_100Ry_pi_dpsi_joint_3s2p.orb
-orbital_source=$train_root/run/ORBITAL_1U.dat
 pseudo_name=H_ONCV_PBE-1.0.upf
 fixed_abs=H_sg15_3s2p1d1f1g_gaus_pca1e-4.abfs
 abacus=/public/home/ghj/app/src/abacus-sternheimer-siab-task4-80a606f57a26/build-task4-o3-debug-info/abacus-80a606f57a26
@@ -190,6 +219,8 @@ export MKL_DYNAMIC=FALSE
 
 echo "date_start=$(date +%F_%T)"
 echo "case=$case_name"
+echo "orbitals_per_h=$orbitals_per_h"
+echo "case_bands=$case_bands"
 echo "nodes=${SLURM_JOB_NODELIST:?}"
 echo "omp_threads=$OMP_NUM_THREADS"
 echo "training_source_commit=$(cat "$train_root/SOURCE_COMMIT")"
