@@ -223,3 +223,48 @@ by `0.037307` kcal/mol. It is a real response-space improvement, but it
 remains `1.867380` kcal/mol below the approximately 108.72 kcal/mol
 Delta-Sternheimer/FHI-aims target. The next frozen shell-screening choice is
 the second `d` shell; further tuning of the one-`d` weight is not promoted.
+
+## Second d response shell
+
+Commit `ca409b9a` freezes the next campaign as H `3s2p2d`: the validated
+`3s2p1d` coefficients are retained, the second smooth `d` candidate is
+appended, and `1s`, `2s`, and `1p` remain fixed. The objective and all source,
+DFT, dpsi, grid, seed, and response contracts are unchanged, including
+`joint_dpsi_weight=0.02`.
+
+The production training job `21473908` completed in 9:40 on one normal node
+with 30 CPUs and 110610 MB. Projected Pi decreased from the unoptimized
+second-d value `0.0966347563` to `0.0815966206`; this is 25.38% below the
+selected one-d value. The final H and H2 components are `0.0535314304` and
+`0.0280651901`. DFT and ordinary-dpsi losses are `0.726367` and `0.371253`
+times their campaign initial values, the lowest-frequency diagnostic is
+`0.0071291030`, and the maximum condition number is `9.3404e3`. The fixed
+coefficient differences are exactly zero. Direct radial inspection shows
+smooth `3s`, `2p`, and first-d changes; the optimized second d is tighter and
+nodal but has no high-frequency oscillation. The selected orbital SHA256 is
+`bba770f62dab907aa24c72a817b5ba7ee7c789e417754caf050e16fe06462e52`.
+
+The independent all-band SOS/CP array `21474012_[0-2]` derived 19 AO per H
+and used `38/19/38` H2/H/H+ghost bands. The tasks completed in 3:44, 3:12,
+and 7:32. The 20-Angstrom cell, 0.74085-Angstrom bond, 100 Ry, 16 frequencies,
+explicit 214-function-per-H ABS, `rpa_ccp_rmesh_times=5`, Massidda correction,
+and LibRPA full Coulomb are identical to the one-d control. All three
+`basis_aux_out` and full-Coulomb hashes are byte-identical to that control.
+
+```text
+EcRPA(H2)      = -0.074941838 Ha
+EcRPA(H)       = -0.018521099 Ha
+EcRPA(H+ghost) = -0.019241671 Ha
+```
+
+| basis | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| projected-Pi joint `3s2p1d` | 107.705560 | 106.852620 | 0.852940 | 84.287061 | 22.565559 |
+| projected-Pi joint `3s2p2d` | 108.134558 | 107.243314 | 0.891244 | 84.365262 | 22.878052 |
+
+The second d raises CP binding by `0.390694` kcal/mol. Its zero-order and
+RPA-correlation contributions improve by `0.078201` and `0.312493` kcal/mol,
+while BSSE increases by only `0.038304` kcal/mol. The CP improvement is
+therefore physical response-space progress rather than a smaller-BSSE
+artifact. The remaining gap to 108.72 kcal/mol is `1.476686` kcal/mol, so the
+next controlled extension is the third d radial shell.
