@@ -29,6 +29,7 @@ GREEDY_RESPONSE = EXAMPLE / "greedy_response_selection"
 LEGACY_PRODUCER = EXAMPLE / "legacy_dpsi_producer"
 HELD_OUT_SOS = EXAMPLE / "held_out_h2_sos"
 FIXED_DZP_TZDP_SOS = EXAMPLE / "fixed_dzp_tzdp_sos"
+PROJECTED_PI_LOSS = EXAMPLE / "projected_pi_loss"
 HELD_OUT_SOS_4S3P = EXAMPLE / "held_out_h2_sos_4s3p"
 HELD_OUT_SOS_4S3P3D = EXAMPLE / "held_out_h2_sos_4s3p3d"
 REAL_H_TZDP = (
@@ -60,6 +61,81 @@ class AttributeDictTest(unittest.TestCase):
 
         self.assertEqual(value.H.Nu, [3, 2])
         self.assertEqual(value["H"]["Ne"], 25)
+
+
+class ProjectedPiCampaignContractTest(unittest.TestCase):
+    def test_optimizer_input_freezes_exact_physical_contract(self):
+        value = json.loads(
+            (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint").read_text()
+        )
+        entries = value["file_list"]["sternheimer"]
+
+        self.assertEqual(value["seed"], 20260718)
+        self.assertEqual(value["element"]["Nu"], {"H": [3, 2, 0, 0, 0]})
+        self.assertEqual(value["radial"]["Rcut"], 8)
+        self.assertEqual(value["radial"]["Ecut"], 100)
+        self.assertEqual(value["radial"]["dr"], 0.01)
+        self.assertEqual(
+            value["freeze_orbitals"],
+            [
+                {"element": "H", "l": 0, "zeta": 1},
+                {"element": "H", "l": 0, "zeta": 2},
+                {"element": "H", "l": 1, "zeta": 1},
+            ],
+        )
+        self.assertEqual({entry["family"] for entry in entries}, {"H", "H2"})
+        self.assertEqual(len(entries), 2)
+        for entry in entries:
+            self.assertEqual(entry["role"], "physical")
+            self.assertTrue(entry["path"].endswith("sternheimer_matrix.dat"))
+            self.assertTrue(
+                entry["source_path"].endswith("STERNHEIMER_SIAB_SOURCE_V1.dat")
+            )
+            self.assertTrue(
+                entry["zero_order_audit_path"].endswith("zero_order_identity.json")
+            )
+        self.assertEqual(len(value["file_list"]["origin"]), 3)
+        self.assertEqual(len(value["file_list"]["linear"]), 1)
+        self.assertEqual(len(value["file_list"]["linear"][0]), 3)
+        self.assertIn(
+            "fixed_dzp_joint_ORBITAL_RESULTS.txt",
+            value["C_init_info"]["C_init_file"],
+        )
+        self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
+        self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 1.0)
+        self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
+        self.assertEqual(
+            value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
+        )
+        self.assertEqual(value["optimize"][0]["optimizer"], "Adam")
+        self.assertEqual(value["optimize"][0]["kwargs"], {"lr": 0.003})
+        self.assertEqual(value["optimize"][0]["max_steps"], 3000)
+
+    def test_optimizer_slurm_uses_full_normal_node_and_hash_preflight(self):
+        script = (PROJECTED_PI_LOSS / "run_pi_dpsi_joint.slurm").read_text()
+        required = (
+            "#SBATCH --partition=normal",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
+            "#SBATCH --time=1-00:00:00",
+            "/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python",
+            "/work1/ghj/runtime/siab-projected-pi-mpl-20260801",
+            "sha256sum -c",
+            "SOURCE_COMMIT",
+            "SOURCE_MANIFEST.sha256",
+            "INPUTS.sha256",
+            "/usr/bin/time -v",
+            "OMP_NUM_THREADS=30",
+            "PROJECTED_PI_METADATA.json",
+            "Mode = pi_dpsi_joint",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, script)
+        self.assertNotIn("--partition=debug", script)
 
 
 def _minimal_input():

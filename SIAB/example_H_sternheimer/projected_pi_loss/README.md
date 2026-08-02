@@ -71,3 +71,34 @@ create or validate a new orbital basis. The next implementation is specified
 in `docs/superpowers/plans/2026-08-01-siab-pi-dpsi-joint.md`. Raw JSON,
 Markdown, plots, scheduler records, and input/code hashes are preserved under
 `results/`.
+
+## Frozen `pi_dpsi_joint` optimizer campaign
+
+`INPUT.pi_dpsi_joint` is the first source-aware optimization input. It starts
+from the current fixed-DZP joint H `3s2p` coefficients (SHA256
+`1340cd11357dea87b67ad2a58a6a8e1ae298c985bf08a66b6e9456c57dbc87df`),
+uses 25 radial primitives at 8 bohr, and fixes `1s`, `2s`, and `1p` exactly.
+Only `3s` and `2p` are trainable. The DFT and ordinary dpsi data are the same
+three H3-distance targets used by the original joint campaign. The new primary
+target consists of exactly one audited H pair and one audited H2 pair from the
+16-frequency, full-Coulomb-whitened producer.
+
+The optimized scalar is the equal-family sum `L_H + L_H2`. The ordinary dpsi
+ratio has weight 1, and the DFT/dpsi acceptance hinges remain 1.05 and 1.10.
+The primitive-overlap rank tolerance is `1e-12`; condition numbers above
+`1e12` are rejected. No ghost target, SOS energy, radial-tail penalty, or old
+lowest-frequency spillage guard enters training.
+
+`run_pi_dpsi_joint.slurm` requires an immutable campaign directory containing
+`code/`, `inputs/`, `SOURCE_COMMIT`, `SOURCE_MANIFEST.sha256`, and
+`INPUTS.sha256`. It runs only on one full `normal` node with 30 CPU threads,
+110610 MB, and a 24-hour limit, using the fixed Python 3.10/PyTorch 2.1 runtime.
+It refuses an existing result directory and validates all code and input
+hashes before optimization. The primary outputs are `ORBITAL_RESULTS.txt`,
+`Spillage.dat`, and `PROJECTED_PI_METADATA.json`; the JSON stores all
+frequency/family losses and source/response/audit provenance.
+
+Before freezing this campaign, the complete SIAB Python suite passed 299 tests
+on `df_dcu` in 54.18 s of unittest time and 60.09 s wall time, with 246800 KiB
+maximum RSS. This is a software gate only. No new basis has yet passed the
+training or independent CP SOS promotion gates.

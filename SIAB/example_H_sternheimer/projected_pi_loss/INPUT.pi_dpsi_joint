@@ -1,0 +1,79 @@
+{
+  "seed": 20260718,
+  "file_list": {
+    "origin": [
+      "../inputs/legacy/OUT.H-STRU2-8-0.7/orb_matrix.0.dat",
+      "../inputs/legacy/OUT.H-STRU2-8-0.9/orb_matrix.0.dat",
+      "../inputs/legacy/OUT.H-STRU2-8-1.3/orb_matrix.0.dat"
+    ],
+    "linear": [[
+      "../inputs/legacy/OUT.H-STRU2-8-0.7/orb_matrix.1.dat",
+      "../inputs/legacy/OUT.H-STRU2-8-0.9/orb_matrix.1.dat",
+      "../inputs/legacy/OUT.H-STRU2-8-1.3/orb_matrix.1.dat"
+    ]],
+    "sternheimer": [
+      {
+        "path": "../inputs/H_sternheimer_matrix.dat",
+        "source_path": "../inputs/H_STERNHEIMER_SIAB_SOURCE_V1.dat",
+        "zero_order_audit_path": "../inputs/H_zero_order_identity.json",
+        "family": "H",
+        "role": "physical"
+      },
+      {
+        "path": "../inputs/H2_sternheimer_matrix.dat",
+        "source_path": "../inputs/H2_STERNHEIMER_SIAB_SOURCE_V1.dat",
+        "zero_order_audit_path": "../inputs/H2_zero_order_identity.json",
+        "family": "H2",
+        "role": "physical"
+      }
+    ]
+  },
+  "element": {
+    "Nt_all": ["H"],
+    "Nu": {"H": [3, 2, 0, 0, 0]}
+  },
+  "weight": {
+    "stru": [1.0, 1.0, 1.0],
+    "bands_range": [1, 1, 1]
+  },
+  "optimize": [
+    {
+      "optimizer": "Adam",
+      "kwargs": {"lr": 0.003},
+      "cal_T": false,
+      "norm": "element",
+      "max_steps": 3000
+    }
+  ],
+  "C_init_info": {
+    "init_from_file": true,
+    "C_init_file": "../inputs/fixed_dzp_joint_ORBITAL_RESULTS.txt",
+    "opt_C_read": false
+  },
+  "V_info": {
+    "init_from_file": true,
+    "same_band": true
+  },
+  "radial": {
+    "Rcut": 8,
+    "dr": 0.01,
+    "Ecut": 100,
+    "smearing_sigma": 0.1
+  },
+  "freeze_orbitals": [
+    {"element": "H", "l": 0, "zeta": 1},
+    {"element": "H", "l": 0, "zeta": 2},
+    {"element": "H", "l": 1, "zeta": 1}
+  ],
+  "loss": {
+    "mode": "pi_dpsi_joint",
+    "projected_pi_rank_tolerance": 1e-12,
+    "epsilon": 1e-14,
+    "condition_limit": 1e12,
+    "tau_dft": 0.05,
+    "tau_dpsi": 0.10,
+    "constraint_penalty_dft": 10.0,
+    "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 1.0
+  }
+}
