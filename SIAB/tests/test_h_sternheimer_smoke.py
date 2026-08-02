@@ -132,7 +132,7 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
         )
         self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
         self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
-        self.assertEqual(value["loss"]["joint_dpsi_weight"], 1.0)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 0.02)
         self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
         self.assertEqual(
             value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
