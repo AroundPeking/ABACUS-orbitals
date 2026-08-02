@@ -150,6 +150,32 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             )["file_list"]["sternheimer"],
         )
 
+    def test_two_d_input_appends_only_the_next_response_shell(self):
+        value = json.loads(
+            (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p2d").read_text()
+        )
+
+        self.assertEqual(value["seed"], 20260718)
+        self.assertEqual(value["element"]["Nu"], {"H": [3, 2, 2, 0, 0]})
+        self.assertEqual(value["freeze_orbitals"], DZP_FREEZE_SPECS)
+        self.assertEqual(
+            value["C_init_info"]["C_init_file"],
+            "../inputs/projected_pi_joint_3s2p1d_w002_plus_smooth_2d_ORBITAL_RESULTS.txt",
+        )
+        self.assertEqual(value["loss"]["mode"], "pi_dpsi_joint")
+        self.assertEqual(value["loss"]["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(value["loss"]["joint_dpsi_weight"], 0.02)
+        self.assertEqual(value["loss"].get("radial_tail_weight", 0.0), 0.0)
+        self.assertEqual(
+            value["loss"].get("low_frequency_guard_weight", 0.0), 0.0
+        )
+        self.assertEqual(
+            value["file_list"]["sternheimer"],
+            json.loads(
+                (PROJECTED_PI_LOSS / "INPUT.pi_dpsi_joint_3s2p1d").read_text()
+            )["file_list"]["sternheimer"],
+        )
+
     def test_optimizer_slurm_uses_full_normal_node_and_hash_preflight(self):
         script = (PROJECTED_PI_LOSS / "run_pi_dpsi_joint.slurm").read_text()
         required = (
