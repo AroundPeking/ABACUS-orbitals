@@ -404,3 +404,25 @@ After reoptimization, the next f residual mode has eigenvalue `0.0287315351`
 and gain `0.0041045050` per AO. The next g residual mode has eigenvalue
 `0.0186048293` and gain `0.0020672033` per AO. The next greedy extension is
 therefore a second f radial shell, giving the frozen `3s2p2d2f1g` candidate.
+
+The second-f production job `21474683` completed in 3:03. The deterministic
+residual mode itself reduced projected-Pi from `0.0513963414` to
+`0.0460604943`; no subsequent Adam step improved the combined objective over
+that seed. The emitted radial orbitals are identical to the seed after the
+standard smoothing and orthogonalization operations. The candidate has 42 AO
+per H. Independent all-band array `21474692_[0-2]` used `84/42/84` bands and
+generated `746/373/746` PCA-1e-4 auxiliary functions for H2/H/H+ghost.
+
+| basis, regenerated PCA `1e-4` | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| selected `3s2p2d1f1g` | 108.958806 | **107.888474** | 1.070332 | 84.348056 | 23.540417 |
+| candidate `3s2p2d2f1g` | 108.810647 | 107.805320 | 1.005327 | 84.351957 | 23.453362 |
+
+Despite the lower training loss, the second f shell lowers CP binding by
+`0.083154` kcal/mol. Its zero-order contribution rises by `0.003901`, but the
+RPA-correlation contribution falls by `0.087055` kcal/mol. Reduced BSSE does
+not rescue the physical result. The second f shell is rejected and the
+selected basis remains `3s2p2d1f1g`. The next and final shell-growth control
+is the lower-ranked second g residual mode; if it also fails CP, high-l shell
+growth stops and the loss construction, rather than basis size, must be
+revisited.

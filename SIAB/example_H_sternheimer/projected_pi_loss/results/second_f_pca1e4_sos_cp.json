@@ -1,0 +1,31 @@
+{
+  "auxiliary_basis_contract": {
+    "explicit_abfs_orbital": false,
+    "exx_pca_threshold": 0.0001
+  },
+  "basis_results": {
+    "3s2p2d1f1g": {
+      "auxiliary_dimensions": {"H": 294, "H2": 588, "H_ghost": 588},
+      "bands": {"H": 35, "H2": 70, "H_ghost": 70},
+      "bsse_kcal_mol": 1.070331990266924,
+      "cp_correlation_kcal_mol": 23.540417392910516,
+      "cp_total_kcal_mol": 107.88847388347496,
+      "cp_zero_order_kcal_mol": 84.34805649056445,
+      "raw_total_kcal_mol": 108.9588058737419
+    },
+    "3s2p2d2f1g": {
+      "auxiliary_dimensions": {"H": 373, "H2": 746, "H_ghost": 746},
+      "bands": {"H": 42, "H2": 84, "H_ghost": 84},
+      "bsse_kcal_mol": 1.0053273764348976,
+      "cp_correlation_kcal_mol": 23.453362376064277,
+      "cp_total_kcal_mol": 107.80531955820021,
+      "cp_zero_order_kcal_mol": 84.35195718213595,
+      "orbital_sha256": "720447e2d7f6deae6476acb1a9275ecf8619825796a5bc4358ac89bd7918ddb4",
+      "raw_total_kcal_mol": 108.81064693463512
+    }
+  },
+  "decision": "reject_second_f_keep_3s2p2d1f1g_test_second_g",
+  "format_version": 1,
+  "jobs": {"optimizer": "21474683", "sos": "21474692_[0-2]"},
+  "reference_binding_kcal_mol": 108.72
+}
