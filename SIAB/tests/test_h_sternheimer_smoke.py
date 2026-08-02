@@ -139,6 +139,35 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
         self.assertNotIn("--partition=debug", script)
         self.assertNotIn("git -C", script)
 
+    def test_projected_pi_sos_slurm_matches_independent_cp_contract(self):
+        script_path = PROJECTED_PI_LOSS / "run_pi_dpsi_joint_sos.slurm"
+        self.assertTrue(script_path.is_file())
+        script = script_path.read_text()
+        required = (
+            "#SBATCH --partition=normal",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
+            "#SBATCH --time=1-00:00:00",
+            "#SBATCH --array=0-2",
+            "PI_TRAIN_ROOT",
+            "PI_SOS_ROOT",
+            "PI_ORBITAL_SHA256",
+            "case_names=(H2 H H_ghost)",
+            "nbands=(18 9 18)",
+            '"ecutwfc": "100"',
+            '"rpa_ccp_rmesh_times": "5"',
+            '"nfreq = 16"',
+            '"prefix_coul_full = v1_coulomb_full_iq_"',
+            "libRPA finished successfully",
+            "PRODUCTION_OUTPUTS.sha256",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, script)
+        self.assertNotIn("--partition=debug", script)
+
 
 def _minimal_input():
     return {
