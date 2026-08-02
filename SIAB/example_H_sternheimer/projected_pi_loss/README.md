@@ -100,5 +100,71 @@ frequency/family losses and source/response/audit provenance.
 
 Before freezing this campaign, the complete SIAB Python suite passed 299 tests
 on `df_dcu` in 54.18 s of unittest time and 60.09 s wall time, with 246800 KiB
-maximum RSS. This is a software gate only. No new basis has yet passed the
-training or independent CP SOS promotion gates.
+maximum RSS. This is a software gate only.
+
+## Optimized basis and independent SOS/CP result
+
+The optimizer implementation and campaign were frozen through commits
+`a1c0422b`, `d2cb3576`, `68536865`, `f3851ded`, `ebd0aa50`, and `5e4f6a72`.
+Commit `3c0f40ce` made the immutable runner compatible with the Git 1.8.3.1
+installed on `df_dcu`. One-step job `21471688` proved that only `3s,2p`
+changed. Independent ten-step jobs `21471713` and `21471714`, run on different
+nodes, produced byte-identical `ORBITAL_RESULTS.txt`, `ORBITAL_1U.dat`,
+`Spillage.dat`, and `PROJECTED_PI_METADATA.json`.
+
+Production job `21471739` ran on one `normal` node with 30 CPUs and 110610 MB.
+It completed in 4:31 with exit code `0:0`; the optimizer itself took 3:56.96
+and stopped after 439 accepted updates because the objective had converged.
+All 440 logged rows, including the initial row, satisfied the acceptance
+contract. The final fixed `1s,2s,1p` coefficient difference was exactly zero.
+
+| training quantity | initial | final | final / initial |
+|---|---:|---:|---:|
+| projected Pi, H + H2 | 0.2145720661 | 0.2105926634 | 0.981454 |
+| DFT loss | 5.0667854e-5 | 3.7959370e-5 | 0.749181 |
+| ordinary dpsi loss | 5.9172304e-4 | 3.9033108e-4 | 0.659652 |
+| lowest-frequency projected Pi | 0.0324551393 | 0.0357745610 | 1.102278 |
+
+The final family losses are `L_H=0.1316161757` and
+`L_H2=0.0789764877`; the maximum candidate condition is `2.9866e3`, below
+the `1e12` limit. The lowest-frequency diagnostic increased, but it is not a
+stop rule in this source-aware objective: no local-frequency guard or radial
+tail penalty entered the loss. The exported orbital SHA256 is
+`a839338e1c1fcaf043a65178099d77e9580c9fe87243f372e85ddde5b72d2d01`.
+
+Commits `0a488d77` and `4a8a617b` add and correct the independent SOS/CP runner.
+Array `21471869_[0-2]` ran H2, H, and H+ghost in 3:14, 2:39, and 5:49. All
+three tasks completed with exit code `0:0`. They use all `18/9/18` bands, the
+same 20-Angstrom cell and 0.74085-Angstrom bond, 100 Ry, 16 frequencies,
+explicit 214-function-per-H ABS, `rpa_ccp_rmesh_times=5`, and full Coulomb as
+the fixed-DZP joint control. For every geometry, KPT, `librpa.in`,
+pseudopotential, explicit ABS, `basis_aux_out`, and the full-Coulomb matrix are
+byte-identical to that control. INPUT and STRU are also identical after
+normalizing only the suffix and orbital filename.
+
+The LibRPA correlation energies are
+
+```text
+EcRPA(H2)      = -0.068995044 Ha
+EcRPA(H)       = -0.016546125 Ha
+EcRPA(H+ghost) = -0.017261200 Ha
+```
+
+| basis | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| initial TZDP | 106.635342 | 105.556881 | 1.078461 | - | - |
+| fixed-DZP joint `3s2p` | 106.886054 | 105.853882 | 1.032171 | 84.270376 | 21.583507 |
+| low-frequency-guarded `3s2p` | 106.881909 | 105.843252 | 1.038657 | - | - |
+| projected-Pi joint `3s2p` | 106.823178 | 105.932932 | 0.890247 | 84.301021 | 21.631911 |
+
+All table energies are in kcal/mol. Relative to the previous best same-size
+basis, projected-Pi optimization raises the CP binding by `0.079050` kcal/mol
+and lowers BSSE by `0.141924` kcal/mol. The CP improvement contains
+`+0.030645` kcal/mol from the zero-order term and `+0.048404` kcal/mol from
+RPA correlation. It therefore passes both frozen promotion inequalities,
+`D_CP > 105.853882` and `BSSE <= 1.082171`, without using SOS or ghost data in
+training. It becomes the current best validated same-size `3s2p` basis under
+this contract, but remains `2.787068` kcal/mol below the approximately 108.72
+kcal/mol Delta-Sternheimer/FHI-aims target. The next improvement must address
+the remaining response-space limitation rather than interpreting this
+promotion gate as basis convergence.

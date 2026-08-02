@@ -134,7 +134,16 @@ CP values only after computing its ranking. At every tested primitive-rank
 threshold it orders fixed-DZP joint, guarded, and initial from best to worst,
 which matches this independent SOS-RPA order. The metric definition, immutable
 inputs, and outputs are in `../projected_pi_loss/`; this correlation authorizes
-the separate `pi_dpsi_joint` design but is not itself a new basis result.
+the separate `pi_dpsi_joint` design.
+
+That design has now produced a held-out result. The source-aware projected-Pi
+`3s2p` basis gives `D raw = 106.823178`, `D CP = 105.932932`, and
+`BSSE = 0.890247` kcal/mol. Relative to this README's unguarded fixed-DZP joint
+control, the CP binding improves by `0.079050` kcal/mol and BSSE decreases by
+`0.141924` kcal/mol. It is therefore the current best independently validated
+same-size `3s2p` result. It remains `2.787068` kcal/mol below 108.72 kcal/mol,
+so the next step must expand the trainable response space; full training,
+provenance, and SOS/CP details are recorded in `../projected_pi_loss/README.md`.
 
 The compact evidence bundle is under
 `/Users/ghj/同步空间/AITP_project/sternheimer_abacus/results/siab_h_low_frequency_guard_21440455_21440627_text`.
