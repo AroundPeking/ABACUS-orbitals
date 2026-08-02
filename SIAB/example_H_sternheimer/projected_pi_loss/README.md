@@ -168,3 +168,58 @@ this contract, but remains `2.787068` kcal/mol below the approximately 108.72
 kcal/mol Delta-Sternheimer/FHI-aims target. The next improvement must address
 the remaining response-space limitation rather than interpreting this
 promotion gate as basis convergence.
+
+## First response-space extension: `3s2p1d`
+
+Frozen projected-Pi screening showed that the first `d` shell gives the
+largest loss reduction per added AO. The `3s2p1d` campaign therefore keeps
+the same fixed `1s,2s,1p` DZP core, starts `3s,2p` from the validated
+projected-Pi basis, and starts `1d` from the previous smooth response-basis
+candidate. No SOS or ghost quantity enters screening or training.
+
+The original `joint_dpsi_weight=1` run `21473252` reduced the normalized
+ordinary-dpsi term but increased projected Pi from `0.140954930` to
+`0.155962458`. The cause is explicit in the objective: the initial dpsi ratio
+is one while projected Pi is only about `0.141`, so the normalized dpsi term
+dominates once the new `d` space is available. A frozen four-point training
+sweep, with every other input and seed unchanged, gave:
+
+| dpsi weight | job | projected Pi | DFT ratio | dpsi ratio | max condition |
+|---:|---:|---:|---:|---:|---:|
+| 0.00 | 21473547 | 0.1108519974 | 1.049698 | 0.972943 | 1.3783e4 |
+| 0.02 | 21473565 | 0.1093567658 | 1.049625 | 0.875856 | 1.4510e4 |
+| 0.05 | 21473610 | 0.1146198830 | 1.049930 | 0.724667 | 8.2634e3 |
+| 0.10 | 21473611 | 0.1344652268 | 0.671839 | 0.439707 | 6.0638e3 |
+| 1.00 | 21473252 | 0.1559624580 | 0.566021 | 0.326483 | 2.7528e3 |
+
+Weight `0.02` is selected because it has the lowest accepted projected-Pi
+loss while improving ordinary dpsi and remaining inside the 5% DFT gate. Its
+family losses are `L_H=0.0670012137` and `L_H2=0.0423555520`; fixed DZP
+coefficients remain byte-exact. The `3s`, `2p`, and `1d` radial functions are
+smooth under direct inspection. Commit `86a93bd0` freezes this weight.
+
+Commit `25554361` also removes the old hard-coded `18/9/18` SOS band counts.
+The independent runner now derives the AO count from `ORBITAL_1U.dat`; for
+`3s2p1d` it obtains 14 AO per H and therefore uses all `28/14/28` bands.
+Array `21473755_[0-2]` completed H2, H, and H+ghost in 3:22, 3:03, and 6:31,
+respectively. It retains the 20-Angstrom cell, 100 Ry, 16 frequencies, the
+same explicit 214-function-per-H ABS, `rpa_ccp_rmesh_times=5`, and full
+Coulomb. The three `basis_aux_out` and full-Coulomb hashes are identical to
+the validated `3s2p` control.
+
+```text
+EcRPA(H2)      = -0.073504639 Ha
+EcRPA(H)       = -0.018089831 Ha
+EcRPA(H+ghost) = -0.018772066 Ha
+```
+
+| basis | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| projected-Pi joint `3s2p` | 106.823178 | 105.932932 | 0.890247 | 84.301021 | 21.631911 |
+| projected-Pi joint `3s2p1d` | 107.705560 | 106.852620 | 0.852940 | 84.287061 | 22.565559 |
+
+The first `d` shell raises CP binding by `0.919688` kcal/mol and lowers BSSE
+by `0.037307` kcal/mol. It is a real response-space improvement, but it
+remains `1.867380` kcal/mol below the approximately 108.72 kcal/mol
+Delta-Sternheimer/FHI-aims target. The next frozen shell-screening choice is
+the second `d` shell; further tuning of the one-`d` weight is not promoted.
