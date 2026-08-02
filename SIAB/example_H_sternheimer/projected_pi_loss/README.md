@@ -332,3 +332,39 @@ the starting point, one residual-derived f mode, `joint_dpsi_weight=0.02`, and
 no radial-tail or low-frequency penalty. Promotion still requires an
 independent all-band H2/H/H+ghost LibRPA SOS/CP calculation. Both the two-d
 control and the f candidate must regenerate their own PCA-1e-4 auxiliary basis.
+
+Production optimizer job `21474551` completed on one normal node with 30 CPU
+cores and 110610 MB in 7:03. It stopped after 520 accepted steps. The total
+loss decreased from `0.0786841309` to `0.0733168681`; the final projected-Pi
+loss is `0.0612267667`, split into `0.0420124701` for H and `0.0192142965` for
+H2. The fixed `1s,2s,1p` coefficient differences are exactly zero. The final
+orbital has 22 AO per H and SHA256
+`4171a07bc752256aca4d64df02a8de773f367a3b9501678a4aa6c11118477249`.
+
+The independent PCA-1e-4 SOS/CP arrays `21474591_[0-2]` and
+`21474592_[0-2]` completed successfully. They used all `30/15/30` bands for
+the two-d H2/H/H+ghost control and all `44/22/44` bands for the f candidate.
+The regenerated auxiliary dimensions are `222/111/222` and `364/182/364`,
+respectively. Thus the comparison fixes the PCA threshold, not the auxiliary
+dimension.
+
+| basis, regenerated PCA `1e-4` | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| projected-Pi joint `3s2p2d` | 108.211885 | 107.421137 | 0.790748 | 84.351029 | 23.070107 |
+| projected-Pi joint `3s2p2d1f` | 108.566874 | **107.626402** | 0.940472 | 84.345316 | 23.281086 |
+
+The first f shell improves the CP binding by `0.205265` kcal/mol. Its
+correlation contribution improves by `0.210979` kcal/mol while the zero-order
+part changes by `-0.005714` kcal/mol. BSSE increases by `0.149725` kcal/mol,
+so the uncorrected `108.566874` kcal/mol must not be interpreted as convergence
+to the 108.72-kcal/mol reference. The CP result remains low by `1.093598`
+kcal/mol, but it passes the held-out gate and replaces `3s2p2d` as the selected
+response basis under the regenerated-PCA contract.
+
+After optimizing the first f shell, the next l=3 residual mode has leading
+eigenvalue `0.0308159406` and gain `0.0044022772` per added AO. The leading
+l=4 mode has eigenvalue `0.0416458377` and gain `0.0046273153` per added AO.
+The latter is 5.11% larger, so the next greedy candidate is `3s2p2d1f1g`, not
+a second f shell. The Cartesian-grid magnetic-overlap deviation for l=4 is
+`1.23551e-4`; the seed construction therefore uses the predeclared `2e-4`
+uniform-grid tolerance while leaving the physical PCA threshold at `1e-4`.

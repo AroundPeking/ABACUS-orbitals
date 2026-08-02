@@ -1,0 +1,58 @@
+{
+  "auxiliary_basis_contract": {
+    "explicit_abfs_orbital": false,
+    "exx_pca_threshold": 0.0001
+  },
+  "basis_results": {
+    "3s2p2d": {
+      "auxiliary_dimensions": {
+        "H": 111,
+        "H2": 222,
+        "H_ghost": 222
+      },
+      "bands": {
+        "H": 15,
+        "H2": 30,
+        "H_ghost": 30
+      },
+      "bsse_kcal_mol": 0.7907478203507253,
+      "cp_correlation_kcal_mol": 23.070107199723385,
+      "cp_total_kcal_mol": 107.4211366951071,
+      "cp_zero_order_kcal_mol": 84.3510294953837,
+      "raw_total_kcal_mol": 108.21188451545781
+    },
+    "3s2p2d1f": {
+      "auxiliary_dimensions": {
+        "H": 182,
+        "H2": 364,
+        "H_ghost": 364
+      },
+      "bands": {
+        "H": 22,
+        "H2": 44,
+        "H_ghost": 44
+      },
+      "bsse_kcal_mol": 0.9404724628844313,
+      "cp_correlation_kcal_mol": 23.281085925054985,
+      "cp_total_kcal_mol": 107.62640170861724,
+      "cp_zero_order_kcal_mol": 84.34531578356224,
+      "orbital_sha256": "4171a07bc752256aca4d64df02a8de773f367a3b9501678a4aa6c11118477249",
+      "raw_total_kcal_mol": 108.56687417150167
+    }
+  },
+  "decision": "select_3s2p2d1f_then_rank_next_residual_shell",
+  "format_version": 1,
+  "jobs": {
+    "optimizer": "21474551",
+    "sos_3s2p2d": "21474591_[0-2]",
+    "sos_3s2p2d1f": "21474592_[0-2]"
+  },
+  "next_residual_ranking": {
+    "l3_second_mode_gain_per_ao": 0.004402277226421217,
+    "l3_second_mode_leading_eigenvalue": 0.030815940584948524,
+    "l4_first_mode_gain_per_ao": 0.0046273153002218455,
+    "l4_first_mode_leading_eigenvalue": 0.04164583770199661,
+    "selected_next_shell": "1g"
+  },
+  "reference_binding_kcal_mol": 108.72
+}
