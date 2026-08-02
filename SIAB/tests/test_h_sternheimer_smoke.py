@@ -156,6 +156,7 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             "PI_ORBITAL_SHA256",
             "case_names=(H2 H H_ghost)",
             "nbands=(18 9 18)",
+            "expected_orbital_entries=(1 1 2)",
             '"ecutwfc": "100"',
             '"rpa_ccp_rmesh_times": "5"',
             '"nfreq = 16"',

@@ -26,7 +26,7 @@ case_names=(H2 H H_ghost)
 nbands=(18 9 18)
 expected_spins=(1 2 2)
 expected_electrons=(2 1 1)
-expected_orbital_entries=(2 1 2)
+expected_orbital_entries=(1 1 2)
 
 task=${SLURM_ARRAY_TASK_ID:?}
 case_name=${case_names[$task]}
