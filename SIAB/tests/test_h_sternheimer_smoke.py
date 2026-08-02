@@ -127,6 +127,7 @@ class ProjectedPiCampaignContractTest(unittest.TestCase):
             "SOURCE_COMMIT",
             "SOURCE_MANIFEST.sha256",
             "INPUTS.sha256",
+            "INPUT_OVERRIDE",
             "/usr/bin/time -v",
             "OMP_NUM_THREADS=30",
             "PROJECTED_PI_METADATA.json",

@@ -25,6 +25,13 @@ test -s "$case_root/SOURCE_MANIFEST.sha256"
 test -s "$case_root/INPUTS.sha256"
 test ! -e "$run_root"
 
+input_source=${INPUT_OVERRIDE:-$source_root/SIAB/example_H_sternheimer/projected_pi_loss/INPUT.pi_dpsi_joint}
+test -s "$input_source"
+case "$input_source" in
+  "$source_root"/*|"$case_root"/*) ;;
+  *) echo "INPUT_OVERRIDE must remain inside source_root or case_root" >&2; exit 2 ;;
+esac
+
 source_commit=$(cat "$case_root/SOURCE_COMMIT")
 test ${#source_commit} -eq 40
 test "$(git -C "$source_root" rev-parse HEAD)" = "$source_commit"
@@ -42,7 +49,7 @@ git -C "$source_root" diff --cached --quiet
 
 mkdir "$run_root"
 install -m 0644 \
-  "$source_root/SIAB/example_H_sternheimer/projected_pi_loss/INPUT.pi_dpsi_joint" \
+  "$input_source" \
   "$run_root/INPUT"
 
 export PYTHONPATH="$matplotlib_root${PYTHONPATH:+:$PYTHONPATH}"
