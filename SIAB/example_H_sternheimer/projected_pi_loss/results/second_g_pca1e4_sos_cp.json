@@ -1,0 +1,59 @@
+{
+  "auxiliary_basis_contract": {
+    "explicit_abfs_orbital": false,
+    "exx_pca_threshold": 0.0001
+  },
+  "basis_results": {
+    "3s2p2d1f1g": {
+      "auxiliary_dimensions": {
+        "H": 294,
+        "H2": 588,
+        "H_ghost": 588
+      },
+      "bands": {
+        "H": 35,
+        "H2": 70,
+        "H_ghost": 70
+      },
+      "bsse_kcal_mol": 1.070331990266924,
+      "cp_correlation_kcal_mol": 23.540417392910516,
+      "cp_total_kcal_mol": 107.88847388347496,
+      "cp_zero_order_kcal_mol": 84.34805649056445,
+      "raw_total_kcal_mol": 108.9588058737419
+    },
+    "3s2p2d1f2g": {
+      "auxiliary_dimensions": {
+        "H": 465,
+        "H2": 930,
+        "H_ghost": 930
+      },
+      "bands": {
+        "H": 44,
+        "H2": 88,
+        "H_ghost": 88
+      },
+      "bsse_kcal_mol": 1.0154019040719806,
+      "cp_correlation_kcal_mol": 23.364461226345323,
+      "cp_total_kcal_mol": 107.71345878774005,
+      "cp_zero_order_kcal_mol": 84.34899756139473,
+      "full_coulomb_h2_ghost_sha256": "e68234dcb399eaf0606447c47833e1dc24eed647ccfc683680aee46d2184e125",
+      "orbital_sha256": "52311fe14f3b0597eb18a6b99a0b9f216fe0db49c0719c3a6e72d6fc7c51f368",
+      "raw_total_kcal_mol": 108.72886069181203
+    }
+  },
+  "decision": "reject_second_g_keep_3s2p2d1f1g_stop_high_l_shell_growth_revise_loss",
+  "format_version": 1,
+  "jobs": {
+    "optimizer": "21475221",
+    "sos": "21483740_[0-2]"
+  },
+  "reference_binding_kcal_mol": 108.72,
+  "training": {
+    "final_projected_pi": 0.04851890857764084,
+    "final_regularization_dpsi": 0.01971008379939549,
+    "final_total": 0.06822899237703633,
+    "fixed_dzp_max_abs_coefficient_difference": 0.0,
+    "seed_projected_pi": 0.048502190025927636,
+    "seed_total": 0.06850219002592764
+  }
+}

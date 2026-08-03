@@ -426,3 +426,33 @@ selected basis remains `3s2p2d1f1g`. The next and final shell-growth control
 is the lower-ranked second g residual mode; if it also fails CP, high-l shell
 growth stops and the loss construction, rather than basis size, must be
 revisited.
+
+The second-g production job `21475221` completed on one normal node with 30
+CPU cores and 110610 MB in 7:06. The total loss decreased from
+`0.0685021900` to `0.0682289924`; projected-Pi changed from `0.0485021900`
+to `0.0485189086`, while the dpsi regularizer decreased from `0.0200000000`
+to `0.0197100838`. The fixed `1s,2s,1p` coefficient differences are exactly
+zero. The final `3s2p2d1f2g` orbital has 44 AO per H and SHA256
+`52311fe14f3b0597eb18a6b99a0b9f216fe0db49c0719c3a6e72d6fc7c51f368`.
+
+The independent all-band array `21483740_[0-2]` used `88/44/88` bands for
+H2/H/H+ghost and completed in 11:15, 10:10, and 33:43. Each case removed the
+explicit `ABFS_ORBITAL` block and regenerated its auxiliary basis with
+`exx_pca_threshold=1e-4`, giving dimensions `930/465/930`. H2 and H+ghost
+used byte-identical full-Coulomb files.
+
+| basis, regenerated PCA `1e-4` | D raw | D CP | BSSE | D0 CP | RPAc CP |
+|---|---:|---:|---:|---:|---:|
+| selected `3s2p2d1f1g` | 108.958806 | **107.888474** | 1.070332 | 84.348056 | 23.540417 |
+| candidate `3s2p2d1f2g` | 108.728861 | 107.713459 | 1.015402 | 84.348998 | 23.364461 |
+
+The raw second-g value is accidentally close to the 108.72-kcal/mol
+reference, but counterpoise lowers it by `1.015402` kcal/mol. Relative to the
+selected first-g basis, the second g raises the zero-order CP contribution by
+only `0.000941` kcal/mol and lowers the RPA-correlation CP contribution by
+`0.175956` kcal/mol, so total CP binding decreases by `0.175015` kcal/mol.
+The candidate is rejected. Both the second f and second g reduce the training
+objective without improving held-out full-Coulomb RPA/CP, so high-l shell
+growth now stops at `3s2p2d1f1g`; the next work must revise the loss
+construction and its frequency/channel weighting rather than add more AO
+shells.
