@@ -1650,3 +1650,157 @@ Full SIAB discover:   Ran 375 tests in 25.125s, OK; process wall 29.35 s
 All commands exited zero. This independent reconstruction closes Task 5 only
 at the code-regression gate. It does not freeze an alpha, run Task 6, optimize
 an orbital basis, or provide an RPA/SOS/CP physical result.
+
+### Task 6 rejected RED: invalid synthetic cell (2026-08-05)
+
+The first Task 6 RED attempt is retained only as rejected controller evidence.
+It started from exact commit
+`4e424434a36837d74548a951954675d2d50afb14`. The local source archive and
+remote copy had SHA256
+
+```text
+75d716f3e1ef304923bd4a05c5d52c64ecb80a7a12a2d704a30baad165fa6b72
+```
+
+The first test overlay had SHA256
+`d00c4e560a7ce8d04b6ac65683c0f549ae3bf3d0d1f3eac33e641a353c07e4a8`,
+and its test file had SHA256
+`323d30066f1e988981856555e40217377d0fd6853897eddc5a7793341d6646cd`.
+The non-checkout staged tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-red-4e424434-d00c4e56/extract/tree
+```
+
+Both test methods stopped on the intentionally absent analyzer, but the
+independent fixture check then failed before evaluator construction with
+`ValueError: provenance cell_bohr must contain nine row-major lattice
+components`. The fixture had only eight components. Therefore the two test
+failures are not accepted as Task 6 RED. The rejected `red_test.log` and
+`fixture_validation.log` SHA256 values are
+`a4bef08ec44eb83dd9ed9eb8522652816e270a3cc8ce5cde35e7080b3bb90a5b`
+and `cab0c543e7fa6ad0c152bf72672a390a54a8f136fa2a3cec21fba00bea5faecb`.
+
+### Task 6 corrected RED: five-basis ranking CLI (2026-08-05)
+
+The fixture was corrected to a nine-component row-major cell before any
+production analyzer existed. A fresh test overlay had SHA256
+
+```text
+31bc0750b48a26406616755904defb797f9848d4d541bd33dfe7c39e2c8e45e0
+```
+
+and `test_rpa_sensitive_ranking.py` had SHA256
+`6483c900be1692beefb8a5c667f2f465ec667ee6dcc06de298152ce793dbbdc1`.
+The same verified source archive plus this exact overlay was staged at
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-red-corrected-4e424434-31bc0750/extract/tree
+```
+
+This is an archive reconstruction, not a remote Git checkout. The environment
+was staged only after local and remote SHA256 checks matched for both the
+source archive and corrected test overlay. The environment was
+
+```text
+host:       login08
+Python:     /work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
+Python:     3.10.8
+PyTorch:    2.1.0+cpu
+PYTHONPATH: /work1/ghj/runtime/siab-projected-pi-mpl-20260801
+DOJO_PATH:  <absolute corrected RED tree>/Dojo-NC-SR
+```
+
+Before running RED, an independent preflight used the strict response-v1,
+source-v1, zero-order-audit, and coefficient readers plus
+`NormalizedPhysicalFamilyProjectedPiOptimization`. It consumed both
+625-primitive H/H2 pairs, both passing audits, and all five exact Nu layouts.
+Every frozen alpha, `0.0, 0.1, 0.25, 0.5, 1.0`, passed all four ordering gates
+in the success fixture; the separate stop fixture admitted none. The preflight
+log SHA256 was
+`cc3706e93a652ee8817c3ef6f59cbbaa7f0d8503676033595135e59bf58b60f8`.
+The environment record SHA256 was
+`c717cf8d41535c4f24bf02e52e8fa5e72e1ee4efbacd660a82fc8feb2f9762e7`.
+
+From that tree's `SIAB/tests`, the RED command was
+
+```bash
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+DOJO_PATH=<absolute corrected RED tree>/Dojo-NC-SR \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_rpa_sensitive_ranking
+```
+
+It ran two methods in 0.001 s and reported exactly two failures, zero errors,
+and exit code 1. Both failures were the explicit assertion that
+`analyze_rpa_sensitive_ranking.py` was absent. The corrected RED log SHA256
+was `bb74e8892007b7223a0c6f140d85cbd776dd9498216684aaca4d12145e67aa1c`.
+This is the accepted Task 6 RED.
+
+### Task 6 GREEN: synthetic ranking code gate (2026-08-05)
+
+The analyzer freezes the five `BASIS_NU` tuples and five `ALPHAS`, reads only
+H/H2 response, source, audit, and exactly five coefficient files, and invokes
+the existing fourth-order H/H2 RPA-sensitive evaluator for every alpha. Each
+alpha records every basis total, every H/H2 base, sensitivity, blended, and
+frequency loss, overlap conditions, trace-log differences, dielectric
+minima, and the four strict ordering gates. The selected value is
+`max(admissible_alpha)`. JSON also records all input hashes, validated
+zero-order audits, and the exact false flags
+`uses_sos_energy_as_numeric_input`, `uses_ghost_family`, and
+`new_candidate_was_evaluated`. JSON, Markdown, PNG, and PDF are all published
+through same-directory temporary files and atomic `os.replace`. The plot has
+separate H and H2 panels and compares base and sensitivity frequency losses
+for all five labels.
+
+The first production overlay had SHA256
+`08baaacfc1a4dec811102cbe4eb77754e627691d2c45503918866d260cf63648`.
+Its staged analyzer had SHA256
+`8bdc99f5b698e9ee2975169a7e8386c2af0ce1720c6120caa79be1119e92b999`.
+That run reached all implementations, but 31 tests reported one failure
+because the Markdown header used lower-case `base loss` and `sensitivity
+loss`. The other 30 tests passed. Its log SHA256 was
+`f1b12da7a5d56dd28abfb6040aa4bb64c5ce8b94495ee5025becf463db092ecf`.
+This run is retained as the expected TDD correction step and is not counted
+as GREEN.
+
+After changing only the visible header capitalization, the final production
+overlay and analyzer SHA256 values were
+
+```text
+production overlay
+  e4482b320dc20d8d908c18c3c6658490a6bb9093d9f155dfcefb2b9bf930f456
+analyze_rpa_sensitive_ranking.py
+  ab703e23d8d74b43908c74d971a29161bebb010a8c32e0012de153113e072797
+```
+
+Local and remote SHA256 checks matched for the source archive, corrected test
+overlay, and final production overlay.
+
+The final non-checkout reconstruction was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-green-final-4e424434-31bc0750-e4482b32/extract/tree
+```
+
+It used the corrected RED environment. The required command was
+
+```bash
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_rpa_sensitive_ranking test_projected_pi_analysis test_projected_pi
+```
+
+It ran 31 tests in 58.136 s and reported `OK`; measured process wall time was
+61.43 s. The environment and required-test log SHA256 values were
+`ef45404271eab0112f18d4128ad1b3f8962155b37b0debcb4dd42bc42cc2b3ca`
+and `dc232975f9f236d828408dc6f70dbeb2473045388285e55235313e7662569242`.
+A full `python -m unittest discover -v` then ran 377 tests in 71.810 s and
+reported `OK`; measured process wall time was 79.87 s and the log SHA256 was
+`f0cd28d0ed654f7283a528828565a6e04f4a597ee9bc39d0f202eac14c6981ca`.
+
+The success fixture deliberately has multiple admissible alphas and selects
+the largest, `1.0`. That value is synthetic test data only. This closes the
+Task 6 code gate; it is not the real historical five-basis gate, does not
+freeze a production alpha, does not optimize or evaluate a new candidate,
+does not read SOS/CP energies, and does not provide physical validation.
+Task 7 has not started.
