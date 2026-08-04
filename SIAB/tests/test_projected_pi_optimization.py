@@ -13,7 +13,7 @@ from projected_pi_optimization import (
     NormalizedPhysicalFamilyProjectedPiOptimization,
 )
 from sternheimer_source_pair import pair_response_and_source
-from test_projected_pi import coefficients, make_pair
+from test_projected_pi import coefficients, make_pair, scaled_pair
 
 
 def modified_pair(pair, q_scale=1.0, frequencies=None, weights=None):
@@ -52,6 +52,10 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         ).evaluate(coefficients(self.coefficient))
 
         torch.testing.assert_close(result.loss, expected.loss)
+        torch.testing.assert_close(
+            result.loss,
+            expected.results["H"].loss + expected.results["H2"].loss,
+        )
         self.assertEqual(tuple(result.family_results), ("H", "H2"))
         torch.testing.assert_close(
             result.frequency_ha,
@@ -72,6 +76,24 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         self.assertEqual(
             result.lowest_frequency_loss, result.frequency_loss[0]
         )
+
+    def test_rpa_sensitive_family_loss_uses_fourth_order_norm(self):
+        h = scaled_pair(self.h)
+        h2 = modified_pair(h, q_scale=1.17)
+        result = self.adapter(
+            ("H", h),
+            ("H2", h2),
+            sensitivity_alpha=0.25,
+            family_power=4,
+        ).evaluate(coefficients(self.coefficient))
+        expected = (
+            result.family_results["H"].loss.pow(4)
+            + result.family_results["H2"].loss.pow(4)
+        ).pow(0.25)
+
+        torch.testing.assert_close(result.loss, expected)
+        self.assertEqual(result.sensitivity_alpha, 0.25)
+        self.assertEqual(result.family_power, 4)
 
     def test_coefficient_gradient_matches_centered_difference(self):
         candidate = coefficients(self.coefficient, requires_grad=True)

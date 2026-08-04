@@ -344,7 +344,14 @@ class OptimizationLossTest(unittest.TestCase):
                 )
 
         config = normalize_loss_config({"mode": "pi_dpsi_joint"})
-        self.assertEqual(config["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(
+            config,
+            {
+                **LOSS_DEFAULTS,
+                "mode": "pi_dpsi_joint",
+                "projected_pi_rank_tolerance": 1.0e-12,
+            },
+        )
         for value in (0.0, 1.0, -1.0, float("nan"), True):
             with self.subTest(rank_tolerance=value):
                 with self.assertRaises((TypeError, ValueError)):
@@ -364,6 +371,92 @@ class OptimizationLossTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, field):
                     normalize_loss_config(
                         {"mode": "pi_dpsi_joint", field: value}
+                    )
+
+    @staticmethod
+    def rpa_sensitive_config(**updates):
+        config = {
+            "mode": "pi_rpa_sensitive_joint",
+            "projected_pi_rank_tolerance": 1.0e-12,
+            "projected_pi_sensitivity_alpha": 0.25,
+            "joint_dpsi_weight": 0.02,
+        }
+        config.update(updates)
+        return config
+
+    def test_rpa_sensitive_joint_accepts_exact_required_contract(self):
+        config = normalize_loss_config(self.rpa_sensitive_config())
+
+        self.assertEqual(config["mode"], "pi_rpa_sensitive_joint")
+        self.assertEqual(config["projected_pi_rank_tolerance"], 1.0e-12)
+        self.assertEqual(config["projected_pi_sensitivity_alpha"], 0.25)
+        self.assertEqual(config["joint_dpsi_weight"], 0.02)
+
+    def test_rpa_sensitive_joint_requires_explicit_alpha(self):
+        config = self.rpa_sensitive_config()
+        config.pop("projected_pi_sensitivity_alpha")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pi_rpa_sensitive_joint requires projected_pi_sensitivity_alpha",
+        ):
+            normalize_loss_config(config)
+
+    def test_rpa_sensitive_joint_rejects_nonfinite_alpha(self):
+        for alpha in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(
+                    ValueError, "projected_pi_sensitivity_alpha.*finite"
+                ):
+                    normalize_loss_config(
+                        self.rpa_sensitive_config(
+                            projected_pi_sensitivity_alpha=alpha
+                        )
+                    )
+
+    def test_rpa_sensitive_joint_rejects_alpha_below_zero(self):
+        with self.assertRaisesRegex(
+            ValueError, "projected_pi_sensitivity_alpha"
+        ):
+            normalize_loss_config(
+                self.rpa_sensitive_config(projected_pi_sensitivity_alpha=-0.1)
+            )
+
+    def test_rpa_sensitive_joint_rejects_alpha_above_one(self):
+        with self.assertRaisesRegex(
+            ValueError, "projected_pi_sensitivity_alpha"
+        ):
+            normalize_loss_config(
+                self.rpa_sensitive_config(projected_pi_sensitivity_alpha=1.1)
+            )
+
+    def test_legacy_modes_reject_rpa_sensitivity_alpha(self):
+        for mode in (
+            "st_only",
+            "st_constrained",
+            "st_dpsi_joint",
+            "pi_dpsi_joint",
+        ):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError):
+                    normalize_loss_config(
+                        {
+                            "mode": mode,
+                            "projected_pi_sensitivity_alpha": 0.25,
+                        }
+                    )
+
+    def test_rpa_sensitive_joint_rejects_other_loss_penalties(self):
+        for field, value in (
+            ("radial_tail_weight", 1.0),
+            ("radial_tail_radius", 4.0),
+            ("low_frequency_guard_weight", 1.0),
+            ("low_frequency_guard_tolerance", 0.1),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, field):
+                    normalize_loss_config(
+                        self.rpa_sensitive_config(**{field: value})
                     )
 
     def test_pi_dpsi_joint_uses_projected_pi_as_primary(self):

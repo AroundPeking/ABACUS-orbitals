@@ -32,6 +32,7 @@ from IO.func_C import read_C_init, write_C
 from IO.read_sternheimer import read_sternheimer
 import main as siab_main
 import main_each as siab_main_each
+from optimization_loss import LOSS_DEFAULTS
 from sternheimer_data import PrimitiveBlock, SternheimerData
 from sternheimer_spillage import OrbitalColumn
 from test_sternheimer_spillage import make_sternheimer_data
@@ -81,6 +82,10 @@ PROJECTED_PI_DIAGNOSTICS = {
     "lowest_projected_pi_loss": 0.19,
     "projected_pi_rank_tolerance": 1.0e-12,
 }
+
+
+class RoutingConstructionObserved(RuntimeError):
+    pass
 
 
 @contextlib.contextmanager
@@ -415,6 +420,15 @@ class MainRoutingTest(unittest.TestCase):
             },
         ]
 
+    @staticmethod
+    def rpa_sensitive_loss():
+        return {
+            "mode": "pi_rpa_sensitive_joint",
+            "projected_pi_rank_tolerance": 1.0e-12,
+            "projected_pi_sensitivity_alpha": 0.25,
+            "joint_dpsi_weight": 0.02,
+        }
+
     def test_loads_one_strict_source_response_audit_pair_per_family(self):
         targets = self.projected_pi_targets()
         responses = ("H response", "H2 response")
@@ -493,6 +507,293 @@ class MainRoutingTest(unittest.TestCase):
                     {"loss": {"mode": "st_dpsi_joint"}},
                 ],
             )
+
+    def test_rpa_sensitive_loader_builds_one_physical_pair_per_family(self):
+        targets = self.projected_pi_targets()
+        responses = ("H response", "H2 response")
+        sources = ("H source", "H2 source")
+        pairs = ("H pair", "H2 pair")
+        audits = ("H audit", "H2 audit")
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            side_effect=responses,
+        ) as response_reader, mock.patch.object(
+            siab_main.IO.read_sternheimer_source,
+            "read_sternheimer_source",
+            side_effect=sources,
+        ) as source_reader, mock.patch.object(
+            siab_main,
+            "apply_target_element_aliases",
+            side_effect=lambda data, entry: data,
+        ), mock.patch.object(
+            siab_main,
+            "pair_response_and_source",
+            side_effect=pairs,
+        ) as pairer, mock.patch.object(
+            siab_main,
+            "read_zero_order_audit",
+            side_effect=audits,
+        ) as audit_reader:
+            loaded, stages = siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
+        self.assertEqual(stages[0]["mode"], "pi_rpa_sensitive_joint")
+        self.assertEqual(loaded.projected_pi_pairs, tuple(zip(("H", "H2"), pairs)))
+        self.assertEqual(loaded.zero_order_audits, tuple(zip(("H", "H2"), audits)))
+        self.assertEqual(response_reader.call_count, 2)
+        self.assertEqual(source_reader.call_count, 2)
+        pairer.assert_has_calls(
+            [mock.call(responses[0], sources[0]), mock.call(responses[1], sources[1])]
+        )
+        audit_reader.assert_has_calls(
+            [
+                mock.call(Path("H_audit.json"), "H"),
+                mock.call(Path("H2_audit.json"), "H2"),
+            ]
+        )
+
+    def test_rpa_sensitive_loader_requires_exactly_h_and_h2(self):
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": [self.projected_pi_targets()[0]]},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
+    def test_rpa_sensitive_loader_rejects_ghost_target(self):
+        targets = self.projected_pi_targets()
+        targets[1] = {**targets[1], "role": "ghost"}
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ), self.assertRaisesRegex(ValueError, "ghost"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
+    def test_rpa_sensitive_loader_requires_source_path(self):
+        targets = self.projected_pi_targets()
+        targets[0] = {
+            key: value
+            for key, value in targets[0].items()
+            if key != "source_path"
+        }
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ), self.assertRaisesRegex(ValueError, "source_path"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
+    def test_rejects_mixed_rpa_sensitive_and_other_loss_stages(self):
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), self.assertRaisesRegex(
+            ValueError, "cannot mix.*pi_rpa_sensitive_joint"
+        ):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": self.projected_pi_targets()},
+                [
+                    {"loss": self.rpa_sensitive_loss()},
+                    {"loss": {"mode": "pi_dpsi_joint"}},
+                ],
+            )
+
+    def _run_until_projected_pi_construction(self, stage):
+        pairs = (("H", object()), ("H2", object()))
+        targets = siab_main.LoadedSternheimerTargets(
+            (),
+            (types.SimpleNamespace(data=(object(),)),),
+            pairs,
+            (),
+        )
+        file_list = {"origin": ["origin"], "linear": ["dpsi"]}
+        info_element = {"H": info(Nl=1, Ne=2, Nu=[2])}
+        coefficient = {
+            "H": [
+                torch.eye(2, dtype=torch.float64, requires_grad=True)
+            ]
+        }
+        constructor = mock.Mock(side_effect=RoutingConstructionObserved)
+        legacy_constructor = mock.Mock(
+            side_effect=RoutingConstructionObserved
+        )
+        returned = (
+            file_list,
+            info(Nt_all=["H"], Nu={"H": [2]}),
+            {},
+            [{"loss": stage}],
+            {
+                "init_from_file": False,
+                "freeze_orbitals": [
+                    {"element": "H", "l": 0, "zeta": 1}
+                ],
+                "seed": 0,
+            },
+            {"same_band": True},
+            {"Rcut": 6.0},
+        )
+        with mock.patch.object(
+            siab_main.IO.read_json, "read_json", return_value=returned
+        ), mock.patch.object(
+            siab_main,
+            "_load_sternheimer_data",
+            return_value=(targets, [stage]),
+        ), mock.patch.object(
+            siab_main.IO.cal_weight, "cal_weight", return_value="weight"
+        ), mock.patch.object(
+            siab_main.IO.read_QSV, "read_file_head", return_value="kst"
+        ), mock.patch.object(
+            siab_main.IO.change_info,
+            "change_info",
+            return_value=(["structure"], info_element),
+        ), mock.patch.object(
+            siab_main.IO.read_QSV,
+            "read_QSV",
+            return_value=("q", "s", "v"),
+        ), mock.patch.object(
+            siab_main.IO.func_C,
+            "random_C_init",
+            return_value=coefficient,
+        ), mock.patch.object(
+            siab_main.orbital, "set_E", return_value="energy"
+        ), mock.patch.object(
+            siab_main,
+            "_normalize_initial_coefficients",
+            return_value=None,
+        ), mock.patch.object(
+            siab_main,
+            "NormalizedPhysicalFamilyProjectedPiOptimization",
+            constructor,
+        ), mock.patch.object(
+            siab_main,
+            "NormalizedPhysicalFamilySpillage",
+            legacy_constructor,
+        ), self.assertRaises(RoutingConstructionObserved):
+            siab_main.main()
+        return pairs, constructor, legacy_constructor
+
+    def test_rpa_sensitive_routes_alpha_rank_and_fourth_order_power(self):
+        stage = {
+            **LOSS_DEFAULTS,
+            **self.rpa_sensitive_loss(),
+            "condition_limit": 7.0e8,
+        }
+        pairs, constructor, legacy_constructor = (
+            self._run_until_projected_pi_construction(stage)
+        )
+
+        constructor.assert_called_once_with(
+            *pairs,
+            relative_rank_tolerance=1.0e-12,
+            condition_limit=7.0e8,
+            sensitivity_alpha=0.25,
+            family_power=4,
+        )
+        legacy_constructor.assert_not_called()
+
+    def test_pi_dpsi_joint_adapter_construction_remains_unchanged(self):
+        stage = {
+            **LOSS_DEFAULTS,
+            "mode": "pi_dpsi_joint",
+            "projected_pi_rank_tolerance": 1.0e-12,
+            "condition_limit": 7.0e8,
+        }
+        pairs, constructor, legacy_constructor = (
+            self._run_until_projected_pi_construction(stage)
+        )
+
+        constructor.assert_called_once_with(
+            *pairs,
+            relative_rank_tolerance=1.0e-12,
+            condition_limit=7.0e8,
+        )
+        legacy_constructor.assert_not_called()
+
+    def test_rpa_sensitive_main_requires_origin(self):
+        stage = {**LOSS_DEFAULTS, **self.rpa_sensitive_loss()}
+        targets = siab_main.LoadedSternheimerTargets(
+            (), (types.SimpleNamespace(data=(object(),)),), (), ()
+        )
+        returned = (
+            {"sternheimer": ["target"]},
+            object(),
+            object(),
+            [{"loss": stage}],
+            {"seed": 0},
+            object(),
+            object(),
+        )
+        with mock.patch.object(
+            siab_main.IO.read_json, "read_json", return_value=returned
+        ), mock.patch.object(
+            siab_main,
+            "_load_sternheimer_data",
+            return_value=(targets, [stage]),
+        ), self.assertRaisesRegex(
+            ValueError, "pi_rpa_sensitive_joint requires origin and dpsi data"
+        ):
+            siab_main.main()
+
+    def test_rpa_sensitive_main_requires_linear_dpsi(self):
+        stage = {**LOSS_DEFAULTS, **self.rpa_sensitive_loss()}
+        targets = siab_main.LoadedSternheimerTargets(
+            (), (types.SimpleNamespace(data=(object(),)),), (), ()
+        )
+        returned = (
+            {"origin": ["origin"], "sternheimer": ["target"]},
+            object(),
+            object(),
+            [{"loss": stage}],
+            {"seed": 0},
+            {"same_band": True},
+            object(),
+        )
+        with mock.patch.object(
+            siab_main.IO.read_json, "read_json", return_value=returned
+        ), mock.patch.object(
+            siab_main,
+            "_load_sternheimer_data",
+            return_value=(targets, [stage]),
+        ), mock.patch.object(
+            siab_main.IO.cal_weight,
+            "cal_weight",
+            side_effect=AssertionError(
+                "new-mode routing did not reject missing dpsi"
+            ),
+        ), self.assertRaisesRegex(
+            ValueError, "pi_rpa_sensitive_joint requires linear dpsi data"
+        ):
+            siab_main.main()
 
     def test_projected_pi_json_records_full_training_provenance(self):
         with tempfile.TemporaryDirectory() as directory:

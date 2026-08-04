@@ -504,7 +504,8 @@ SOS/CP gate into distinct commits. It also requires an autograd-versus-centered
 finite-difference check before the new loss can be used. At design-freeze time
 the state was **plan only**: no RED test, implementation, historical ranking,
 new optimization, or physical result had been run. The current state is now
-**Task 1 RED**; no implementation, historical ranking, new optimization, or
+**Task 3 RED**. Task 2 GREEN below is historical evidence, not the current
+stage. No Task 4 implementation, historical ranking, new optimization, or
 physical result exists.
 
 ### Task 1 RED: per-family RPA sensitivity (2026-08-04)
@@ -573,7 +574,7 @@ Every new test stopped for the same feature-specific reason:
 'sensitivity_alpha'`. The exit status was 1. There was no import, fixture,
 or test-algebra failure. This is RED evidence only: no implementation or physical result exists.
 
-### Task 2 GREEN: per-family RPA sensitivity implementation (2026-08-04)
+### Historical Task 2 GREEN: per-family RPA sensitivity implementation (2026-08-04)
 
 `SIAB/opt_orb_pytorch_dpsi/projected_pi.py` now provides the standalone
 `evaluate_rpa_sensitivity(reference_pi, candidate_pi, frequency_weight,
@@ -661,3 +662,97 @@ endpoint, out-of-range and nonfinite alpha plus reference/candidate finite and
 Hermitian validation, and 5 optimization-adapter regression tests.
 
 **GREEN code test only; no historical ranking, optimization, or physical result**
+
+### Current Task 3 RED: RPA-sensitive joint mode (2026-08-04)
+
+This RED-only change modifies the three requested test files and no production
+Python. The `df_dcu` GitHub probe failed with
+`ssh: Could not resolve hostname github.com: Name or service not known`, so the
+test used the documented source-archive plus exact-overlay fallback. The
+remote tree was
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-red.5Q0Dgr`.
+
+The committed source was `SIAB` from starting commit
+`21238ce7fe8bf91498da589b1bf2f0ca5f180874`. Its uncompressed `git archive`
+SHA256 was:
+
+```text
+9c2f77c8315417c84e87577f1893c9c7ad4bcd03cbc39ec3d56172af327dac0b
+```
+
+The overlay archive SHA256 was
+`66ac86df42018e8bb37672c94ed6ed67e0bf2d2077ae17c785a9bb1727975ee6`.
+It contained exactly:
+
+```text
+SIAB/tests/test_projected_pi_optimization.py
+  c6b5699fccb2adb2c0da32db64e6d3d21d640042a713425b6dec5660aafb319f
+SIAB/tests/test_loss_and_freeze.py
+  24a0c0bed022284fe354e8ca2c310c063c8d38ca3963621dcb37501e24b546b3
+SIAB/tests/test_main_sternheimer.py
+  767b68cfcc2f7294f623189ee9babbc0cabde09bd311d8533e51224a593e162a
+```
+
+The untouched Task 2 production files in that source archive had SHA256:
+
+```text
+SIAB/opt_orb_pytorch_dpsi/projected_pi_optimization.py
+  134bb7085e87311adeb6940a82827399cb6770959b1601c086f5c71cf271c8e3
+SIAB/opt_orb_pytorch_dpsi/optimization_loss.py
+  c063ecfa23270beca67737b54035a7a7fcf5505909a073b49d9671be4a9da10d
+SIAB/opt_orb_pytorch_dpsi/main.py
+  f83ae7540186947e58c9ff671b629719cf5c86083c78f0e6983c28d066819056
+```
+
+Local and remote SHA256 values matched before the test. The exact command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-red.5Q0Dgr/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+```
+
+The command exited 1 after 4.330 seconds. It ran 86 test methods. All 69
+pre-existing methods passed, as did 5 new backward-compatibility/rejection
+methods. Therefore 74 test methods passed. Ten new methods produced 15 failure
+records because the nonfinite-alpha method has 3 failing subtests and the
+forbidden-penalty method has 4 failing subtests; 2 other new methods errored.
+The exact unittest summary was `FAILED (failures=15, errors=2)`.
+
+The new failing methods and feature-specific reasons were:
+
+- `test_rpa_sensitive_family_loss_uses_fourth_order_norm`: error because the
+  adapter does not accept `sensitivity_alpha` (and therefore cannot yet accept
+  the frozen fourth-order contract).
+- `test_rpa_sensitive_joint_accepts_exact_required_contract`: error because
+  `projected_pi_sensitivity_alpha` is still an unknown config key.
+- `test_rpa_sensitive_joint_requires_explicit_alpha`: the new mode is still
+  unknown, so the required-alpha diagnostic is absent.
+- `test_rpa_sensitive_joint_rejects_nonfinite_alpha`: 3 failure records for
+  `nan`, `inf`, and `-inf`; unknown-key rejection occurs before finite-alpha
+  validation.
+- `test_rpa_sensitive_joint_rejects_other_loss_penalties`: 4 failure records;
+  unknown-alpha rejection occurs before the four mode-specific zero-penalty
+  diagnostics.
+- `test_rejects_mixed_rpa_sensitive_and_other_loss_stages`: routing still
+  reports only the legacy `pi_dpsi_joint` mixing rule.
+- `test_rpa_sensitive_loader_builds_one_physical_pair_per_family`: the loader
+  returns no projected-Pi H/H2 pairs for the new mode.
+- `test_rpa_sensitive_loader_requires_exactly_h_and_h2`: the new mode accepts
+  a lone H target instead of rejecting it.
+- `test_rpa_sensitive_loader_requires_source_path`: the new mode does not yet
+  require the source side of the physical pair.
+- `test_rpa_sensitive_main_requires_origin`: routing emits the legacy
+  Sternheimer origin/dpsi diagnostic.
+- `test_rpa_sensitive_main_requires_linear_dpsi`: routing reaches legacy
+  `cal_weight` instead of rejecting missing dpsi; the deliberate sentinel
+  confirms that exact boundary.
+- `test_rpa_sensitive_routes_alpha_rank_and_fourth_order_power`: the new mode
+  enters the legacy spillage route, so the projected-Pi adapter is never called.
+
+There was no import, fixture, setup, or test-algebra error. The five new tests
+that already pass cover alpha rejection in every legacy mode, below/above-range
+alpha rejection, ghost rejection, and exact unchanged `pi_dpsi_joint` adapter
+construction. This is **Task 3 RED only**: Task 4 has not started, and there is
+no historical ranking, optimization, candidate orbital, or physical result.
