@@ -43,6 +43,15 @@ RANK_TOLERANCE = 1.0e-12
 CONDITION_LIMIT = 1.0e12
 
 
+class StoreCoefficientOnce(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(
+                f"coefficient option {option_string} may be specified only once"
+            )
+        setattr(namespace, self.dest, values)
+
+
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(
         description="Rank five archived SIAB bases with RPA-sensitive losses."
@@ -56,6 +65,7 @@ def parse_arguments(argv=None):
             f"--{basis_name.replace('_', '-')}",
             required=True,
             type=Path,
+            action=StoreCoefficientOnce,
         )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser.parse_args(argv)

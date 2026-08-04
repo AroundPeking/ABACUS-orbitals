@@ -1705,7 +1705,7 @@ source archive and corrected test overlay. The environment was
 ```text
 host:       login08
 Python:     /work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
-Python:     3.10.8
+Python:     3.10.13
 PyTorch:    2.1.0+cpu
 PYTHONPATH: /work1/ghj/runtime/siab-projected-pi-mpl-20260801
 DOJO_PATH:  <absolute corrected RED tree>/Dojo-NC-SR
@@ -1804,3 +1804,89 @@ Task 6 code gate; it is not the real historical five-basis gate, does not
 freeze a production alpha, does not optimize or evaluate a new candidate,
 does not read SOS/CP energies, and does not provide physical validation.
 Task 7 has not started.
+
+### Task 6 spec-review fix: reject duplicate coefficient options (2026-08-05)
+
+Commit `c1236f29fa819e76c0d63919811e00b1eb3dac72` is preserved as the first
+Task 6 implementation. Spec review found that ordinary argparse `store`
+actions silently accepted a repeated coefficient option and retained its last
+value, so the CLI did not yet enforce exactly one occurrence of each frozen
+coefficient label. The same review also checked the authoritative
+`corrected_red_environment.txt` and `green_environment.txt` records and found
+that the previously recorded patch-level Python version was wrong; the exact
+version is 3.10.13.
+
+For the follow-up RED, a local Git archive of `c1236f29` and a test-only patch
+were staged with matching local/remote SHA256 values:
+
+```text
+source archive
+  8c06ac5ec2377eca7b8a99ccd9352f85e07354e5e5dbdc3e589d90b7dd8c0e50
+test patch
+  a4bc2851ca789a071c38c144e4f16aea483a27f3741b8aa7b0c2148744bd6001
+test_rpa_sensitive_ranking.py
+  cc0b9f66c840d1cc17217b4831040549a508a3705c52bea6467f2a02e68dc9cd
+```
+
+The immutable archive-plus-patch tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-review-red-c1236f29-a4bc2851/extract/tree
+```
+
+This is not a remote checkout. On `login08`, with Python 3.10.13 at
+`/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python`, PyTorch 2.1.0+cpu,
+`PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801`, and tree-local
+`DOJO_PATH`, the command
+
+```bash
+python -m unittest -v test_rpa_sensitive_ranking
+```
+
+ran four tests in 74.655 s. Exactly one test failed because the unchanged
+analyzer returned 0 after `--two-d` was supplied twice; the missing-option,
+Galerkin-stop, and largest-alpha tests passed. The environment and RED log
+SHA256 values were
+`870b29729dad27c78ae47100f4e2deefdf336a4166b1d60b5b33168a90b11a68`
+and `de431be83d073f0d0cf0a69f0d0b53dcef1e011bd333def3407ef2586caea58f`.
+
+The minimal fix adds a coefficient-specific `StoreCoefficientOnce` argparse
+action. The first occurrence is stored; a second occurrence exits 2 with
+`coefficient option --two-d may be specified only once`. All five distinct
+coefficient options remain independently required, and the missing-option
+test confirms omission still exits 2 through argparse's required-option
+check. The production patch and fixed analyzer SHA256 values are
+
+```text
+production patch
+  6a56cba99a2cd9e364d8b28a1c1d4f04afb4e3bdbc3e1de63236aac0e544d6d2
+analyze_rpa_sensitive_ranking.py
+  8fe60239a2e63a7f55112edadeb9400e9487410cd8a1e44036f50acc7eca35d5
+```
+
+The source archive, test patch, and production patch again matched locally
+and remotely. The final non-checkout GREEN tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-review-green-c1236f29-a4bc2851-6a56cba9/extract/tree
+```
+
+The required command
+
+```bash
+python -m unittest -v \
+  test_rpa_sensitive_ranking test_projected_pi_analysis test_projected_pi
+```
+
+ran 33 tests in 68.639 s and reported `OK`; measured process wall time was
+73.92 s. The environment and required-test log SHA256 values were
+`7c41580e91a00c906c63543326591f918fb6317be35372ae01996e0dcd0d44ee`
+and `cb0cf98c2ef7ae7e89e3461c2c681d14231570f565beaf932fe194ad7044284e`.
+Full `python -m unittest discover -v` ran 379 tests in 82.103 s and reported
+`OK`; measured process wall time was 87.44 s and the log SHA256 was
+`4cc15d400924a0d593346ca545a967fcc9020207da40d80f71ff80a8c94a45f5`.
+
+This follow-up closes only the Task 6 CLI occurrence contract and corrects
+its recorded environment. It does not run the real historical gate, freeze a
+production alpha, optimize or evaluate a new candidate, read SOS/CP energy as
+numeric input, or provide physical validation. Task 7 has not started.

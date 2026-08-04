@@ -286,6 +286,41 @@ class RpaSensitiveRankingTest(unittest.TestCase):
         command.extend(("--output-dir", str(output)))
         return command
 
+    def test_duplicate_coefficient_option_is_rejected(self):
+        output = self.root / "duplicate"
+        command = self.command(output)
+        command.extend(("--two-d", str(self.coefficients["two_d"])))
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn(
+            "coefficient option --two-d may be specified only once",
+            completed.stderr,
+        )
+        self.assertFalse(output.exists())
+
+    def test_missing_coefficient_option_remains_rejected(self):
+        output = self.root / "missing"
+        command = self.command(output)
+        option_index = command.index("--second-g")
+        del command[option_index : option_index + 2]
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn(
+            "the following arguments are required: --second-g",
+            completed.stderr,
+        )
+        self.assertFalse(output.exists())
+
     def test_selects_largest_of_multiple_admissible_alphas_and_writes_complete_outputs(self):
         output = self.root / "pass"
         completed = subprocess.run(
