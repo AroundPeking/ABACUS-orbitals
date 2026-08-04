@@ -506,6 +506,26 @@ class ProjectedPiTest(unittest.TestCase):
             sensitivity_alpha=0.25,
         ).evaluate(coefficients(self.coefficient))
         self._assert_all_losses_close(permuted, original)
+        torch.testing.assert_close(
+            permuted.candidate_pi,
+            original.candidate_pi[:, permutation][:, :, permutation],
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        torch.testing.assert_close(
+            permuted.reference_pi,
+            original.reference_pi[:, permutation][:, :, permutation],
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        self.assertGreater(
+            float(
+                torch.max(
+                    torch.abs(permuted.candidate_pi - original.candidate_pi)
+                )
+            ),
+            1.0e-6,
+        )
 
     def test_rpa_sensitivity_rejects_nonpositive_reference_dielectric(self):
         q = self.q.clone()

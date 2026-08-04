@@ -512,14 +512,14 @@ physical result exists.
 The RED-only test source was added without changing production Python. The
 remote GitHub checkout could not be created because `github.com` did not
 resolve on `df_dcu`, so the test used the permitted disposable copy at
-`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-review`.
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-covariance`.
 Its source state was a `git archive` of `SIAB` from
-`9aaa80631e538cd3a6d5cef3efe0e347498a1926` with archive SHA256
-`42458a7b735b29e6e0f98784d5d22132123e74667f44fa81ac93a8cbbe4ed676`,
+`36735e60f7be06a307ea620799fb637b5f422ffc` with archive SHA256
+`25d3d32dda10a7a44a46d5d4698dda1e931798184baa80cffc7340aee5d33185`,
 plus only the uncommitted `SIAB/tests/test_projected_pi.py` overlay with
-SHA256 `385169cdd222e17c5d4d17f10ee253105d144d0685e883062fa10dcccef13d15`.
+SHA256 `fbccd4ea414eaeeb259b50a50288f4186825cee67f1d28e4b98fdc66445c3a23`.
 The overlay archive SHA256 was
-`eeabf8cbe76a9fece233ed03f72bdf5d51ef13373b53b4b23808cbe423a0ad6a`.
+`98dbe377a1e6fc51b3461d4269dddd090152cdb3e8cfb67578b51adda20b5910`.
 The untouched production `projected_pi.py` had SHA256
 `f78d08285b296a0a41acb557bf7df622ebc8b3e74e44ba2548705ff8e02e505b`.
 
@@ -537,17 +537,27 @@ values are:
 Thus each fixture has exactly one invalid side at `relative_tolerance=1e-12`;
 the reference test no longer depends on reference-first validation order.
 
+Common auxiliary-channel permutation coverage now includes covariance of both
+`candidate_pi` and `reference_pi`, in addition to scalar-loss invariance. Both
+matrices must equal the original matrix with both channel axes permuted, using
+`rtol=atol=1e-13`. On df_dcu the maximum covariance residual was exactly zero
+for both matrices, while
+`max(abs(permuted.candidate_pi - original.candidate_pi))` was
+`5.0198819048475868e-05`, above the explicit `1e-6` nontriviality threshold.
+Thus an evaluator that ignores the auxiliary-channel labels cannot pass this
+test.
+
 The exact RED command was:
 
 ```bash
-cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-review/SIAB/tests
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-covariance/SIAB/tests
 PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
 /work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
   -m unittest -v test_projected_pi
 ```
 
-It ran 19 tests: all 11 legacy tests passed and exactly these 8 new tests
-errored as expected:
+It ran 19 tests in 0.166 seconds: all 11 legacy tests passed and exactly these
+8 new tests errored as expected:
 
 - `test_rpa_sensitivity_matches_independent_eigendecomposition`
 - `test_rpa_sensitivity_directional_gradients_match_centered_difference`
