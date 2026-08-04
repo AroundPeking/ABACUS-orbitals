@@ -456,3 +456,40 @@ objective without improving held-out full-Coulomb RPA/CP, so high-l shell
 growth now stops at `3s2p2d1f1g`; the next work must revise the loss
 construction and its frequency/channel weighting rather than add more AO
 shells.
+
+## RPA-sensitive fixed-size redesign: design frozen
+
+The next cycle keeps the selected `3s2p2d1f1g` size fixed at 35 AO per H and
+continues to freeze the DZP `1s,2s,1p` columns. It does not add another high-l
+shell. The design is recorded in
+`docs/superpowers/specs/2026-08-04-siab-rpa-sensitive-response-loss-design.md`.
+
+For the primitive-reference symmetrized response, the RPA integrand and its
+first variation are
+
+```text
+F(Pi) = Tr[log(I-Pi) + Pi]
+delta F = Tr[(I-(I-Pi_ref)^-1) delta Pi].
+```
+
+The implementation will use this derivative to construct a positive
+frequency/channel sensitivity norm. It retains a frozen fraction of the
+current complete-matrix projected-Pi loss, because a scalar RPA-integrand
+difference could cancel between channels or frequencies. Before any new
+optimization, the revised metric must reproduce the independent decisions
+for `3s2p2d`, first f, first g, rejected second f, and rejected second g. If no
+frozen blend reproduces all four promotions/rejections, the projected target
+is stopped rather than tuned to the CP energy.
+
+The isolated H loss becomes an explicit no-regression gate, while H+ghost
+remains outside the optimizer. The first new candidate is promoted only if it
+improves both the current `107.888474` kcal/mol CP binding and the current
+`1.070332` kcal/mol BSSE under the same PCA-`1e-4`, all-band, full-Coulomb
+contract. This is a development gate, not the final workflow.
+
+The final release criterion is that raw, CP, and Delta-ST H2 binding agree to
+`0.1 kcal/mol` at `0.60`, `0.74085`, `1.00`, and `1.50` Angstrom, with Ecut
+and frequency convergence below the same tolerance. Only after that gate is
+the basis frozen for production; production then uses the raw SOS-RPA result
+without H+ghost or CP correction. At this point only the design is complete:
+no new ranking, optimized orbital, or RPA result has been produced.
