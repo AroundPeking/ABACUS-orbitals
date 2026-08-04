@@ -2204,3 +2204,46 @@ This remains a synthetic Task 6 code gate only. It does not run the real
 historical ranking, freeze a production alpha, optimize/evaluate a new
 candidate, consume SOS/CP energy numerically, or establish physical
 validation. Task 7 has not started.
+
+### Task 6 controller-independent final regression (2026-08-05)
+
+After specification and code-quality approval, the controller rebuilt a
+fresh tree directly from final commit
+`89791f573b4f2cd3bf1dd91e7091d3eeac313b9f`. It used a tracked
+`git archive` of `SIAB` and `Dojo-NC-SR`, did not reuse any implementation
+overlay, was not a remote checkout, and contained no AppleDouble entries.
+The local and remote archive SHA256 was
+
+```text
+5a42b9d5bfa62285c05da79b11fde6f91ff24fda1ba6e4bb8c26e16d4f967629
+```
+
+The independent tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-controller-final-89791f57/tree
+```
+
+The staged analyzer and test SHA256 values were respectively
+`48d9753fd15dea8946e1012a70be96eb9b00018058b9069e076a4270943260e1`
+and
+`eddd03f7473cb1598bc7e35630ec95dbfbc2482f0da51a2aa37363d9eb15e0bd`.
+On `login08` with Linux x86_64, Python 3.10.13, PyTorch 2.1.0+cpu,
+Matplotlib 3.10.3, tree-local `DOJO_PATH`, and the frozen `PYTHONPATH`, the
+controller reran all three gates:
+
+```text
+Task 6 module:       Ran 15 tests in 167.866s, OK; real 172.98s
+Required modules:    Ran 44 tests in 200.763s, OK; real 204.17s
+Full SIAB discover:  Ran 390 tests in 185.092s, OK; real 191.41s
+```
+
+The corresponding log SHA256 values were
+`c4a64c03c45bc050cc3636b8733e571e5c5aac1f6219079235a32e802ee7d451`,
+`fcfd4e0853c128e4c188383352deff9a080daba9f7cf231a7f08c19cea6f088e`,
+and
+`8d78eb7e8bbfc11916a7700c68f0ff1db50705122d42a26bbc49d7cb314cfceb`.
+All commands exited zero. This closes only the Task 6 code-regression gate;
+it does not execute the real historical ranking, freeze alpha, optimize a
+basis, use SOS/CP energy numerically, or establish physical validation.
+Task 7 has not started.
