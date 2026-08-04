@@ -501,28 +501,46 @@ The executable task sequence is now recorded in
 It separates RED tests, the backward-compatible implementation, historical
 five-basis alpha selection, fixed-size optimization, and the equilibrium
 SOS/CP gate into distinct commits. It also requires an autograd-versus-centered
-finite-difference check before the new loss can be used. The current state is
-still **plan only**: no RED test, implementation, historical ranking, new
-optimization, or physical result has been run.
+finite-difference check before the new loss can be used. At design-freeze time
+the state was **plan only**: no RED test, implementation, historical ranking,
+new optimization, or physical result had been run. The current state is now
+**Task 1 RED**; no implementation, historical ranking, new optimization, or
+physical result exists.
 
 ### Task 1 RED: per-family RPA sensitivity (2026-08-04)
 
 The RED-only test source was added without changing production Python. The
 remote GitHub checkout could not be created because `github.com` did not
 resolve on `df_dcu`, so the test used the permitted disposable copy at
-`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code`.
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-review`.
 Its source state was a `git archive` of `SIAB` from
-`133ecf2bf92471eb5f8e66310a4e3a4b12f575ec` with archive SHA256
-`a6a920bfc06dac6a25764225c42f2136e4fad49cb263e9c18f2232e2e8f09bf6`,
+`9aaa80631e538cd3a6d5cef3efe0e347498a1926` with archive SHA256
+`42458a7b735b29e6e0f98784d5d22132123e74667f44fa81ac93a8cbbe4ed676`,
 plus only the uncommitted `SIAB/tests/test_projected_pi.py` overlay with
-SHA256 `a5f82bb64695b0c6b4b2fe2ca80cea8b0413615fcacf4b35d3a2c374b8600fc0`.
+SHA256 `385169cdd222e17c5d4d17f10ee253105d144d0685e883062fa10dcccef13d15`.
+The overlay archive SHA256 was
+`eeabf8cbe76a9fece233ed03f72bdf5d51ef13373b53b4b23808cbe423a0ad6a`.
 The untouched production `projected_pi.py` had SHA256
 `f78d08285b296a0a41acb557bf7df622ebc8b3e74e44ba2548705ff8e02e505b`.
+
+The corrected error fixtures independently calculate the per-frequency
+minimum eigenvalue of `I-Pi` before calling the unsupported API. Their df_dcu
+values are:
+
+- reference-only invalid: reference
+  `[0.9904237367701484, -0.05052223708956394]`, candidate
+  `[0.9896330875745136, 0.5220694792539988]`;
+- candidate-only invalid: reference
+  `[0.04237367701483419, 0.5224898922320165]`, candidate
+  `[-0.036691242548635206, 0.7827588542063632]`.
+
+Thus each fixture has exactly one invalid side at `relative_tolerance=1e-12`;
+the reference test no longer depends on reference-first validation order.
 
 The exact RED command was:
 
 ```bash
-cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code/SIAB/tests
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task1-review/SIAB/tests
 PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
 /work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
   -m unittest -v test_projected_pi

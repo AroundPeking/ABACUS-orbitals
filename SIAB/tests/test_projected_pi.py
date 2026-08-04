@@ -209,6 +209,10 @@ def direct_rpa_sensitivity(reference_pi, candidate_pi, frequency_weight):
     }
 
 
+def minimum_dielectric_eigenvalue(pi):
+    return torch.min(1.0 - torch.linalg.eigvalsh(pi), dim=-1).values
+
+
 class ProjectedPiTest(unittest.TestCase):
     def setUp(self):
         self.pair, self.d, self.q = make_pair()
@@ -504,16 +508,56 @@ class ProjectedPiTest(unittest.TestCase):
         self._assert_all_losses_close(permuted, original)
 
     def test_rpa_sensitivity_rejects_nonpositive_reference_dielectric(self):
+        q = self.q.clone()
+        q[0] *= 1.0e-2
+        q[1] *= 2.2
+        response = replace(self.pair.response, q=q.reshape(4, 3))
+        reference_only_invalid_pair = pair_response_and_source(
+            response,
+            self.pair.source,
+        )
+        expected = direct_values(
+            self.d,
+            q,
+            reference_only_invalid_pair.source.overlap,
+            self.coefficient,
+        )
+        reference_minimum = minimum_dielectric_eigenvalue(
+            expected["reference_pi"]
+        )
+        candidate_minimum = minimum_dielectric_eigenvalue(
+            expected["candidate_pi"]
+        )
+        tolerance = 1.0e-12
+        self.assertLessEqual(float(torch.min(reference_minimum)), tolerance)
+        self.assertTrue(bool(torch.all(candidate_minimum > tolerance)))
+
         with self.assertRaisesRegex(
             RuntimeError,
             "reference I-Pi is not positive",
         ):
             ProjectedPiEvaluator(
-                scaled_pair(self.pair, scale=1.1),
+                reference_only_invalid_pair,
                 sensitivity_alpha=0.25,
             ).evaluate(coefficients(self.coefficient))
 
     def test_rpa_sensitivity_rejects_nonpositive_candidate_dielectric(self):
+        expected = direct_values(
+            self.d,
+            self.q,
+            self.pair.source.overlap,
+            self.coefficient,
+        )
+        reference_minimum = minimum_dielectric_eigenvalue(
+            expected["reference_pi"]
+        )
+        candidate_minimum = minimum_dielectric_eigenvalue(
+            expected["candidate_pi"]
+        )
+        tolerance = 1.0e-12
+        self.assertTrue(bool(torch.all(reference_minimum > tolerance)))
+        self.assertLessEqual(float(torch.min(candidate_minimum)), tolerance)
+
         with self.assertRaisesRegex(
             RuntimeError,
             "candidate I-Pi is not positive",
