@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import gc
 import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
+import stat
 import sys
 import tempfile
 
@@ -41,6 +44,25 @@ RADIAL_SIZE = 25
 FAMILY_POWER = 4
 RANK_TOLERANCE = 1.0e-12
 CONDITION_LIMIT = 1.0e12
+OUTPUT_FILENAMES = frozenset(
+    {
+        "rpa_sensitive_ranking.json",
+        "rpa_sensitive_ranking.md",
+        "rpa_sensitive_frequency.pdf",
+        "rpa_sensitive_frequency.png",
+    }
+)
+FIXED_PDF_TIMESTAMP = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+
+@dataclass(frozen=True)
+class InputSnapshot:
+    resolved_path: Path
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    sha256: str
 
 
 class StoreCoefficientOnce(argparse.Action):
@@ -71,17 +93,84 @@ def parse_arguments(argv=None):
     return parser.parse_args(argv)
 
 
-def _sha256(path):
+def _sha256_stream(stream):
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
+    for block in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(block)
     return digest.hexdigest()
 
 
-def _require_file(path, label):
-    if not path.is_file():
-        raise ValueError(f"{label} is not a readable file: {path}")
+def _snapshot_file(path, label):
+    try:
+        resolved_path = path.resolve(strict=True)
+        with resolved_path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError(f"{label} is not a regular file: {path}")
+            digest = _sha256_stream(stream)
+            after = os.fstat(stream.fileno())
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        raise ValueError(f"{label} is not a readable file: {path}") from exc
+
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    after_identity = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    if before_identity != after_identity:
+        raise ValueError(f"{label} changed while its content hash was computed")
+    return InputSnapshot(
+        resolved_path=resolved_path,
+        device=after.st_dev,
+        inode=after.st_ino,
+        size=after.st_size,
+        mtime_ns=after.st_mtime_ns,
+        sha256=digest,
+    )
+
+
+def _snapshot_inputs(input_paths):
+    return {
+        label: _snapshot_file(path, label)
+        for label, path in input_paths.items()
+    }
+
+
+def _reject_family_aliases(snapshots):
+    for role in ("response", "source", "audit"):
+        h = snapshots[f"H_{role}"]
+        h2 = snapshots[f"H2_{role}"]
+        same_identity = (
+            h.resolved_path == h2.resolved_path
+            or (h.device, h.inode) == (h2.device, h2.inode)
+        )
+        if same_identity:
+            raise ValueError(
+                f"H/H2 family alias for {role}: identical resolved identity"
+            )
+        if h.sha256 == h2.sha256:
+            raise ValueError(
+                f"H/H2 family alias for {role}: identical content SHA256"
+            )
+
+
+def _verify_input_snapshots(input_paths, snapshots):
+    for label, original in snapshots.items():
+        current = _snapshot_file(input_paths[label], label)
+        if (
+            current.resolved_path != original.resolved_path
+            or (current.device, current.inode) != (original.device, original.inode)
+        ):
+            raise ValueError(f"{label} input identity changed before publication")
+        if current.sha256 != original.sha256:
+            raise ValueError(f"{label} input content changed before publication")
 
 
 def _coefficient_metadata(nu):
@@ -260,55 +349,68 @@ def _write_plot(output_dir, alpha_result):
             "plot output requires matplotlib in the analysis environment"
         ) from exc
 
-    colors = {
-        "two_d": "#1f77b4",
-        "first_f": "#d62728",
-        "first_g": "#2ca02c",
-        "second_f": "#9467bd",
-        "second_g": "#8c564b",
-    }
-    figure, axes = plt.subplots(
-        1,
-        2,
-        figsize=(10.5, 4.3),
-        constrained_layout=True,
-    )
-    for axis, family_name in zip(axes, FAMILY_NAMES):
-        for basis_name in BASIS_NU:
-            record = alpha_result["bases"][basis_name]["families"][family_name]
-            axis.plot(
-                record["frequency_ha"],
-                record["frequency_base_loss"],
-                color=colors[basis_name],
-                marker="o",
-                linewidth=1.4,
-                markersize=3.5,
-                label=f"{basis_name} base",
-            )
-            axis.plot(
-                record["frequency_ha"],
-                record["frequency_sensitivity_loss"],
-                color=colors[basis_name],
-                linestyle="--",
-                marker="s",
-                linewidth=1.2,
-                markersize=3.0,
-                label=f"{basis_name} sensitivity",
-            )
-        axis.set_xscale("log")
-        axis.set_yscale("log")
-        axis.set_xlabel("Imaginary frequency (Ha)")
-        axis.set_ylabel("Relative projected-Pi loss")
-        axis.set_title(family_name)
-        axis.grid(True, which="both", linewidth=0.4, alpha=0.35)
-    axes[0].legend(frameon=False, fontsize=7, ncol=2)
-    _atomic_figure(
-        figure,
-        output_dir / "rpa_sensitive_frequency.png",
-        dpi=220,
-    )
-    _atomic_figure(figure, output_dir / "rpa_sensitive_frequency.pdf")
-    plt.close(figure)
+    figure = None
+    try:
+        colors = {
+            "two_d": "#1f77b4",
+            "first_f": "#d62728",
+            "first_g": "#2ca02c",
+            "second_f": "#9467bd",
+            "second_g": "#8c564b",
+        }
+        figure, axes = plt.subplots(
+            1,
+            2,
+            figsize=(10.5, 4.3),
+            constrained_layout=True,
+        )
+        for axis, family_name in zip(axes, FAMILY_NAMES):
+            for basis_name in BASIS_NU:
+                record = alpha_result["bases"][basis_name]["families"][
+                    family_name
+                ]
+                axis.plot(
+                    record["frequency_ha"],
+                    record["frequency_base_loss"],
+                    color=colors[basis_name],
+                    marker="o",
+                    linewidth=1.4,
+                    markersize=3.5,
+                    label=f"{basis_name} base",
+                )
+                axis.plot(
+                    record["frequency_ha"],
+                    record["frequency_sensitivity_loss"],
+                    color=colors[basis_name],
+                    linestyle="--",
+                    marker="s",
+                    linewidth=1.2,
+                    markersize=3.0,
+                    label=f"{basis_name} sensitivity",
+                )
+            axis.set_xscale("log")
+            axis.set_yscale("log")
+            axis.set_xlabel("Imaginary frequency (Ha)")
+            axis.set_ylabel("Relative projected-Pi loss")
+            axis.set_title(family_name)
+            axis.grid(True, which="both", linewidth=0.4, alpha=0.35)
+        axes[0].legend(frameon=False, fontsize=7, ncol=2)
+        _atomic_figure(
+            figure,
+            output_dir / "rpa_sensitive_frequency.png",
+            dpi=220,
+        )
+        _atomic_figure(
+            figure,
+            output_dir / "rpa_sensitive_frequency.pdf",
+            metadata={
+                "CreationDate": FIXED_PDF_TIMESTAMP,
+                "ModDate": FIXED_PDF_TIMESTAMP,
+            },
+        )
+    finally:
+        if figure is not None:
+            plt.close(figure)
 
 
 def _markdown(payload):
@@ -377,6 +479,10 @@ def _markdown(payload):
 
 
 def run(args):
+    output_dir = args.output_dir
+    if os.path.lexists(output_dir):
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+
     input_paths = {
         "H_response": args.h_response,
         "H_source": args.h_source,
@@ -388,18 +494,22 @@ def run(args):
     input_paths.update(
         (basis_name, getattr(args, basis_name)) for basis_name in BASIS_NU
     )
-    for label, path in input_paths.items():
-        _require_file(path, label)
+    snapshots = _snapshot_inputs(input_paths)
+    _reject_family_aliases(snapshots)
+    resolved_paths = {
+        label: snapshot.resolved_path
+        for label, snapshot in snapshots.items()
+    }
 
     audits = {
-        "H": read_zero_order_audit(args.h_audit, "H"),
-        "H2": read_zero_order_audit(args.h2_audit, "H2"),
+        "H": read_zero_order_audit(resolved_paths["H_audit"], "H"),
+        "H2": read_zero_order_audit(resolved_paths["H2_audit"], "H2"),
     }
     pairs = {}
     reader_warnings = {}
     for family_name, response_path, source_path in (
-        ("H", args.h_response, args.h_source),
-        ("H2", args.h2_response, args.h2_source),
+        ("H", resolved_paths["H_response"], resolved_paths["H_source"]),
+        ("H2", resolved_paths["H2_response"], resolved_paths["H2_source"]),
     ):
         pair = pair_response_and_source(
             read_sternheimer(response_path),
@@ -409,7 +519,7 @@ def run(args):
         reader_warnings[family_name] = list(pair.provenance_warnings)
 
     coefficients = {
-        basis_name: _read_coefficients(input_paths[basis_name], basis_name)
+        basis_name: _read_coefficients(resolved_paths[basis_name], basis_name)
         for basis_name in BASIS_NU
     }
     alpha_results = _evaluate(pairs, coefficients)
@@ -419,7 +529,7 @@ def run(args):
     selected_alpha = max(admissible_alphas) if admissible_alphas else None
     decision = "pass" if selected_alpha is not None else "stop_galerkin_required"
     input_sha256 = {
-        label: _sha256(path) for label, path in input_paths.items()
+        label: snapshot.sha256 for label, snapshot in snapshots.items()
     }
     zero_order_audits = {}
     for family_name, audit in audits.items():
@@ -449,15 +559,6 @@ def run(args):
         "python_version": sys.version.split()[0],
     }
 
-    args.output_dir.mkdir(parents=True, exist_ok=False)
-    _atomic_text(
-        args.output_dir / "rpa_sensitive_ranking.json",
-        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
-    )
-    _atomic_text(
-        args.output_dir / "rpa_sensitive_ranking.md",
-        _markdown(payload),
-    )
     plot_result = next(
         (
             result
@@ -466,7 +567,41 @@ def run(args):
         ),
         alpha_results[-1],
     )
-    _write_plot(args.output_dir, plot_result)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.lexists(output_dir):
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+    staging_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{output_dir.name}.staging-",
+            dir=output_dir.parent,
+        )
+    )
+    try:
+        _atomic_text(
+            staging_dir / "rpa_sensitive_ranking.json",
+            json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        )
+        _atomic_text(
+            staging_dir / "rpa_sensitive_ranking.md",
+            _markdown(payload),
+        )
+        _write_plot(staging_dir, plot_result)
+        produced = {path.name for path in staging_dir.iterdir()}
+        if produced != OUTPUT_FILENAMES:
+            raise RuntimeError(
+                "incomplete staged artifact set: "
+                f"expected {sorted(OUTPUT_FILENAMES)}, got {sorted(produced)}"
+            )
+        _verify_input_snapshots(input_paths, snapshots)
+        if os.path.lexists(output_dir):
+            raise FileExistsError(
+                f"output directory already exists: {output_dir}"
+            )
+        os.rename(staging_dir, output_dir)
+        staging_dir = None
+    finally:
+        if staging_dir is not None:
+            shutil.rmtree(staging_dir, ignore_errors=True)
     return 0 if decision == "pass" else 2
 
 

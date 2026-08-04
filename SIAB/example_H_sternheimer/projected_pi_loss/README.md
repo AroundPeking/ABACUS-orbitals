@@ -1890,3 +1890,174 @@ This follow-up closes only the Task 6 CLI occurrence contract and corrects
 its recorded environment. It does not run the real historical gate, freeze a
 production alpha, optimize or evaluate a new candidate, read SOS/CP energy as
 numeric input, or provide physical validation. Task 7 has not started.
+
+### Task 6 code-quality hardening: family identity and atomic set (2026-08-05)
+
+Commits `c1236f29fa819e76c0d63919811e00b1eb3dac72` and
+`20341ac12ce75c646d9be4a57fc4b30fd5ae2f13` remain the first implementation
+and specification-review fix. The code-quality review then required the H and
+H2 families to be independently identified, every recorded input hash to
+describe the bytes consumed, and the four required artifacts to become
+visible as one directory set.
+
+The implementation rejects response, source, or audit pairs when their
+resolved path/file identity is the same or when separate files have identical
+SHA256 content. Audit aliases are rejected deliberately: the CLI requires
+separate H/H2 audits and the strict audit reader binds each document to its
+`case`; accepting the same identity or bytes would weaken that family binding
+before validation, and there is no existing identity-binding exception that
+justifies it.
+
+Each of the eleven input paths is resolved and hashed before any strict reader
+or evaluator runs. Readers consume those resolved identities. Immediately
+before publication, every original CLI path is resolved and hashed again;
+retargeted/replaced identities and changed content fail with the affected
+input label and publish nothing. Inputs are not copied.
+
+JSON, Markdown, PNG, and PDF are written into one unique sibling directory
+named with the `.<output>.staging-` prefix. The figure is closed in a `finally`
+block. Any generation or verification failure recursively removes the staging
+directory, leaving the final path absent and permitting a retry. After the
+exact four-name set and all input snapshots pass, one directory `rename`
+publishes the complete absent destination; an existing destination is still
+refused. The PDF `CreationDate` and `ModDate` are fixed to 2000-01-01 UTC, so
+identical path-independent runs produce byte-identical artifacts.
+
+#### Rejected quality RED/GREEN fixture attempt
+
+The first quality test overlay was SHA256
+`64068f357193d0cba3cae2a5efa50c3e480a80af1c15074d4858d8ee61c0fc32`
+and produced test file SHA256
+`ce3781ced58730085722312bdd4df92d49c58ef5d32d5ac63192faea8de218b6`.
+It was applied to the exact `20341ac1` archive SHA256
+`300218bfc7fa985ba8d2c872ac37bdb823177dde0813259a655c81ac04b07064`
+at
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-quality-red-20341ac1-64068f35/tree
+```
+
+It ran 12 tests in 174.135 s, with 11 assertion failures and no errors
+(`real 177.64`, `user 1752.47`, `sys 225.77`). The log SHA256 was
+`c1bfab48bd2997b42341db317fbd0b4c4f18623bf60850302809d314bd144989`.
+Although those failures exposed the reviewed defects, the nominal H and H2
+source fixtures were byte-identical. That violates the new family-separation
+contract, so this RED is rejected rather than counted.
+
+The corresponding attempted GREEN tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-quality-green-20341ac1-93e1c682/tree
+```
+
+using production overlay SHA256
+`93e1c682a7080aa2c2717cd6104f940001e25221fe4317b2f1117f9788ade979`.
+It correctly exposed the invalid baseline source alias and therefore reported
+7 failures and 1 error among 12 tests in 50.969 s (`real 54.93`, `user
+48.86`, `sys 75.79`). Its log SHA256 was
+`80f907a32ea85cf0c2501f79d5b0d7ecd060185ebc387856371049ec96c42b1a`.
+This attempt is also rejected and is not GREEN.
+
+#### Accepted corrected quality RED
+
+The source fixture was corrected by applying the family scale consistently to
+both source and response overlaps. H/H2 source bytes are now distinct while
+the strict pairing relation is preserved. The fresh test-only overlay and
+resulting test file SHA256 values were
+
+```text
+test overlay
+  103d0969b2ce53d0914cce7ddfa3c9a09d0489e465f1b59e03cc13d461011211
+test_rpa_sensitive_ranking.py
+  359afad9e7749a307b3d45a139682cc816d0e6fcb8d79e56cd938a79d64988fe
+```
+
+The exact `20341ac1` archive plus that overlay was reconstructed, not checked
+out, at
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-quality-corrected-red-20341ac1-103d0969/tree
+```
+
+On `login08`, the environment was Python 3.10.13 at
+`/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python`, PyTorch 2.1.0+cpu,
+Matplotlib 3.10.3, and
+`PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801`. The environment
+record SHA256 was
+`6d69bfb69fe386d92c9db73f49a4acd41f4172e976131e013616112ee1fefcb2`.
+The staged old analyzer retained SHA256
+`8fe60239a2e63a7f55112edadeb9400e9487410cd8a1e44036f50acc7eca35d5`.
+
+`python -m unittest -v test_rpa_sensitive_ranking` ran 12 tests in 172.307 s
+and reported exactly 11 targeted assertion failures, zero errors, and status 1
+(`real 176.00`, `user 1762.51`, `sys 244.74`). The real-evaluator success and
+stop tests both passed, independently proving that the strict readers,
+pairing, evaluator, and corrected fixtures were consumable. The RED log
+SHA256 was
+`8ead899574df64f17f9237883bb3a87abe4eff31c40f8b69e0402428994d4506`.
+This is the accepted quality RED.
+
+#### Accepted corrected quality GREEN
+
+The accepted production overlay and analyzer SHA256 values were
+
+```text
+production overlay
+  93e1c682a7080aa2c2717cd6104f940001e25221fe4317b2f1117f9788ade979
+analyze_rpa_sensitive_ranking.py
+  f8137755b9e376e2484a49c4dbde01a0a1abfb188e2c81a5f98513919fecb663
+```
+
+The archive and both overlays matched locally and remotely. The immutable
+archive-plus-overlays tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-quality-corrected-green-20341ac1-93e1c682/tree
+```
+
+Its environment record SHA256 was
+`66137d971fc9d76e933a479bdb13c0c19d075b7908089763efbdea3cc2c3175d`.
+It used the same `login08` Python/PyTorch/Matplotlib/PYTHONPATH environment as
+corrected RED, with `PYTHONDONTWRITEBYTECODE=1` and
+`MPLCONFIGDIR=<absolute GREEN evidence directory>/mplconfig`. From the
+absolute GREEN tree's `SIAB/tests`, the exact commands were
+
+```bash
+python -m unittest -v test_rpa_sensitive_ranking
+python -m unittest -v \
+  test_rpa_sensitive_ranking test_projected_pi_analysis test_projected_pi
+python -m unittest discover -v
+```
+
+All three exited zero:
+
+```text
+Task 6 module:
+  Ran 12 tests in 142.838s, OK
+  real 146.33, user 1768.24, sys 199.24
+  log 723706dceb0aff0c2ad56991d84549ba4dc8bce98ea0f81fedb03790ced46bde
+
+Required three modules:
+  Ran 41 tests in 151.687s, OK
+  real 155.00, user 1781.47, sys 224.81
+  log 93027e7d358099cafd43202bcb4ac6d037cf6fb9f08bb8fec3b6a766235de736
+
+Full SIAB discover:
+  Ran 387 tests in 169.165s, OK
+  real 175.68, user 1814.99, sys 246.85
+  log 0f39b04d4336d7716c2e1c9f9ba2b08b9fa3e2f25387ccd11d0de6a72e50e04d
+```
+
+The pre/post-test tree manifest SHA256 was unchanged at
+`3f08e60c169ed4335804f2977adc5b32797b2ae7cdc25b2aded9acdef8b8b9da`.
+Tests cover all five repeated coefficient options and omission, exact stable
+JSON keys, same-path and equal-content family aliases for all three roles,
+content mutation and symlink retargeting, late PDF failure cleanup and retry,
+exact four-artifact pass/stop sets, two H/H2 axes with all base/sensitivity
+labels, finite values, strict gates, maximum-alpha selection, and byte
+identity of all four artifacts across delayed runs.
+
+This remains only a synthetic Task 6 code gate. It does not run the real
+historical ranking, freeze a production alpha, optimize or evaluate a new
+candidate, consume SOS/CP energy numerically, or establish physical
+validation. Task 7 has not started.
