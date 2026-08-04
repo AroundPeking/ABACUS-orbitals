@@ -1,4 +1,5 @@
 import copy
+from dataclasses import replace
 import io
 import json
 import math
@@ -218,9 +219,10 @@ class QuadraticProjectedPi:
 
 
 class CheckpointRpaSensitiveProjectedPi:
-    def __init__(self, near_zero=False, legacy=False):
+    def __init__(self, near_zero=False, legacy=False, zero_baseline=None):
         self.near_zero = near_zero
         self.legacy = legacy
+        self.zero_baseline = zero_baseline
 
     @staticmethod
     def _family(loss, condition):
@@ -245,21 +247,15 @@ class CheckpointRpaSensitiveProjectedPi:
             frequency_weight=torch.tensor(
                 [0.25, 0.75], dtype=loss.dtype, device=loss.device
             ),
+            frequency_ha=torch.tensor(
+                [0.1, 1.0], dtype=loss.dtype, device=loss.device
+            ),
             reference_rank=2,
             max_candidate_condition=condition,
             sensitivity_alpha=0.25,
         )
 
-    def evaluate(self, c):
-        x = c["H"][0][0, 1]
-        if self.near_zero:
-            h_loss = x.square()
-            h2_loss = x.square()
-            condition = 100.0 if float(x) == 0.0 else 1.0
-        else:
-            h_loss = -0.2 * x.square() + 0.3 * x + 0.4
-            h2_loss = 0.35 * x.square() - 0.95 * x + 0.8
-            condition = 3.0
+    def _result(self, x, h_loss, h2_loss, condition):
         family_results = {
             "H": self._family(h_loss, condition),
             "H2": self._family(h2_loss, condition),
@@ -282,6 +278,62 @@ class CheckpointRpaSensitiveProjectedPi:
             sensitivity_alpha=None if self.legacy else 0.25,
             family_power=None if self.legacy else 4,
         )
+
+    def evaluate(self, c):
+        x = c["H"][0][0, 1]
+        if self.zero_baseline == "H":
+            h_loss = x.square()
+            h2_loss = x.square() + 0.8
+            condition = 1.0
+        elif self.zero_baseline == "family":
+            h_loss = x.square()
+            h2_loss = x.square()
+            condition = 1.0
+        elif self.near_zero:
+            offset = x * 0.0 + 1.0e-16
+            h_loss = offset + x.square()
+            h2_loss = offset + x.square()
+            condition = 100.0 if float(x) == 0.0 else 1.0
+        else:
+            h_loss = -0.2 * x.square() + 0.3 * x + 0.4
+            h2_loss = 0.35 * x.square() - 0.95 * x + 0.8
+            condition = 3.0
+        return self._result(x, h_loss, h2_loss, condition)
+
+
+class RecordingRpaSensitiveProjectedPi(CheckpointRpaSensitiveProjectedPi):
+    def __init__(self):
+        super().__init__()
+        self.grad_enabled = []
+
+    def evaluate(self, c):
+        self.grad_enabled.append(torch.is_grad_enabled())
+        return super().evaluate(c)
+
+
+class FamilyImprovesAtomEqualProjectedPi(CheckpointRpaSensitiveProjectedPi):
+    def evaluate(self, c):
+        x = c["H"][0][0, 1]
+        h_loss = x * 0.0 + 0.4
+        h2_loss = 0.8 - 0.4 * x
+        return self._result(x, h_loss, h2_loss, 3.0)
+
+
+class MalformedRpaSensitiveProjectedPi(CheckpointRpaSensitiveProjectedPi):
+    def __init__(self, mutate):
+        super().__init__()
+        self.mutate = mutate
+
+    def evaluate(self, c):
+        return self.mutate(super().evaluate(c))
+
+
+def replace_projected_pi_family(result, name, **changes):
+    values = vars(result.family_results[name]).copy()
+    values.update(changes)
+    family_results = dict(result.family_results)
+    family_results[name] = types.SimpleNamespace(**values)
+    return replace(result, family_results=family_results)
 
 
 class ScriptedCandidateStep:
@@ -1026,6 +1078,16 @@ class ConvergeIntegrationTest(unittest.TestCase):
     def files():
         return io.StringIO(), io.StringIO()
 
+    def assert_rpa_sensitive_baseline_rejected(self, evaluator, pattern):
+        converge, c = make_rpa_sensitive_converge(max_steps=1)
+        converge.set_projected_pi_objective(evaluator)
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim"
+        ) as get_optim:
+            with self.assertRaisesRegex(ValueError, pattern):
+                converge.cal_converge(c, self.files())
+        get_optim.assert_not_called()
+
     def test_new_stage_requires_evaluator_and_rejects_kinetic_term(self):
         converge, c = make_converge_case("st_only", max_steps=1)
         with self.assertRaisesRegex(ValueError, "Sternheimer.*evaluator"):
@@ -1184,6 +1246,194 @@ class ConvergeIntegrationTest(unittest.TestCase):
         ):
             self.assertNotIn(long_name, header)
 
+    def test_rpa_sensitive_baseline_is_cached_and_evaluated_without_grad(self):
+        converge, c = make_rpa_sensitive_converge(max_steps=0)
+        stage = converge.info_optimize[0]
+        converge.info_optimize = [copy.deepcopy(stage), copy.deepcopy(stage)]
+        evaluator = RecordingRpaSensitiveProjectedPi()
+        converge.set_projected_pi_objective(evaluator)
+
+        with self.assertRaisesRegex(RuntimeError, "no accepted"):
+            converge.cal_converge(c, self.files())
+
+        self.assertEqual(evaluator.grad_enabled, [False, False, False])
+
+    def test_rpa_sensitive_unmoved_optimizer_reports_strict_gate_state(self):
+        converge, c = make_rpa_sensitive_converge(max_steps=1)
+        converge.set_projected_pi_objective(
+            CheckpointRpaSensitiveProjectedPi()
+        )
+
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=ScriptedCandidateStep(c, [0.0]),
+        ):
+            with self.assertRaises(RuntimeError) as context:
+                converge.cal_converge(c, self.files())
+
+        message = str(context.exception)
+        for expected in (
+            "response_failed_gates=2",
+            "family_improved=false",
+            "atom_improved=false",
+            "family_current=",
+            "family_baseline=",
+            "family_signed_normalized_delta=0",
+            "atom_current=",
+            "atom_baseline=",
+            "atom_signed_normalized_delta=0",
+            "max_projected_pi_condition=",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, message)
+        self.assertNotIn("max_st_condition=", message)
+
+    def test_rpa_sensitive_violation_prefers_one_failed_gate(self):
+        converge, c = make_rpa_sensitive_converge(max_steps=1)
+        converge.set_projected_pi_objective(
+            FamilyImprovesAtomEqualProjectedPi()
+        )
+
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=ScriptedCandidateStep(c, [1.0]),
+        ):
+            with self.assertRaises(RuntimeError) as context:
+                converge.cal_converge(c, self.files())
+
+        message = str(context.exception)
+        self.assertIn("response_failed_gates=1", message)
+        self.assertIn("family_improved=true", message)
+        self.assertIn("atom_improved=false", message)
+        family = re.search(
+            r"family_current=([0-9.eE+-]+), family_baseline=([0-9.eE+-]+), "
+            r"family_signed_normalized_delta=([0-9.eE+-]+)",
+            message,
+        )
+        self.assertIsNotNone(family)
+        current, baseline, delta = map(float, family.groups())
+        self.assertLess(current, baseline)
+        self.assertLess(delta, 0.0)
+        self.assertRegex(message, r"atom_signed_normalized_delta=0(?:\.0+)?[,;]")
+
+    def test_rpa_sensitive_zero_baseline_fails_before_optimizer(self):
+        for zero_baseline in ("H", "family"):
+            with self.subTest(zero_baseline=zero_baseline):
+                converge, c = make_rpa_sensitive_converge(max_steps=1)
+                converge.set_projected_pi_objective(
+                    CheckpointRpaSensitiveProjectedPi(
+                        zero_baseline=zero_baseline
+                    )
+                )
+                with mock.patch(
+                    "opt_orbital_converge.optimize.get_optim"
+                ) as get_optim:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"pi_rpa_sensitive_joint strict improvement impossible:.*"
+                        r"baseline.*loss.*zero",
+                    ):
+                        converge.cal_converge(c, self.files())
+                get_optim.assert_not_called()
+
+    def test_rpa_sensitive_baseline_rejects_legacy_result_immediately(self):
+        self.assert_rpa_sensitive_baseline_rejected(
+            CheckpointRpaSensitiveProjectedPi(legacy=True),
+            r"pi_rpa_sensitive_joint baseline result.*sensitivity_alpha.*configured",
+        )
+
+    def test_rpa_sensitive_baseline_rejects_wrong_result_type_immediately(self):
+        self.assert_rpa_sensitive_baseline_rejected(
+            QuadraticSternheimer(),
+            r"pi_rpa_sensitive_joint baseline result must be "
+            r"ProjectedPiOptimizationResult",
+        )
+
+    def test_rpa_sensitive_baseline_rejects_malformed_family_keys(self):
+        self.assert_rpa_sensitive_baseline_rejected(
+            MalformedRpaSensitiveProjectedPi(
+                lambda result: replace(
+                    result,
+                    family_results={"H": result.family_results["H"]},
+                )
+            ),
+            r"pi_rpa_sensitive_joint baseline result family_results must "
+            r"contain exactly H and H2",
+        )
+
+    def test_rpa_sensitive_baseline_rejects_mismatched_alpha(self):
+        cases = (
+            (
+                "aggregate",
+                lambda result: replace(result, sensitivity_alpha=0.5),
+                r"result sensitivity_alpha.*configured",
+            ),
+            (
+                "H2",
+                lambda result: replace_projected_pi_family(
+                    result, "H2", sensitivity_alpha=0.5
+                ),
+                r"H2 sensitivity_alpha.*configured",
+            ),
+        )
+        for name, mutate, pattern in cases:
+            with self.subTest(name=name):
+                self.assert_rpa_sensitive_baseline_rejected(
+                    MalformedRpaSensitiveProjectedPi(mutate), pattern
+                )
+
+    def test_rpa_sensitive_baseline_rejects_invalid_family_power(self):
+        for family_power in (None, 2):
+            with self.subTest(family_power=family_power):
+                self.assert_rpa_sensitive_baseline_rejected(
+                    MalformedRpaSensitiveProjectedPi(
+                        lambda result, value=family_power: replace(
+                            result, family_power=value
+                        )
+                    ),
+                    r"family_power must be exactly 4",
+                )
+
+    def test_rpa_sensitive_baseline_rejects_none_diagnostics(self):
+        cases = (
+            ("base_loss", {"base_loss": None}),
+            ("trace_log_difference", {"trace_log_difference": None}),
+        )
+        for field, changes in cases:
+            with self.subTest(field=field):
+                self.assert_rpa_sensitive_baseline_rejected(
+                    MalformedRpaSensitiveProjectedPi(
+                        lambda result, values=changes: replace_projected_pi_family(
+                            result, "H", **values
+                        )
+                    ),
+                    rf"H {field}.*required.*finite",
+                )
+
+    def test_rpa_sensitive_baseline_rejects_frequency_or_weight_mismatch(self):
+        cases = (
+            (
+                "frequency",
+                {"frequency_ha": torch.tensor([0.1, 2.0])},
+                r"H2 frequency_ha.*match",
+            ),
+            (
+                "weight",
+                {"frequency_weight": torch.tensor([0.75, 0.25])},
+                r"H2 frequency_weight.*match",
+            ),
+        )
+        for name, changes, pattern in cases:
+            with self.subTest(name=name):
+                self.assert_rpa_sensitive_baseline_rejected(
+                    MalformedRpaSensitiveProjectedPi(
+                        lambda result, values=changes: replace_projected_pi_family(
+                            result, "H2", **values
+                        )
+                    ),
+                    pattern,
+                )
+
     def test_pi_dpsi_joint_acceptance_and_selection_remain_unchanged(self):
         converge, c = make_converge_case(
             "pi_dpsi_joint",
@@ -1234,19 +1484,21 @@ class ConvergeIntegrationTest(unittest.TestCase):
         with mock.patch(
             "opt_orbital_converge.optimize.get_optim",
             return_value=ScriptedCandidateStep(c, [1.0e-7]),
-        ):
+        ) as get_optim:
             with self.assertRaises(RuntimeError) as context:
                 converge.cal_converge(c, self.files())
 
         message = str(context.exception)
         self.assertNotIn("inf", message.lower())
         match = re.search(
-            r"atom=([0-9.eE+-]+), family=([0-9.eE+-]+)", message
+            r"atom_signed_normalized_delta=([0-9.eE+-]+).*"
+            r"family_signed_normalized_delta=([0-9.eE+-]+)",
+            message,
         )
         self.assertIsNotNone(match)
         values = [float(value) for value in match.groups()]
         self.assertTrue(all(math.isfinite(value) for value in values))
-        self.assertTrue(all(value >= 0.0 for value in values))
+        get_optim.assert_called_once()
 
     def test_low_frequency_guard_rejects_regressed_candidate(self):
         converge, c = make_converge_case("st_only", max_steps=1)

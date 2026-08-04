@@ -1479,3 +1479,142 @@ and was not treated as GREEN.
 This completes only the Task 5 code checkpoint gate and diagnostic schema. It
 does not produce an optimized basis, rank historical alpha values, run Task 6,
 or establish any RPA/SOS/CP or physical-validation result.
+
+### Task 5 code-quality review fixes: RED (2026-08-04)
+
+The review fixes started from exact commit
+`cfb8ef4d6f61f65cda6b831007041e2d0641c6f9`. Tests were changed before
+production code. The targeted cases require one `torch.no_grad()` baseline
+evaluation for repeated identically configured sensitive stages, explicit
+strict-gate state in the fatal diagnostic, failed-gate-aware violation
+ordering, exact-zero baseline preflight, and immediate validation of every
+new-mode evaluator result. They also prove that a legacy objective wired to
+`pi_rpa_sensitive_joint` fails at the baseline boundary rather than later in
+main or a writer.
+
+The source archive contained tracked `SIAB` and `Dojo-NC-SR` from that exact
+commit. Its local and remote SHA256 was
+
+```text
+e1a532c406f6df1af624a774e6646184540db832c6124051344ca2efaa3935e5
+```
+
+The exact test-only ustar overlay SHA256 was
+
+```text
+8a19928174a9d307846db7ba1a35e1d26ae109a38735834802d22e12328dafa9
+```
+
+with test-file SHA256 values
+
+```text
+test_loss_and_freeze.py
+  7b5f6aa8f11f69d86d6c6062628e4fedf5426b67b0aaef238ec5d3afdbc98541
+test_main_sternheimer.py
+  9586f826f6e369d9c0572d99adeb5588d3f79c702fce8c6e16915735726dc897
+```
+
+Because `df_dcu` has no GitHub DNS, this was not a remote checkout. The
+archive plus exact overlay was extracted at
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task5-quality-red-cfb8ef4d-8a199281/extract/tree
+```
+
+The run used
+
+```text
+Python:     /work1/ghj/runtime/siab-py310-cpu-20260720/bin/python
+PYTHONPATH: /work1/ghj/runtime/siab-projected-pi-mpl-20260801
+DOJO_PATH:  <absolute RED tree>/Dojo-NC-SR
+```
+
+The 13 targeted test methods produced feature-specific RED. The ordinary
+runner reported `FAILED (failures=16, errors=12)`: four methods had direct
+failures, four methods had direct errors, and 20 subtests contributed 12
+failure records and eight error records. The failures exposed duplicate
+gradient-enabled baselines, missing equality diagnostics and zero-baseline
+preflight, late or nonspecific malformed-result failures, and the old
+diagnostic helper signature. The ordinary RED log SHA256 was
+`975d4cd7d305bebbc196a6b23ff605aaf5b9e10464957e4a69010013fb26b1af`;
+the independent method/subtest count log SHA256 was
+`501855454864ccefbab0266730517799ebd33a0d8cd0fc4d2add6b59e097b4ea`.
+
+### Task 5 code-quality review fixes: GREEN (2026-08-04)
+
+For a current loss `L` and positive baseline `L0`, the fatal diagnostic now
+records the signed normalized delta
+
+```text
+delta = (L - L0) / max(L0, epsilon)
+```
+
+for both aggregate family and atomic H losses, together with current,
+baseline, and the exact strict-comparison booleans. Acceptance remains
+`L < L0`; a negative delta reports improvement but does not replace or relax
+that comparison. A failed response gate has penalty
+`1 + max(0, delta)`, while a passed gate has zero penalty. The violation key
+first minimizes the total number of failed gates, then maximum and summed
+penalties, then signed-delta tie-breaks. Consequently, “family improves and H
+is equal” is preferred over the unchanged initial point, although neither is
+accepted. Equality is therefore visible as a failed gate instead of a zero
+violation. The projected-mode fatal condition label is
+`max_projected_pi_condition`.
+
+Since the losses are nonnegative, an exactly zero H or family baseline cannot
+be strictly improved. It now fails immediately with `strict improvement
+impossible`, before optimizer construction or stepping. A positive near-zero
+baseline remains legal and its signed deltas remain finite through the same
+`epsilon` denominator semantics.
+
+An identically configured `(C_initial, evaluator)` sensitive baseline is
+evaluated once under `torch.no_grad()`. The cache retains only detached scalar
+baselines and serializable initial scalar diagnostics; the complete result and
+autograd graph are discarded. Old modes keep their previous baseline path.
+After baseline and candidate evaluation, the unified validator checks the
+new-mode result type, configured alpha, exact fourth-order family power,
+exactly `H`/`H2`, family alpha agreement, finite total/base/sensitivity/blend
+data, aligned finite frequencies and positive weights, per-frequency loss and
+trace-log diagnostics, dielectric eigenvalue minima, rank, and conditions.
+`pi_dpsi_joint` retains its legacy result contract. Diagnostic schema choice
+is now driven by the validated configured mode, never inferred from a result
+attribute.
+
+The GREEN tree reused the exact RED source and test overlays, then applied the
+minimal production overlay. Its SHA256 was
+
+```text
+5634bbedb34316554541e62755813223cad10d55f50089b6eded3ce68d643f5d
+```
+
+and `opt_orbital_converge.py` had SHA256
+`31c1be4d1ae585b21a1f612a3ddb97c2c694f5f1b78ec0142c7f10a1da88feaa`.
+The absolute, non-checkout tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task5-quality-green-cfb8ef4d-5634bbed/extract/tree
+```
+
+It used the same explicit Python, `PYTHONPATH`, and tree-local `DOJO_PATH` as
+RED. Results, including independently counted successful subtests, were:
+
+```text
+targeted review tests: 13 methods,  20 subtests, 0 failures, 0 errors
+Task 5 two modules:    109 methods,  82 subtests, 0 failures, 0 errors
+Task 4 four modules:   146 methods, 118 subtests, 0 failures, 0 errors
+full unittest discover: 375 methods, 252 subtests, 0 failures, 0 errors
+```
+
+The ordinary log SHA256 values were, respectively,
+`1b508982be2929ef4ddaa703ea1eceb2e4e32e0920a5c4d3945849bd9e2805cf`,
+`fd70d519c8815a15cce605c25249deff34510b8e80639072172b433c68707aa4`,
+`e60d70ca7ea87d25f038015e1ff908e581f15d80d861caf91cf235d18b9af7cb`,
+and `56d088e900d8e16041fa0539dac2a2f55d5c632af7d336a7983866f161640a11`.
+The matching count-log SHA256 values were
+`5bfaf17fb7d09990b16111f9f86495f3f4a864cd5650d8469df9af56ccca7ea3`,
+`c7b1af4366c7bb27089bc8a60f7951ddc5ac926fd93f8c4ba87fe8291161a0da`,
+`d068409e1bc03fa173699c994e256f4cbb7a8f22dfe73874121e4e3801f55461`,
+and `bc1de07af2eb06c29c04d8c78e3d5f0cb095680d7dc9c2f332a14310ab097c1c`.
+
+This is code GREEN only. It is not an optimization, historical alpha ranking,
+Task 6 implementation, candidate-basis result, or physical validation.

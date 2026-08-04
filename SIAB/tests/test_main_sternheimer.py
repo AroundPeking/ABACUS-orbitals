@@ -1063,6 +1063,7 @@ class MainRoutingTest(unittest.TestCase):
 
         diagnostics = siab_converge._projected_pi_diagnostics(
             result,
+            "pi_rpa_sensitive_joint",
             1.0e-12,
             {
                 "projected_pi_family": torch.tensor(0.82, dtype=torch.float64),

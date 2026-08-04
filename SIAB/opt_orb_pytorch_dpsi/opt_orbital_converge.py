@@ -34,8 +34,172 @@ def _finite_list(name, values):
 	]
 
 
-def _projected_pi_diagnostics(result, rank_tolerance, loss_baseline=None):
-	if getattr(result, "sensitivity_alpha", None) is not None:
+def _finite_nonnegative_scalar_tensor(value, label):
+	if (
+		not isinstance(value, torch.Tensor)
+		or value.ndim != 0
+		or torch.is_complex(value)
+		or not bool(torch.isfinite(value))
+		or bool(value < 0.0)
+	):
+		raise ValueError(
+			f"{label} is required and must be a finite nonnegative scalar tensor"
+		)
+
+
+def _finite_frequency_tensor(value, label, shape, nonnegative=False):
+	if (
+		not isinstance(value, torch.Tensor)
+		or value.ndim != 1
+		or value.shape != shape
+		or torch.is_complex(value)
+		or not bool(torch.all(torch.isfinite(value)))
+		or (nonnegative and bool(torch.any(value < 0.0)))
+	):
+		raise ValueError(
+			f"{label} is required and must be a finite frequency tensor"
+		)
+
+
+def _matches_configured_alpha(value, expected):
+	if isinstance(value, bool):
+		return False
+	try:
+		value = float(value)
+	except (TypeError, ValueError):
+		return False
+	return math.isfinite(value) and value == expected
+
+
+def _validate_projected_pi_result(result, loss_config, context):
+	mode = loss_config["mode"]
+	if not isinstance(result, ProjectedPiOptimizationResult):
+		if mode == "pi_rpa_sensitive_joint":
+			raise ValueError(
+				f"{mode} {context} result must be ProjectedPiOptimizationResult"
+			)
+		raise TypeError(
+			"projected-Pi evaluator must return ProjectedPiOptimizationResult"
+		)
+	if mode != "pi_rpa_sensitive_joint":
+		return
+
+	prefix = f"{mode} {context} result"
+	expected_alpha = loss_config["projected_pi_sensitivity_alpha"]
+	if not _matches_configured_alpha(result.sensitivity_alpha, expected_alpha):
+		raise ValueError(
+			f"{prefix} sensitivity_alpha must equal configured alpha "
+			f"{expected_alpha}"
+		)
+	if (
+		isinstance(result.family_power, bool)
+		or not isinstance(result.family_power, int)
+		or result.family_power != 4
+	):
+		raise ValueError(f"{prefix} family_power must be exactly 4")
+	if not isinstance(result.family_results, dict) or set(
+		result.family_results
+	) != {"H", "H2"}:
+		raise ValueError(
+			f"{prefix} family_results must contain exactly H and H2"
+		)
+
+	_finite_nonnegative_scalar_tensor(result.loss, f"{prefix} total loss")
+	_finite_float(f"{prefix} max_condition", result.max_condition)
+	if (
+		not isinstance(result.frequency_ha, torch.Tensor)
+		or result.frequency_ha.ndim != 1
+		or result.frequency_ha.numel() == 0
+		or torch.is_complex(result.frequency_ha)
+		or not bool(torch.all(torch.isfinite(result.frequency_ha)))
+	):
+		raise ValueError(
+			f"{prefix} frequency_ha is required and must be a finite vector"
+		)
+	frequency_shape = result.frequency_ha.shape
+	_finite_frequency_tensor(
+		result.frequency_loss,
+		f"{prefix} frequency_loss",
+		frequency_shape,
+		nonnegative=True,
+	)
+
+	reference_weight = None
+	for name in ("H", "H2"):
+		family = result.family_results[name]
+		if not _matches_configured_alpha(
+			getattr(family, "sensitivity_alpha", None), expected_alpha
+		):
+			raise ValueError(
+				f"{prefix} {name} sensitivity_alpha must equal configured "
+				f"alpha {expected_alpha}"
+			)
+		for field in ("loss", "base_loss", "sensitivity_loss"):
+			_finite_nonnegative_scalar_tensor(
+				getattr(family, field, None), f"{prefix} {name} {field}"
+			)
+		for field in (
+			"frequency_loss",
+			"frequency_base_loss",
+			"frequency_sensitivity_loss",
+		):
+			_finite_frequency_tensor(
+				getattr(family, field, None),
+				f"{prefix} {name} {field}",
+				frequency_shape,
+				nonnegative=True,
+			)
+		for field in (
+			"trace_log_difference",
+			"minimum_reference_dielectric_eigenvalue",
+			"minimum_candidate_dielectric_eigenvalue",
+		):
+			_finite_frequency_tensor(
+				getattr(family, field, None),
+				f"{prefix} {name} {field}",
+				frequency_shape,
+			)
+		family_frequency = getattr(family, "frequency_ha", None)
+		_finite_frequency_tensor(
+			family_frequency,
+			f"{prefix} {name} frequency_ha",
+			frequency_shape,
+		)
+		if not torch.equal(family_frequency, result.frequency_ha):
+			raise ValueError(
+				f"{prefix} {name} frequency_ha must match aggregate frequency_ha"
+			)
+		weight = getattr(family, "frequency_weight", None)
+		_finite_frequency_tensor(
+			weight,
+			f"{prefix} {name} frequency_weight",
+			frequency_shape,
+		)
+		if bool(torch.any(weight <= 0.0)):
+			raise ValueError(f"{prefix} {name} frequency_weight must be positive")
+		if reference_weight is None:
+			reference_weight = weight
+		elif not torch.equal(weight, reference_weight):
+			raise ValueError(
+				f"{prefix} {name} frequency_weight must match H frequency_weight"
+			)
+		reference_rank = getattr(family, "reference_rank", None)
+		if (
+			isinstance(reference_rank, bool)
+			or not isinstance(reference_rank, int)
+			or reference_rank < 0
+		):
+			raise ValueError(f"{prefix} {name} reference_rank must be nonnegative")
+		_finite_float(
+			f"{prefix} {name} max_candidate_condition",
+			getattr(family, "max_candidate_condition", math.nan),
+		)
+
+
+def _projected_pi_diagnostics(
+	result, mode, rank_tolerance, loss_baseline=None
+):
+	if mode == "pi_rpa_sensitive_joint":
 		if not isinstance(loss_baseline, dict):
 			raise ValueError("RPA-sensitive diagnostics require loss baselines")
 		for name in ("projected_pi_family", "projected_pi_h"):
@@ -81,7 +245,7 @@ def _projected_pi_diagnostics(result, rank_tolerance, loss_baseline=None):
 			}
 		h_family = result.family_results["H"]
 		return {
-			"mode": "pi_rpa_sensitive_joint",
+			"mode": mode,
 			"alpha": _finite_float("sensitivity alpha", result.sensitivity_alpha),
 			"family_power": int(result.family_power),
 			"initial_family_loss": _finite_float(
@@ -211,6 +375,7 @@ class Opt_Orbital_Converge:
 
 		loss_configs = dict()
 		loss_baselines = dict()
+		projected_pi_baseline_cache = dict()
 		new_stage_indices = []
 		for stage_index, info_opt in enumerate(self.info_optimize):
 			if "loss" not in info_opt:
@@ -268,23 +433,63 @@ class Opt_Orbital_Converge:
 					"dft_origin": baseline_components["dft_origin"].detach().clone(),
 					"dft_dpsi": baseline_components["dft_dpsi"].detach().clone(),
 				}
-				baseline_st = None
-				if (
-					loss_config["low_frequency_guard_weight"] > 0.0
-					or loss_config["mode"] == "pi_rpa_sensitive_joint"
-				):
+				if loss_config["mode"] == "pi_rpa_sensitive_joint":
+					baseline_key = (
+						id(C_initial),
+						id(evaluator),
+						tuple(
+							(name, loss_config[name])
+							for name in sorted(loss_config)
+						),
+					)
+					baseline_record = projected_pi_baseline_cache.get(
+						baseline_key
+					)
+					if baseline_record is None:
+						with torch.no_grad():
+							baseline_result = evaluator.evaluate(C_initial)
+							_validate_projected_pi_result(
+								baseline_result, loss_config, "baseline"
+							)
+							family_baseline = baseline_result.loss.detach().clone()
+							h_baseline = baseline_result.family_results[
+								"H"
+							].loss.detach().clone()
+							baseline_record = {
+								"projected_pi_family": family_baseline,
+								"projected_pi_h": h_baseline,
+								"initial_diagnostics": {
+									"family_loss": family_baseline.item(),
+									"h_loss": h_baseline.item(),
+								},
+							}
+						del baseline_result
+						zero_baselines = []
+						if h_baseline.item() == 0.0:
+							zero_baselines.append("H")
+						if family_baseline.item() == 0.0:
+							zero_baselines.append("family")
+						if zero_baselines:
+							raise RuntimeError(
+								"pi_rpa_sensitive_joint strict improvement "
+								"impossible: baseline "
+								+ " and ".join(zero_baselines)
+								+ " loss is zero"
+							)
+						projected_pi_baseline_cache[baseline_key] = (
+							baseline_record
+						)
+					loss_baselines[stage_index]["projected_pi_family"] = (
+						baseline_record["projected_pi_family"].clone()
+					)
+					loss_baselines[stage_index]["projected_pi_h"] = (
+						baseline_record["projected_pi_h"].clone()
+					)
+				elif loss_config["low_frequency_guard_weight"] > 0.0:
 					baseline_st = evaluator.evaluate(C_initial)
-				if loss_config["low_frequency_guard_weight"] > 0.0:
 					loss_baselines[stage_index][
 						"sternheimer_lowest_frequency"
 					] = baseline_st.lowest_frequency_loss.detach().clone()
-				if loss_config["mode"] == "pi_rpa_sensitive_joint":
-					loss_baselines[stage_index]["projected_pi_family"] = (
-						baseline_st.loss.detach().clone()
-					)
-					loss_baselines[stage_index]["projected_pi_h"] = (
-						baseline_st.family_results["H"].loss.detach().clone()
-					)
 
 		best_accepted = None
 		best_violation = None
@@ -368,13 +573,9 @@ class Opt_Orbital_Converge:
 				def calculate_components():
 					if pi_mode:
 						st_result = self.projected_pi_objective.evaluate(C)
-						if not isinstance(
-							st_result, ProjectedPiOptimizationResult
-						):
-							raise TypeError(
-								"projected-Pi evaluator must return "
-								"ProjectedPiOptimizationResult"
-							)
+						_validate_projected_pi_result(
+							st_result, loss_config, "candidate"
+						)
 					else:
 						st_result = self.sternheimer_spillage.evaluate(C)
 						if not isinstance(st_result, SternheimerLossResult):
@@ -469,17 +670,49 @@ class Opt_Orbital_Converge:
 							loss_config,
 						)
 						if rpa_sensitive_mode:
+							family_current = st_result.loss.item()
+							family_baseline = loss_baseline[
+								"projected_pi_family"
+							].item()
+							atom_current = st_result.family_results["H"].loss.item()
+							atom_baseline = loss_baseline["projected_pi_h"].item()
 							family_improved = bool(
-								st_result.loss
-								< loss_baseline["projected_pi_family"]
+								family_current < family_baseline
 							)
 							atom_improved = bool(
-								st_result.family_results["H"].loss
-								< loss_baseline["projected_pi_h"]
+								atom_current < atom_baseline
+							)
+							family_signed_delta = (
+								family_current - family_baseline
+							) / max(family_baseline, loss_config["epsilon"])
+							atom_signed_delta = (
+								atom_current - atom_baseline
+							) / max(atom_baseline, loss_config["epsilon"])
+							response_failed_gates = int(not family_improved) + int(
+								not atom_improved
+							)
+							family_gate_penalty = (
+								0.0
+								if family_improved
+								else 1.0 + max(0.0, family_signed_delta)
+							)
+							atom_gate_penalty = (
+								0.0
+								if atom_improved
+								else 1.0 + max(0.0, atom_signed_delta)
 							)
 						else:
 							family_improved = True
 							atom_improved = True
+							family_current = None
+							family_baseline = None
+							atom_current = None
+							atom_baseline = None
+							family_signed_delta = 0.0
+							atom_signed_delta = 0.0
+							response_failed_gates = 0
+							family_gate_penalty = 0.0
+							atom_gate_penalty = 0.0
 						accepted = (
 							constraints_ok
 							and condition_ok
@@ -528,58 +761,60 @@ class Opt_Orbital_Converge:
 							)
 						else:
 							low_frequency_violation = 0.0
+						base_violations = (
+							dft_violation,
+							dpsi_violation,
+							condition_violation,
+							locality_condition_violation,
+							low_frequency_violation,
+						)
 						if rpa_sensitive_mode:
-							baseline_family = loss_baseline[
-								"projected_pi_family"
-							].item()
-							baseline_h = loss_baseline["projected_pi_h"].item()
-							family_violation = max(
-								0.0,
-								(st_result.loss.item() - baseline_family)
-								/ max(baseline_family, loss_config["epsilon"]),
+							all_penalties = base_violations + (
+								family_gate_penalty,
+								atom_gate_penalty,
 							)
-							atom_violation = max(
-								0.0,
-								(
-									st_result.family_results["H"].loss.item()
-									- baseline_h
-								)
-								/ max(baseline_h, loss_config["epsilon"]),
+							failed_gate_count = sum(
+								violation > 0.0 for violation in base_violations
+							) + response_failed_gates
+							violation_key = (
+								failed_gate_count,
+								max(all_penalties),
+								sum(all_penalties),
+								family_signed_delta + atom_signed_delta,
+								family_signed_delta,
+								atom_signed_delta,
 							)
 						else:
-							family_violation = 0.0
-							atom_violation = 0.0
-						violation_key = (
-							max(
-								dft_violation,
-								dpsi_violation,
-								condition_violation,
-								locality_condition_violation,
-								low_frequency_violation,
-								family_violation,
-								atom_violation,
-							),
-							(
-								dft_violation
-								+ dpsi_violation
-								+ condition_violation
-								+ locality_condition_violation
-								+ low_frequency_violation
-								+ family_violation
-								+ atom_violation
-							),
-						)
+							violation_key = (
+								max(base_violations),
+								sum(base_violations),
+							)
 						if best_violation is None or violation_key < best_violation["key"]:
 							best_violation = {
 								"key": violation_key,
+								"mode": loss_config["mode"],
 								"dft": dft_violation,
 								"dpsi": dpsi_violation,
-								"atom": atom_violation,
-								"family": family_violation,
+								"atom": atom_gate_penalty,
+								"family": family_gate_penalty,
+								"response_failed_gates": response_failed_gates,
+								"family_improved": family_improved,
+								"atom_improved": atom_improved,
+								"family_current": family_current,
+								"family_baseline": family_baseline,
+								"family_signed_delta": family_signed_delta,
+								"atom_current": atom_current,
+								"atom_baseline": atom_baseline,
+								"atom_signed_delta": atom_signed_delta,
 								"condition": condition_violation,
 								"locality_condition": locality_condition_violation,
 								"low_frequency": low_frequency_violation,
-								"max_st_condition": st_result.max_condition,
+								"condition_label": (
+									"max_projected_pi_condition"
+									if pi_mode
+									else "max_st_condition"
+								),
+								"max_condition": st_result.max_condition,
 								"condition_limit": loss_config["condition_limit"],
 								"max_locality_condition": locality_result.max_condition,
 								"locality_condition_limit": (
@@ -692,6 +927,7 @@ class Opt_Orbital_Converge:
 							best_accepted["projected_pi_diagnostics"] = (
 								_projected_pi_diagnostics(
 									st_result,
+									loss_config["mode"],
 									loss_config[
 										"projected_pi_rank_tolerance"
 									],
@@ -826,17 +1062,39 @@ class Opt_Orbital_Converge:
 
 		if new_stage_indices:
 			if best_accepted is None:
+				if best_violation["mode"] == "pi_rpa_sensitive_joint":
+					response_diagnostics = (
+						f"response_failed_gates="
+						f"{best_violation['response_failed_gates']}, "
+						f"family_improved="
+						f"{str(best_violation['family_improved']).lower()}, "
+						f"atom_improved="
+						f"{str(best_violation['atom_improved']).lower()}; "
+						f"atom_current={best_violation['atom_current']:.8g}, "
+						f"atom_baseline={best_violation['atom_baseline']:.8g}, "
+						f"atom_signed_normalized_delta="
+						f"{best_violation['atom_signed_delta']:.8g}; "
+						f"family_current={best_violation['family_current']:.8g}, "
+						f"family_baseline={best_violation['family_baseline']:.8g}, "
+						f"family_signed_normalized_delta="
+						f"{best_violation['family_signed_delta']:.8g}; "
+					)
+				else:
+					response_diagnostics = (
+						f"atom={best_violation['atom']:.8g}, "
+						f"family={best_violation['family']:.8g}, "
+					)
 				raise RuntimeError(
 					"no accepted Sternheimer optimization point; smallest observed "
 					"violation candidate: "
-						f"dft={best_violation['dft']:.8g}, "
-						f"dpsi={best_violation['dpsi']:.8g}, "
-						f"atom={best_violation['atom']:.8g}, "
-						f"family={best_violation['family']:.8g}, "
-						f"low_frequency={best_violation['low_frequency']:.8g}, "
+					f"dft={best_violation['dft']:.8g}, "
+					f"dpsi={best_violation['dpsi']:.8g}, "
+					+ response_diagnostics
+					+ f"low_frequency={best_violation['low_frequency']:.8g}, "
 					f"condition={best_violation['condition']:.8g}; "
 					f"locality_condition={best_violation['locality_condition']:.8g}; "
-					f"max_st_condition={best_violation['max_st_condition']:.8g}, "
+					f"{best_violation['condition_label']}="
+					f"{best_violation['max_condition']:.8g}, "
 					f"condition_limit={best_violation['condition_limit']:.8g}, "
 					f"max_locality_condition="
 					f"{best_violation['max_locality_condition']:.8g}, "
