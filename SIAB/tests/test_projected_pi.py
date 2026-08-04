@@ -95,6 +95,12 @@ def make_pair():
     return pair_response_and_source(response, source), d.unsqueeze(0), q
 
 
+def scaled_pair(pair, scale=1.0e-2):
+    source = replace(pair.source, d=pair.source.d * scale)
+    response = replace(pair.response, q=pair.response.q * scale)
+    return pair_response_and_source(response, source)
+
+
 def coefficients(value=None, requires_grad=False):
     if value is None:
         value = torch.tensor(
@@ -149,6 +155,57 @@ def direct_values(d, q, overlap, coefficient):
         "reference_pi": reference_pi,
         "frequency_loss": frequency_loss,
         "loss": loss,
+    }
+
+
+def direct_rpa_sensitivity(reference_pi, candidate_pi, frequency_weight):
+    sensitivity_error = []
+    sensitivity_reference_norm = []
+    trace_log_difference = []
+    minimum_reference_dielectric_eigenvalue = []
+    minimum_candidate_dielectric_eigenvalue = []
+    for reference, candidate in zip(reference_pi, candidate_pi):
+        reference_eigenvalue, reference_eigenvector = torch.linalg.eigh(reference)
+        candidate_eigenvalue = torch.linalg.eigvalsh(candidate)
+        reference_dielectric = 1.0 - reference_eigenvalue
+        candidate_dielectric = 1.0 - candidate_eigenvalue
+        g = torch.abs(1.0 - 1.0 / reference_dielectric)
+        weight_sqrt = (
+            reference_eigenvector
+            @ torch.diag(torch.sqrt(g / torch.max(g))).to(torch.complex128)
+            @ reference_eigenvector.mH
+        )
+        weighted_error = weight_sqrt @ (candidate - reference) @ weight_sqrt
+        weighted_reference = weight_sqrt @ reference @ weight_sqrt
+        sensitivity_error.append(torch.sum(torch.abs(weighted_error) ** 2).real)
+        sensitivity_reference_norm.append(
+            torch.sum(torch.abs(weighted_reference) ** 2).real
+        )
+        trace_log_difference.append(
+            torch.sum(torch.log(candidate_dielectric) + candidate_eigenvalue)
+            - torch.sum(torch.log(reference_dielectric) + reference_eigenvalue)
+        )
+        minimum_reference_dielectric_eigenvalue.append(
+            torch.min(reference_dielectric)
+        )
+        minimum_candidate_dielectric_eigenvalue.append(
+            torch.min(candidate_dielectric)
+        )
+
+    sensitivity_error = torch.stack(sensitivity_error)
+    sensitivity_reference_norm = torch.stack(sensitivity_reference_norm)
+    return {
+        "sensitivity_loss": torch.sum(frequency_weight * sensitivity_error)
+        / torch.sum(frequency_weight * sensitivity_reference_norm),
+        "frequency_sensitivity_loss": sensitivity_error
+        / sensitivity_reference_norm,
+        "trace_log_difference": torch.stack(trace_log_difference),
+        "minimum_reference_dielectric_eigenvalue": torch.stack(
+            minimum_reference_dielectric_eigenvalue
+        ),
+        "minimum_candidate_dielectric_eigenvalue": torch.stack(
+            minimum_candidate_dielectric_eigenvalue
+        ),
     }
 
 
@@ -270,6 +327,240 @@ class ProjectedPiTest(unittest.TestCase):
             / (2.0 * step)
         )
         self.assertAlmostEqual(analytic, finite_difference, delta=2.0e-7)
+
+    def test_rpa_sensitivity_matches_independent_eigendecomposition(self):
+        scale = 1.0e-2
+        pair = scaled_pair(self.pair, scale=scale)
+        expected_base = direct_values(
+            self.d * scale,
+            self.q * scale,
+            pair.source.overlap,
+            self.coefficient,
+        )
+        expected_sensitivity = direct_rpa_sensitivity(
+            expected_base["reference_pi"],
+            expected_base["candidate_pi"],
+            torch.tensor([0.3, 0.7], dtype=torch.float64),
+        )
+        for value in expected_sensitivity.values():
+            self.assertTrue(bool(torch.all(torch.isfinite(value))))
+        self.assertTrue(
+            bool(
+                torch.all(
+                    expected_sensitivity[
+                        "minimum_reference_dielectric_eigenvalue"
+                    ]
+                    > 0.0
+                )
+            )
+        )
+        self.assertTrue(
+            bool(
+                torch.all(
+                    expected_sensitivity[
+                        "minimum_candidate_dielectric_eigenvalue"
+                    ]
+                    > 0.0
+                )
+            )
+        )
+
+        result = ProjectedPiEvaluator(
+            pair,
+            sensitivity_alpha=0.25,
+        ).evaluate(coefficients(self.coefficient))
+
+        self.assertEqual(result.sensitivity_alpha, 0.25)
+        torch.testing.assert_close(
+            result.base_loss,
+            expected_base["loss"],
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        torch.testing.assert_close(
+            result.frequency_base_loss,
+            expected_base["frequency_loss"],
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        torch.testing.assert_close(
+            result.loss,
+            0.25 * result.base_loss + 0.75 * result.sensitivity_loss,
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        torch.testing.assert_close(
+            result.frequency_loss,
+            0.25 * result.frequency_base_loss
+            + 0.75 * result.frequency_sensitivity_loss,
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        for field in (
+            "sensitivity_loss",
+            "frequency_sensitivity_loss",
+            "trace_log_difference",
+            "minimum_reference_dielectric_eigenvalue",
+            "minimum_candidate_dielectric_eigenvalue",
+        ):
+            torch.testing.assert_close(
+                getattr(result, field),
+                expected_sensitivity[field],
+                rtol=1.0e-13,
+                atol=1.0e-13,
+            )
+        self.assertTrue(
+            bool(torch.all(result.minimum_reference_dielectric_eigenvalue > 0.0))
+        )
+        self.assertTrue(
+            bool(torch.all(result.minimum_candidate_dielectric_eigenvalue > 0.0))
+        )
+
+    def test_rpa_sensitivity_directional_gradients_match_centered_difference(self):
+        scale = 1.0e-2
+        pair = scaled_pair(self.pair, scale=scale)
+        expected = direct_values(
+            self.d * scale,
+            self.q * scale,
+            pair.source.overlap,
+            self.coefficient,
+        )
+        reference_eigenvalue = torch.linalg.eigvalsh(expected["reference_pi"])
+        self.assertTrue(
+            bool(torch.all(torch.diff(reference_eigenvalue, dim=-1) > 1.0e-8))
+        )
+
+        direction = torch.tensor(
+            [[0.3, -0.2], [-0.4, 0.1], [0.2, 0.5]],
+            dtype=torch.float64,
+        )
+        direction = direction / torch.linalg.vector_norm(direction)
+        candidate = coefficients(self.coefficient, requires_grad=True)
+        coefficient = candidate["H"][0]
+        evaluator = ProjectedPiEvaluator(pair, sensitivity_alpha=0.25)
+        result = evaluator.evaluate(candidate)
+        sensitivity_gradient = torch.autograd.grad(
+            result.sensitivity_loss,
+            coefficient,
+            retain_graph=True,
+        )[0]
+        blended_gradient = torch.autograd.grad(result.loss, coefficient)[0]
+
+        epsilon = 1.0e-6
+        plus = self.coefficient + epsilon * direction
+        minus = self.coefficient - epsilon * direction
+        plus_result = evaluator.evaluate(coefficients(plus))
+        minus_result = evaluator.evaluate(coefficients(minus))
+        for field, gradient in (
+            ("sensitivity_loss", sensitivity_gradient),
+            ("loss", blended_gradient),
+        ):
+            finite_difference = (
+                getattr(plus_result, field) - getattr(minus_result, field)
+            ) / (2.0 * epsilon)
+            torch.testing.assert_close(
+                torch.sum(gradient * direction),
+                finite_difference,
+                rtol=2.0e-5,
+                atol=2.0e-7,
+            )
+
+    def test_rpa_sensitivity_common_source_response_phase_is_invariant(self):
+        pair = scaled_pair(self.pair)
+        phase = torch.exp(torch.tensor(0.37j, dtype=torch.complex128))
+        source = replace(pair.source, d=pair.source.d * phase)
+        response = replace(pair.response, q=pair.response.q * phase)
+        phased_pair = pair_response_and_source(response, source)
+
+        original = ProjectedPiEvaluator(pair, sensitivity_alpha=0.25).evaluate(
+            coefficients(self.coefficient)
+        )
+        phased = ProjectedPiEvaluator(
+            phased_pair,
+            sensitivity_alpha=0.25,
+        ).evaluate(coefficients(self.coefficient))
+        self._assert_all_losses_close(phased, original)
+
+    def test_rpa_sensitivity_common_auxiliary_channel_permutation_is_invariant(self):
+        pair = scaled_pair(self.pair)
+        permutation = torch.tensor([1, 0], dtype=torch.int64)
+        source = replace(
+            pair.source,
+            auxiliary_channel=permutation[pair.source.auxiliary_channel],
+        )
+        response = replace(
+            pair.response,
+            auxiliary_channel=permutation[pair.response.auxiliary_channel],
+        )
+        permuted_pair = pair_response_and_source(response, source)
+
+        original = ProjectedPiEvaluator(pair, sensitivity_alpha=0.25).evaluate(
+            coefficients(self.coefficient)
+        )
+        permuted = ProjectedPiEvaluator(
+            permuted_pair,
+            sensitivity_alpha=0.25,
+        ).evaluate(coefficients(self.coefficient))
+        self._assert_all_losses_close(permuted, original)
+
+    def test_rpa_sensitivity_rejects_nonpositive_reference_dielectric(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "reference I-Pi is not positive",
+        ):
+            ProjectedPiEvaluator(
+                scaled_pair(self.pair, scale=1.1),
+                sensitivity_alpha=0.25,
+            ).evaluate(coefficients(self.coefficient))
+
+    def test_rpa_sensitivity_rejects_nonpositive_candidate_dielectric(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "candidate I-Pi is not positive",
+        ):
+            ProjectedPiEvaluator(
+                self.pair,
+                sensitivity_alpha=0.25,
+            ).evaluate(coefficients(self.coefficient))
+
+    def test_rpa_sensitivity_rejects_numerically_zero_reference(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "RPA sensitivity is numerically zero",
+        ):
+            ProjectedPiEvaluator(
+                scaled_pair(self.pair, scale=1.0e-7),
+                sensitivity_alpha=0.25,
+            ).evaluate(coefficients(self.coefficient))
+
+    def test_rpa_sensitivity_rejects_nonfinite_pi(self):
+        evaluator = ProjectedPiEvaluator(
+            scaled_pair(self.pair),
+            sensitivity_alpha=0.25,
+        )
+        evaluator._q = evaluator._q.clone()
+        evaluator._q[0, 0, 0, 0] = torch.tensor(
+            complex(float("nan"), 0.0),
+            dtype=torch.complex128,
+        )
+        with self.assertRaisesRegex(RuntimeError, r"(candidate|projected-)Pi.*finite"):
+            evaluator.evaluate(coefficients(self.coefficient))
+
+    def _assert_all_losses_close(self, actual, expected):
+        for field in (
+            "loss",
+            "base_loss",
+            "sensitivity_loss",
+            "frequency_loss",
+            "frequency_base_loss",
+            "frequency_sensitivity_loss",
+        ):
+            torch.testing.assert_close(
+                getattr(actual, field),
+                getattr(expected, field),
+                rtol=1.0e-13,
+                atol=1.0e-13,
+            )
 
     def test_rejects_singular_candidate_overlap(self):
         singular = torch.tensor(

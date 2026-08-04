@@ -504,3 +504,43 @@ SOS/CP gate into distinct commits. It also requires an autograd-versus-centered
 finite-difference check before the new loss can be used. The current state is
 still **plan only**: no RED test, implementation, historical ranking, new
 optimization, or physical result has been run.
+
+### Task 1 RED: per-family RPA sensitivity (2026-08-04)
+
+The RED-only test source was added without changing production Python. The
+remote GitHub checkout could not be created because `github.com` did not
+resolve on `df_dcu`, so the test used the permitted disposable copy at
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code`.
+Its source state was a `git archive` of `SIAB` from
+`133ecf2bf92471eb5f8e66310a4e3a4b12f575ec` with archive SHA256
+`a6a920bfc06dac6a25764225c42f2136e4fad49cb263e9c18f2232e2e8f09bf6`,
+plus only the uncommitted `SIAB/tests/test_projected_pi.py` overlay with
+SHA256 `a5f82bb64695b0c6b4b2fe2ca80cea8b0413615fcacf4b35d3a2c374b8600fc0`.
+The untouched production `projected_pi.py` had SHA256
+`f78d08285b296a0a41acb557bf7df622ebc8b3e74e44ba2548705ff8e02e505b`.
+
+The exact RED command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi
+```
+
+It ran 19 tests: all 11 legacy tests passed and exactly these 8 new tests
+errored as expected:
+
+- `test_rpa_sensitivity_matches_independent_eigendecomposition`
+- `test_rpa_sensitivity_directional_gradients_match_centered_difference`
+- `test_rpa_sensitivity_common_source_response_phase_is_invariant`
+- `test_rpa_sensitivity_common_auxiliary_channel_permutation_is_invariant`
+- `test_rpa_sensitivity_rejects_nonpositive_reference_dielectric`
+- `test_rpa_sensitivity_rejects_nonpositive_candidate_dielectric`
+- `test_rpa_sensitivity_rejects_numerically_zero_reference`
+- `test_rpa_sensitivity_rejects_nonfinite_pi`
+
+Every new test stopped for the same feature-specific reason:
+`TypeError: ProjectedPiEvaluator.__init__() got an unexpected keyword argument
+'sensitivity_alpha'`. The exit status was 1. There was no import, fixture,
+or test-algebra failure. This is RED evidence only: no implementation or physical result exists.
