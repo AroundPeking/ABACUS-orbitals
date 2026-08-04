@@ -1618,3 +1618,35 @@ and `bc1de07af2eb06c29c04d8c78e3d5f0cb095680d7dc9c2f332a14310ab097c1c`.
 
 This is code GREEN only. It is not an optimization, historical alpha ranking,
 Task 6 implementation, candidate-basis result, or physical validation.
+
+### Task 5 controller-independent final regression (2026-08-04)
+
+After the Task 5 specification and code-quality reviews approved the final
+implementation, the controller built a fresh archive directly from commit
+`014a19f4eca823bd12fa5a6c61d97db1d63ae803`. It did not reuse either
+implementation GREEN overlay and was not a remote Git checkout. The archive
+contained tracked `SIAB` and `Dojo-NC-SR`, had no AppleDouble entries, and
+had matching local/remote SHA256:
+
+```text
+92cc02558a781a9a7b2ccf2156aac227715f61b45bc2905d30014c4db8c48dc6
+```
+
+The absolute independent tree was:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task5-controller-final-014a19f4
+```
+
+From its `SIAB/tests` directory, with tree-local `DOJO_PATH` and the
+recorded Python/PYTHONPATH, the controller reran:
+
+```text
+Task 5 two modules:   Ran 109 tests in 1.013s, OK; process wall 5.80 s
+Task 4 four modules:  Ran 146 tests in 1.204s, OK; process wall 5.06 s
+Full SIAB discover:   Ran 375 tests in 25.125s, OK; process wall 29.35 s
+```
+
+All commands exited zero. This independent reconstruction closes Task 5 only
+at the code-regression gate. It does not freeze an alpha, run Task 6, optimize
+an orbital basis, or provide an RPA/SOS/CP physical result.
