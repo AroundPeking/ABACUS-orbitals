@@ -32,6 +32,7 @@ from IO.func_C import read_C_init, write_C
 from IO.read_sternheimer import read_sternheimer
 import main as siab_main
 import main_each as siab_main_each
+import opt_orbital_converge as siab_converge
 from optimization_loss import LOSS_DEFAULTS
 from sternheimer_data import PrimitiveBlock, SternheimerData
 from sternheimer_spillage import OrbitalColumn
@@ -84,7 +85,7 @@ PROJECTED_PI_DIAGNOSTICS = {
 }
 
 
-class RoutingConstructionObserved(RuntimeError):
+class RoutingConvergeObserved(RuntimeError):
     pass
 
 
@@ -682,8 +683,13 @@ class MainRoutingTest(unittest.TestCase):
     def test_rejects_mixed_rpa_sensitive_and_pi_dpsi_joint_stages(self):
         self.assert_mixed_rpa_sensitive_stage_rejected("pi_dpsi_joint")
 
-    def _run_until_projected_pi_construction(self, stage):
-        pairs = (("H", object()), ("H2", object()))
+    def _run_through_projected_pi_objective(
+        self, stage, data_transmit=None
+    ):
+        pairs = (
+            ("H", types.SimpleNamespace(provenance_warnings=())),
+            ("H2", types.SimpleNamespace(provenance_warnings=())),
+        )
         targets = siab_main.LoadedSternheimerTargets(
             (),
             (types.SimpleNamespace(data=(object(),)),),
@@ -697,10 +703,18 @@ class MainRoutingTest(unittest.TestCase):
                 torch.eye(2, dtype=torch.float64, requires_grad=True)
             ]
         }
-        constructor = mock.Mock(side_effect=RoutingConstructionObserved)
-        legacy_constructor = mock.Mock(
-            side_effect=RoutingConstructionObserved
-        )
+        objective_sentinel = object()
+        spillage_sentinel = object()
+        constructor = mock.Mock(return_value=objective_sentinel)
+        legacy_constructor = mock.Mock(return_value=spillage_sentinel)
+        converge = mock.Mock()
+        if data_transmit is None:
+            converge.cal_converge.side_effect = RoutingConvergeObserved
+        else:
+            converge.cal_converge.return_value = data_transmit
+        converge_constructor = mock.Mock(return_value=converge)
+        coefficient_writer = mock.Mock()
+        metadata_writer = mock.Mock()
         returned = (
             file_list,
             info(Nt_all=["H"], Nu={"H": [2]}),
@@ -714,47 +728,112 @@ class MainRoutingTest(unittest.TestCase):
                 "seed": 0,
             },
             {"same_band": True},
-            {"Rcut": 6.0},
+            {
+                "Rcut": {"H": 6.0},
+                "dr": {"H": 0.01},
+                "smearing_sigma": {"H": 0.0},
+            },
         )
-        with mock.patch.object(
-            siab_main.IO.read_json, "read_json", return_value=returned
-        ), mock.patch.object(
-            siab_main,
-            "_load_sternheimer_data",
-            return_value=(targets, [stage]),
-        ), mock.patch.object(
-            siab_main.IO.cal_weight, "cal_weight", return_value="weight"
-        ), mock.patch.object(
-            siab_main.IO.read_QSV, "read_file_head", return_value="kst"
-        ), mock.patch.object(
-            siab_main.IO.change_info,
-            "change_info",
-            return_value=(["structure"], info_element),
-        ), mock.patch.object(
-            siab_main.IO.read_QSV,
-            "read_QSV",
-            return_value=("q", "s", "v"),
-        ), mock.patch.object(
-            siab_main.IO.func_C,
-            "random_C_init",
-            return_value=coefficient,
-        ), mock.patch.object(
-            siab_main.orbital, "set_E", return_value="energy"
-        ), mock.patch.object(
-            siab_main,
-            "_normalize_initial_coefficients",
-            return_value=None,
-        ), mock.patch.object(
-            siab_main,
-            "NormalizedPhysicalFamilyProjectedPiOptimization",
-            constructor,
-        ), mock.patch.object(
-            siab_main,
-            "NormalizedPhysicalFamilySpillage",
-            legacy_constructor,
-        ), self.assertRaises(RoutingConstructionObserved):
-            siab_main.main()
-        return pairs, constructor, legacy_constructor
+        patches = (
+            mock.patch.object(
+                siab_main.IO.read_json, "read_json", return_value=returned
+            ),
+            mock.patch.object(
+                siab_main,
+                "_load_sternheimer_data",
+                return_value=(targets, [stage]),
+            ),
+            mock.patch.object(
+                siab_main.IO.cal_weight, "cal_weight", return_value="weight"
+            ),
+            mock.patch.object(
+                siab_main.IO.read_QSV, "read_file_head", return_value="kst"
+            ),
+            mock.patch.object(
+                siab_main.IO.change_info,
+                "change_info",
+                return_value=(["structure"], info_element),
+            ),
+            mock.patch.object(
+                siab_main.IO.read_QSV,
+                "read_QSV",
+                return_value=("q", "s", "v"),
+            ),
+            mock.patch.object(
+                siab_main.IO.func_C,
+                "random_C_init",
+                return_value=coefficient,
+            ),
+            mock.patch.object(
+                siab_main.orbital, "set_E", return_value="energy"
+            ),
+            mock.patch.object(
+                siab_main,
+                "_normalize_initial_coefficients",
+                return_value=None,
+            ),
+            mock.patch.object(
+                siab_main,
+                "NormalizedPhysicalFamilyProjectedPiOptimization",
+                constructor,
+            ),
+            mock.patch.object(
+                siab_main,
+                "NormalizedPhysicalFamilySpillage",
+                legacy_constructor,
+            ),
+            mock.patch.object(
+                siab_main, "Opt_Orbital_Converge", converge_constructor
+            ),
+            mock.patch.object(
+                siab_main.orbital,
+                "generate_orbital",
+                return_value={"H": []},
+            ),
+            mock.patch.object(
+                siab_main.orbital, "orth", return_value=None
+            ),
+            mock.patch.object(
+                siab_main.IO.print_orbital,
+                "print_orbital",
+                return_value=None,
+            ),
+            mock.patch.object(
+                siab_main.IO.print_orbital,
+                "plot_orbital",
+                return_value=None,
+            ),
+            mock.patch.object(
+                siab_main.IO.func_C, "write_C", coefficient_writer
+            ),
+            mock.patch.object(
+                siab_main, "_write_projected_pi_metadata", metadata_writer
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory, working_directory(
+            directory
+        ), contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            if data_transmit is None:
+                with self.assertRaises(RoutingConvergeObserved):
+                    siab_main.main()
+            else:
+                siab_main.main()
+
+        converge.cal_converge.assert_called_once()
+        return types.SimpleNamespace(
+            pairs=pairs,
+            targets=targets,
+            constructor=constructor,
+            legacy_constructor=legacy_constructor,
+            converge=converge,
+            objective_sentinel=objective_sentinel,
+            spillage_sentinel=spillage_sentinel,
+            coefficient_writer=coefficient_writer,
+            metadata_writer=metadata_writer,
+            data_transmit=data_transmit,
+        )
 
     def test_rpa_sensitive_routes_alpha_rank_and_fourth_order_power(self):
         stage = {
@@ -762,18 +841,20 @@ class MainRoutingTest(unittest.TestCase):
             **self.rpa_sensitive_loss(),
             "condition_limit": 7.0e8,
         }
-        pairs, constructor, legacy_constructor = (
-            self._run_until_projected_pi_construction(stage)
-        )
+        observed = self._run_through_projected_pi_objective(stage)
 
-        constructor.assert_called_once_with(
-            *pairs,
+        observed.converge.set_projected_pi_objective.assert_called_once_with(
+            observed.objective_sentinel
+        )
+        observed.converge.set_sternheimer_spillage.assert_not_called()
+        observed.constructor.assert_called_once_with(
+            *observed.pairs,
             relative_rank_tolerance=1.0e-12,
             condition_limit=7.0e8,
             sensitivity_alpha=0.25,
             family_power=4,
         )
-        legacy_constructor.assert_not_called()
+        observed.legacy_constructor.assert_not_called()
 
     def test_pi_dpsi_joint_adapter_construction_remains_unchanged(self):
         stage = {
@@ -782,16 +863,134 @@ class MainRoutingTest(unittest.TestCase):
             "projected_pi_rank_tolerance": 1.0e-12,
             "condition_limit": 7.0e8,
         }
-        pairs, constructor, legacy_constructor = (
-            self._run_until_projected_pi_construction(stage)
-        )
+        observed = self._run_through_projected_pi_objective(stage)
 
-        constructor.assert_called_once_with(
-            *pairs,
+        observed.constructor.assert_called_once_with(
+            *observed.pairs,
             relative_rank_tolerance=1.0e-12,
             condition_limit=7.0e8,
         )
-        legacy_constructor.assert_not_called()
+        observed.legacy_constructor.assert_not_called()
+        observed.converge.set_projected_pi_objective.assert_called_once_with(
+            observed.objective_sentinel
+        )
+        observed.converge.set_sternheimer_spillage.assert_not_called()
+
+    def test_rpa_sensitive_diagnostics_record_mode_alpha_and_family_power(self):
+        family_results = {
+            "H": types.SimpleNamespace(
+                loss=torch.tensor(0.12, dtype=torch.float64),
+                reference_rank=2,
+                max_candidate_condition=4.0,
+                frequency_loss=torch.tensor(
+                    [0.13, 0.11], dtype=torch.float64
+                ),
+                sensitivity_alpha=0.25,
+            ),
+            "H2": types.SimpleNamespace(
+                loss=torch.tensor(0.18, dtype=torch.float64),
+                reference_rank=3,
+                max_candidate_condition=5.0,
+                frequency_loss=torch.tensor(
+                    [0.20, 0.16], dtype=torch.float64
+                ),
+                sensitivity_alpha=0.25,
+            ),
+        }
+        result = types.SimpleNamespace(
+            frequency_ha=torch.tensor([0.1, 1.0], dtype=torch.float64),
+            frequency_loss=torch.tensor([0.17, 0.14], dtype=torch.float64),
+            lowest_frequency_ha=torch.tensor(0.1, dtype=torch.float64),
+            lowest_frequency_loss=torch.tensor(0.17, dtype=torch.float64),
+            max_condition=5.0,
+            family_results=family_results,
+            sensitivity_alpha=0.25,
+            family_power=4,
+        )
+
+        diagnostics = siab_converge._projected_pi_diagnostics(
+            result, 1.0e-12
+        )
+
+        self.assertEqual(diagnostics["family_names"], ["H", "H2"])
+        self.assertEqual(
+            {
+                name: diagnostics.get(name)
+                for name in ("mode", "sensitivity_alpha", "family_power")
+            },
+            {
+                "mode": "pi_rpa_sensitive_joint",
+                "sensitivity_alpha": 0.25,
+                "family_power": 4,
+            },
+        )
+        self.assertEqual(
+            diagnostics["families"]["H"]["frequency_loss"],
+            [0.13, 0.11],
+        )
+        self.assertEqual(
+            diagnostics["families"]["H2"]["frequency_loss"],
+            [0.2, 0.16],
+        )
+
+    def test_rpa_sensitive_routes_existing_projected_pi_metadata_hook(self):
+        projected_pi_diagnostics = {
+            "mode": "pi_rpa_sensitive_joint",
+            "frequency_ha": [0.1, 1.0],
+            "frequency_loss": [0.17, 0.14],
+            "lowest_frequency_ha": 0.1,
+            "lowest_frequency_loss": 0.17,
+            "max_condition": 5.0,
+            "rank_tolerance": 1.0e-12,
+            "family_names": ["H", "H2"],
+            "families": {"H": {"loss": 0.12}, "H2": {"loss": 0.18}},
+            "sensitivity_alpha": 0.25,
+            "family_power": 4,
+        }
+        data_transmit = {
+            "C": {
+                "H": [torch.eye(2, dtype=torch.float64)]
+            },
+            "Spillage": PROJECTED_PI_COMPONENTS["total"],
+            "loss_mode": "pi_rpa_sensitive_joint",
+            "loss_components": PROJECTED_PI_COMPONENTS,
+            "max_projected_pi_condition": 5.0,
+            "projected_pi_diagnostics": projected_pi_diagnostics,
+            "max_st_condition": 99.0,
+            "max_locality_condition": 88.0,
+        }
+        stage = {
+            **LOSS_DEFAULTS,
+            **self.rpa_sensitive_loss(),
+            "condition_limit": 7.0e8,
+        }
+
+        observed = self._run_through_projected_pi_objective(
+            stage, data_transmit=data_transmit
+        )
+        writer_kwargs = observed.coefficient_writer.call_args.kwargs
+        self.assertEqual(
+            {
+                "metadata_calls": observed.metadata_writer.call_count,
+                "mode": writer_kwargs["mode"],
+                "diagnostics": writer_kwargs["diagnostics"],
+            },
+            {
+                "metadata_calls": 1,
+                "mode": "pi_rpa_sensitive_joint",
+                "diagnostics": {
+                    "max_projected_pi_condition": 5.0,
+                    "lowest_projected_pi_frequency_ha": 0.1,
+                    "lowest_projected_pi_loss": 0.17,
+                    "projected_pi_rank_tolerance": 1.0e-12,
+                },
+            },
+        )
+        observed.metadata_writer.assert_called_once_with(
+            "PROJECTED_PI_METADATA.json",
+            observed.targets,
+            data_transmit,
+        )
 
     def test_rpa_sensitive_main_requires_origin(self):
         stage = {**LOSS_DEFAULTS, **self.rpa_sensitive_loss()}

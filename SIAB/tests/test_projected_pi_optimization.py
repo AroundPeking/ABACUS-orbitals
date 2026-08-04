@@ -7,6 +7,7 @@ import torch
 import common  # noqa: F401 - configures the optimizer import path
 from projected_pi import (
     NormalizedPhysicalFamilyProjectedPi,
+    ProjectedPiEvaluator,
     ProjectedPiFamilyResult,
 )
 from projected_pi_optimization import (
@@ -52,11 +53,11 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         ).evaluate(coefficients(self.coefficient))
 
         torch.testing.assert_close(result.loss, expected.loss)
-        self.assertTrue(
-            torch.equal(
-                result.loss,
-                expected.results["H"].loss + expected.results["H2"].loss,
-            )
+        torch.testing.assert_close(
+            result.loss,
+            expected.results["H"].loss + expected.results["H2"].loss,
+            rtol=0.0,
+            atol=0.0,
         )
         self.assertEqual(tuple(result.family_results), ("H", "H2"))
         torch.testing.assert_close(
@@ -79,15 +80,38 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
             result.lowest_frequency_loss, result.frequency_loss[0]
         )
 
-    def test_rpa_sensitive_family_loss_uses_fourth_order_norm(self):
+    def rpa_sensitive_pairs(self):
         h = scaled_pair(self.h)
-        h2 = modified_pair(h, q_scale=1.17)
+        h2_q = h.response.q.clone()
+        h2_q[0, 0] *= 1.31
+        h2_q[-1, -1] *= 0.79
+        h2 = pair_response_and_source(
+            replace(h.response, q=h2_q), h.source
+        )
+        return h, h2
+
+    def test_rpa_sensitive_family_loss_uses_fourth_order_norm(self):
+        h, h2 = self.rpa_sensitive_pairs()
+        candidate = coefficients(self.coefficient, requires_grad=True)
+        direct_h = ProjectedPiEvaluator(
+            h, sensitivity_alpha=0.25
+        ).evaluate(candidate)
+        direct_h2 = ProjectedPiEvaluator(
+            h2, sensitivity_alpha=0.25
+        ).evaluate(candidate)
+        self.assertGreater(float(direct_h.loss.detach()), 0.0)
+        self.assertGreater(float(direct_h2.loss.detach()), 0.0)
+        self.assertGreater(
+            abs(float((direct_h.loss - direct_h2.loss).detach())),
+            1.0e-10,
+        )
+
         result = self.adapter(
             ("H", h),
             ("H2", h2),
             sensitivity_alpha=0.25,
             family_power=4,
-        ).evaluate(coefficients(self.coefficient))
+        ).evaluate(candidate)
         expected = (
             result.family_results["H"].loss.pow(4)
             + result.family_results["H2"].loss.pow(4)
@@ -96,6 +120,80 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         torch.testing.assert_close(result.loss, expected)
         self.assertEqual(result.sensitivity_alpha, 0.25)
         self.assertEqual(result.family_power, 4)
+        self.assertEqual(
+            result.family_results["H"].sensitivity_alpha, 0.25
+        )
+        self.assertEqual(
+            result.family_results["H2"].sensitivity_alpha, 0.25
+        )
+        torch.testing.assert_close(
+            result.family_results["H"].loss, direct_h.loss
+        )
+        torch.testing.assert_close(
+            result.family_results["H2"].loss, direct_h2.loss
+        )
+
+    def test_rpa_sensitive_fourth_order_gradient_matches_centered_difference(self):
+        h, h2 = self.rpa_sensitive_pairs()
+        candidate = coefficients(self.coefficient, requires_grad=True)
+        result = self.adapter(
+            ("H", h),
+            ("H2", h2),
+            sensitivity_alpha=0.25,
+            family_power=4,
+        ).evaluate(candidate)
+        result.loss.backward()
+        analytic = float(candidate["H"][0].grad[1, 0])
+        self.assertGreater(abs(analytic), 1.0e-8)
+
+        step = 1.0e-6
+        plus = self.coefficient.clone()
+        minus = self.coefficient.clone()
+        plus[1, 0] += step
+        minus[1, 0] -= step
+        finite_difference = float(
+            (
+                self.adapter(
+                    ("H", h),
+                    ("H2", h2),
+                    sensitivity_alpha=0.25,
+                    family_power=4,
+                ).evaluate(coefficients(plus)).loss
+                - self.adapter(
+                    ("H", h),
+                    ("H2", h2),
+                    sensitivity_alpha=0.25,
+                    family_power=4,
+                ).evaluate(coefficients(minus)).loss
+            )
+            / (2.0 * step)
+        )
+        self.assertAlmostEqual(analytic, finite_difference, delta=3.0e-7)
+
+    def test_rpa_sensitive_rejects_family_power_other_than_exactly_four(self):
+        h, h2 = self.rpa_sensitive_pairs()
+        for family_power in (
+            1,
+            2,
+            3,
+            5,
+            4.5,
+            float("nan"),
+            float("inf"),
+            "4",
+            None,
+            True,
+        ):
+            with self.subTest(family_power=family_power):
+                with self.assertRaisesRegex(
+                    ValueError, "family_power.*exactly 4"
+                ):
+                    self.adapter(
+                        ("H", h),
+                        ("H2", h2),
+                        sensitivity_alpha=0.25,
+                        family_power=family_power,
+                    )
 
     def test_coefficient_gradient_matches_centered_difference(self):
         candidate = coefficients(self.coefficient, requires_grad=True)

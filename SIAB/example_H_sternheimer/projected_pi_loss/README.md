@@ -840,3 +840,109 @@ There was no import, fixture, mock, setup, or test-algebra error. The missing
 dpsi sentinel remains an intentional routing-boundary probe. This is still
 **Task 3 RED only**. There is **no Task 4 implementation, historical ranking,
 optimization, candidate orbital, or physical result**.
+
+### Task 3 RED code-quality gap closure (2026-08-04)
+
+The preceding 97-method result remains the historical spec-review RED. This
+follow-up changes only `test_projected_pi_optimization.py` and
+`test_main_sternheimer.py`; production Python remains untouched. The
+`df_dcu` GitHub SSH probe produced no DNS resolution before its 10-second
+timeout, so the run again used a committed-source archive plus exact test
+overlay. The source is `SIAB` at commit
+`0d12cdfa57d40f3136c6577a3125eaac5bbefab4`.
+
+The first overlay attempt was discarded and is not RED evidence: import stopped
+with `SyntaxError: too many statically nested blocks` in the routing helper.
+Replacing the combined mock context with `contextlib.ExitStack` changed only
+test setup. The corrected archive provenance below is the counted run.
+
+The uncompressed source archive SHA256 was:
+
+```text
+285f61255461d5c7e4af7c5d895e4172f060e305514aeb1d399f2fb9a3e218ef
+```
+
+The corrected two-test overlay archive SHA256 was
+`bb1e741ef4762cef809f363feac76c3c171a6bc06563bdb84a97ac1dcf0731fb`.
+It contained exactly:
+
+```text
+SIAB/tests/test_projected_pi_optimization.py
+  0258ef94d7b3606d0e6c3afb2b0d256397703e54dcc97ce3ca7c893744ef172c
+SIAB/tests/test_main_sternheimer.py
+  86cb9f8092f3f4466b43c4b8d391208433ef63f95ec7e67706dc6103042dfda8
+```
+
+Local and remote hashes matched. The untouched production hashes were:
+
+```text
+SIAB/opt_orb_pytorch_dpsi/projected_pi_optimization.py
+  134bb7085e87311adeb6940a82827399cb6770959b1601c086f5c71cf271c8e3
+SIAB/opt_orb_pytorch_dpsi/optimization_loss.py
+  c063ecfa23270beca67737b54035a7a7fcf5505909a073b49d9671be4a9da10d
+SIAB/opt_orb_pytorch_dpsi/main.py
+  f83ae7540186947e58c9ff671b629719cf5c86083c78f0e6983c28d066819056
+SIAB/opt_orb_pytorch_dpsi/opt_orbital_converge.py
+  9a3d1b932d46d099b46f466149460440d5731f2e07598c32e111b3272922e968
+```
+
+The corrected remote input and test trees were:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-quality-red-input-v2.lxxVkE
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-quality-red-v2.gEHjpW
+```
+
+The exact command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-quality-red-v2.gEHjpW/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+```
+
+The command exited 1 after 0.933 seconds and ran 101 test methods. Exactly 73
+methods passed. Twenty methods produced 25 failure records because the
+nonfinite-alpha method has 3 failing subtests and the forbidden-penalty method
+has 4. Eight methods produced 17 error records because the invalid-family-power
+method has 10 erroring subtests. The exact unittest summary was
+`FAILED (failures=25, errors=17)`.
+
+All methods that passed in the preceding 97-method RED still pass. In
+particular, the legacy aggregate now uses diagnostic-rich
+`torch.testing.assert_close(..., rtol=0, atol=0)` for exact H+H2 equality, and
+the unchanged `pi_dpsi_joint` constructor and projected-Pi objective setter
+path both pass.
+
+The code-quality additions fail only at unsupported Task 3 contracts:
+
+- Direct H and H2 sensitivity evaluators both return positive losses and their
+  loss difference exceeds `1e-10`, proving the fixture is nontrivial before the
+  aggregate adapter errors on unsupported `sensitivity_alpha`.
+- The fourth-order value test also requires `sensitivity_alpha=0.25` on both
+  family results. A separate gradient-enabled coefficient test requires a
+  nonzero aggregate gradient to agree with a centered `1e-6` finite difference
+  within `3e-7`; it currently errors at the same unsupported constructor.
+- Ten subtests require rejection of family powers `1`, `2`, `3`, `5`, `4.5`,
+  `nan`, `inf`, `"4"`, `None`, and `True`. They currently error before exact-4
+  validation because the sensitive adapter arguments are unsupported.
+- The main-routing constructor now returns a unique objective sentinel and the
+  test stops only at `cal_converge`. New-mode routing fails because the
+  projected-Pi setter receives no sentinel and the legacy spillage route is
+  installed instead; the old `pi_dpsi_joint` control reaches the same boundary
+  with its exact old constructor and objective setter calls.
+- Internal projected-Pi diagnostics preserve the existing family/frequency
+  records but omit `mode=pi_rpa_sensitive_joint`, `sensitivity_alpha=0.25`, and
+  `family_power=4`.
+- The metadata-hook test does not inspect or define a Task 5 file schema. It
+  fails because the new mode routes legacy ST diagnostics and makes zero calls
+  to the existing projected-Pi metadata hook.
+
+The remaining config and loader failures are the already documented Task 3
+RED: required fields, alpha validation/endpoints, loss composition/selection,
+legacy-mode exclusion, exact H/H2 physical campaigns, origin/dpsi requirements,
+and adapter arguments. There was no import, fixture, mock-setup, or test-algebra
+error in the counted run. This is still **Task 3 RED only**: there is **no Task
+4 implementation, historical ranking, optimization, candidate orbital, or
+physical result**.
