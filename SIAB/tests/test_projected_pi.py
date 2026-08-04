@@ -412,6 +412,15 @@ class ProjectedPiTest(unittest.TestCase):
                 ):
                     ProjectedPiEvaluator(self.pair, sensitivity_alpha=alpha)
 
+    def test_sensitivity_alpha_rejects_bool_and_string_values(self):
+        for alpha in (True, False, "0.25"):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(
+                    TypeError,
+                    "sensitivity_alpha must be a finite real number",
+                ):
+                    ProjectedPiEvaluator(self.pair, sensitivity_alpha=alpha)
+
     def test_rpa_sensitivity_helper_rejects_nonfinite_pi(self):
         reference = torch.zeros((1, 2, 2), dtype=torch.complex128)
         candidate = reference.clone()

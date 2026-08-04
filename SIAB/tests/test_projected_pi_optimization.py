@@ -133,6 +133,43 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
             result.family_results["H2"].loss, direct_h2.loss
         )
 
+    def test_rpa_sensitive_zero_family_losses_have_zero_finite_gradient(self):
+        overlap = torch.eye(3, dtype=torch.complex128)
+        h = scaled_pair(self.h)
+        h = pair_response_and_source(
+            replace(h.response, overlap=overlap),
+            replace(h.source, overlap=overlap),
+        )
+        h2 = pair_response_and_source(
+            replace(h.response, q=h.response.q * 1.17),
+            h.source,
+        )
+        candidate = coefficients(
+            torch.eye(3, dtype=torch.float64),
+            requires_grad=True,
+        )
+
+        result = self.adapter(
+            ("H", h),
+            ("H2", h2),
+            sensitivity_alpha=0.25,
+            family_power=4,
+        ).evaluate(candidate)
+
+        self.assertEqual(float(result.loss.detach()), 0.0)
+        for family in ("H", "H2"):
+            self.assertEqual(
+                float(result.family_results[family].loss.detach()),
+                0.0,
+            )
+        result.loss.backward()
+        for element_coefficients in candidate.values():
+            for coefficient in element_coefficients:
+                self.assertTrue(
+                    bool(torch.all(torch.isfinite(coefficient.grad)))
+                )
+                self.assertEqual(int(torch.count_nonzero(coefficient.grad)), 0)
+
     def test_rpa_sensitive_fourth_order_gradient_matches_centered_difference(self):
         h, h2 = self.rpa_sensitive_pairs()
         candidate = coefficients(self.coefficient, requires_grad=True)
@@ -193,6 +230,21 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
                         ("H2", h2),
                         sensitivity_alpha=0.25,
                         family_power=family_power,
+                    )
+
+    def test_rpa_sensitive_adapter_rejects_bool_and_string_alpha(self):
+        h, h2 = self.rpa_sensitive_pairs()
+        for alpha in (True, False, "0.25"):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(
+                    TypeError,
+                    "sensitivity_alpha must be a finite real number",
+                ):
+                    self.adapter(
+                        ("H", h),
+                        ("H2", h2),
+                        sensitivity_alpha=alpha,
+                        family_power=4,
                     )
 
     def test_coefficient_gradient_matches_centered_difference(self):

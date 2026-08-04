@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
+import numbers
 
 import torch
 
@@ -590,14 +591,10 @@ def _normalize_condition_limit(value):
 def _normalize_sensitivity_alpha(value):
     if value is None:
         return None
-    try:
-        value = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "sensitivity_alpha must be finite and between zero and one"
-        ) from exc
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError("sensitivity_alpha must be a finite real number")
     if not math.isfinite(value) or value < 0.0 or value > 1.0:
         raise ValueError(
             "sensitivity_alpha must be finite and between zero and one"
         )
-    return value
+    return float(value)

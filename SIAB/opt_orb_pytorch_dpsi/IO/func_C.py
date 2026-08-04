@@ -5,6 +5,7 @@ import math
 import numbers
 from collections.abc import Mapping
 from dataclasses import dataclass
+from loss_modes import LOSS_MODES, PROJECTED_PI_MODES
 
 
 _LOSS_COMPONENTS = (
@@ -60,13 +61,8 @@ _PROJECTED_PI_LOSS_DIAGNOSTICS = (
 	("projected_pi_rank_tolerance", "Projected Pi rank tolerance"),
 )
 
-_PROJECTED_PI_MODES = frozenset(
-	{"pi_dpsi_joint", "pi_rpa_sensitive_joint"}
-)
-
-
 def _component_schema(guarded, mode=None):
-	if mode in _PROJECTED_PI_MODES:
+	if mode in PROJECTED_PI_MODES:
 		return _PROJECTED_PI_LOSS_COMPONENTS
 	if not guarded:
 		return _LOSS_COMPONENTS
@@ -88,13 +84,7 @@ def _validate_loss_metadata(loss_components, mode):
 		return None
 	if loss_components is None or mode is None:
 		raise ValueError("mode and loss_components must be supplied together")
-	if mode not in (
-		"st_only",
-		"st_constrained",
-		"st_dpsi_joint",
-		"pi_dpsi_joint",
-		"pi_rpa_sensitive_joint",
-	):
+	if mode not in LOSS_MODES:
 		raise ValueError(f"invalid mode {mode!r}")
 	if not isinstance(loss_components, Mapping):
 		raise TypeError("loss_components must be a mapping")
@@ -102,15 +92,15 @@ def _validate_loss_metadata(loss_components, mode):
 		name
 		for name, _ in (
 			_PROJECTED_PI_LOSS_COMPONENTS
-			if mode in _PROJECTED_PI_MODES
+			if mode in PROJECTED_PI_MODES
 			else _LOSS_COMPONENTS
 		)
 	}
 	guard = {name for name, _ in _GUARDED_LOSS_COMPONENTS}
 	provided = set(loss_components)
-	if mode in _PROJECTED_PI_MODES and provided == base:
+	if mode in PROJECTED_PI_MODES and provided == base:
 		guarded = False
-	elif mode in _PROJECTED_PI_MODES:
+	elif mode in PROJECTED_PI_MODES:
 		raise ValueError(
 			f"{mode} loss_components must contain exactly "
 			+ ", ".join(name for name, _ in _PROJECTED_PI_LOSS_COMPONENTS)
@@ -149,7 +139,7 @@ def _validate_loss_diagnostics(diagnostics, mode):
 		return None
 	if not isinstance(diagnostics, Mapping):
 		raise TypeError("loss diagnostics must be a mapping")
-	if mode in _PROJECTED_PI_MODES:
+	if mode in PROJECTED_PI_MODES:
 		expected = {name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS}
 		if set(diagnostics) != expected:
 			raise ValueError(
@@ -392,7 +382,7 @@ def write_C(
 			for name, label in _component_schema(guarded_components, mode):
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
 			if diagnostics is not None:
-				if mode in _PROJECTED_PI_MODES:
+				if mode in PROJECTED_PI_MODES:
 					diagnostic_schema = _PROJECTED_PI_LOSS_DIAGNOSTICS
 				else:
 					diagnostic_schema = _LOSS_DIAGNOSTICS

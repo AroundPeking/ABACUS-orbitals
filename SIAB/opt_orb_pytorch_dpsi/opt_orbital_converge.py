@@ -10,6 +10,7 @@ from optimization_loss import (
 	normalize_loss_config,
 	selection_component,
 )
+from loss_modes import PROJECTED_PI_MODES
 from radial_locality import RadialLocalityResult
 from projected_pi_optimization import ProjectedPiOptimizationResult
 from sternheimer_spillage import SternheimerLossResult
@@ -58,7 +59,7 @@ def _projected_pi_diagnostics(result, rank_tolerance):
 
 
 def _is_projected_pi_mode(mode):
-	return mode in ("pi_dpsi_joint", "pi_rpa_sensitive_joint")
+	return mode in PROJECTED_PI_MODES
 
 
 class Opt_Orbital_Converge:

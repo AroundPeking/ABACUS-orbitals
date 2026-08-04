@@ -2,6 +2,7 @@ import math
 import numbers
 
 import torch
+from loss_modes import LOSS_MODES, PROJECTED_PI_MODES
 
 
 LOSS_DEFAULTS = {
@@ -19,21 +20,11 @@ LOSS_DEFAULTS = {
     "low_frequency_guard_tolerance": 0.0,
 }
 
-_LOSS_MODES = frozenset(
-    {
-        "st_only",
-        "st_constrained",
-        "st_dpsi_joint",
-        "pi_dpsi_joint",
-        "pi_rpa_sensitive_joint",
-    }
-)
-_PROJECTED_PI_MODES = frozenset({"pi_dpsi_joint", "pi_rpa_sensitive_joint"})
 _PROJECTED_PI_RANK_TOLERANCE = 1.0e-12
 
 
 def _validate_mode(mode):
-    if not isinstance(mode, str) or mode not in _LOSS_MODES:
+    if not isinstance(mode, str) or mode not in LOSS_MODES:
         raise ValueError(
             f"invalid loss mode {mode!r}; expected st_only, st_constrained, "
             "st_dpsi_joint, pi_dpsi_joint, or pi_rpa_sensitive_joint"
@@ -83,7 +74,7 @@ def normalize_loss_config(config):
             _PROJECTED_PI_RANK_TOLERANCE,
         )
     elif (
-        mode not in _PROJECTED_PI_MODES
+        mode not in PROJECTED_PI_MODES
         and "projected_pi_rank_tolerance" in config
     ):
         raise ValueError(
@@ -124,7 +115,7 @@ def normalize_loss_config(config):
         normalized["low_frequency_guard_tolerance"],
         0.0,
     )
-    if mode in _PROJECTED_PI_MODES:
+    if mode in PROJECTED_PI_MODES:
         _validate_real(
             "projected_pi_rank_tolerance",
             normalized["projected_pi_rank_tolerance"],
@@ -218,7 +209,7 @@ def compose_loss(
             f"loss mode {mode!r} does not match config mode {normalized['mode']!r}"
         )
     primary_name = (
-        "projected_pi" if mode in _PROJECTED_PI_MODES else "sternheimer"
+        "projected_pi" if mode in PROJECTED_PI_MODES else "sternheimer"
     )
     _validate_loss_tensor(primary_name, st)
     _validate_loss_tensor("dft_origin", dft)
@@ -283,11 +274,7 @@ def compose_loss(
         constraint_dpsi = normalized["constraint_penalty_dpsi"] * torch.relu(
             dpsi_ratio - 1.0 - normalized["tau_dpsi"]
         ).square()
-        if mode in (
-            "st_dpsi_joint",
-            "pi_dpsi_joint",
-            "pi_rpa_sensitive_joint",
-        ):
+        if mode == "st_dpsi_joint" or mode in PROJECTED_PI_MODES:
             regularization_dpsi = normalized["joint_dpsi_weight"] * dpsi_ratio
         total = (
             st
@@ -306,7 +293,7 @@ def compose_loss(
         "constraint_dft": constraint_dft,
         "constraint_dpsi": constraint_dpsi,
     }
-    if mode not in _PROJECTED_PI_MODES:
+    if mode not in PROJECTED_PI_MODES:
         components["radial_tail"] = radial_tail
         components["regularization_locality"] = regularization_locality
     if guard_active:
@@ -322,11 +309,7 @@ def selection_component(mode):
     _validate_mode(mode)
     return (
         "total"
-        if mode in (
-            "st_dpsi_joint",
-            "pi_dpsi_joint",
-            "pi_rpa_sensitive_joint",
-        )
+        if mode == "st_dpsi_joint" or mode in PROJECTED_PI_MODES
         else "sternheimer"
     )
 

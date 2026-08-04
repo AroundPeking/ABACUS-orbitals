@@ -100,7 +100,7 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
             family_losses = torch.stack(
                 tuple(family.results[name].loss for name in _PHYSICAL_FAMILIES)
             )
-            loss = torch.sum(family_losses.pow(4)).pow(1.0 / 4)
+            loss = torch.linalg.vector_norm(family_losses, ord=4)
             sensitivity_alpha = h.sensitivity_alpha
         if not bool(torch.isfinite(loss)):
             raise RuntimeError("projected-Pi optimization loss must be finite")

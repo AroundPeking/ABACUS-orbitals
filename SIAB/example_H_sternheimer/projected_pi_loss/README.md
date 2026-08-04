@@ -1168,3 +1168,102 @@ They exited zero and reported, respectively, `Ran 101 tests in 1.494s`,
 `Ran 127 tests in 1.103s`, and `Ran 356 tests in 25.672s`, all with `OK`.
 This remains a code/output-routing GREEN only; it does not provide a promoted
 basis, RPA binding energy, BSSE improvement, or any physical validation.
+
+### Task 4 code-quality review fixes (2026-08-04)
+
+The Task 4 code-quality review identified three boundary defects:
+
+1. The hand-written fourth-order family aggregation had a zero forward value
+   but produced nonfinite coefficient gradients when both H and H2 losses were
+   exactly zero.
+2. The direct projected-Pi API converted `sensitivity_alpha` with `float()`
+   before validating its type, so `True`, `False`, and `"0.25"` were accepted
+   even though the INPUT validator rejected them.
+3. Projected-Pi mode classification was duplicated in `optimization_loss.py`,
+   `main.py`, `opt_orbital_converge.py`, and `IO/func_C.py`.
+
+The new real dual-family regression uses identity overlap and a complete
+three-column candidate. Both underlying family losses and the aggregate loss
+are exactly zero; after `backward()`, every candidate coefficient gradient must
+be finite and exactly zero. The sensitive aggregate now uses
+`torch.linalg.vector_norm(family_losses, ord=4)`. Existing nonzero value and
+finite-difference gradient tests remain unchanged, and the legacy
+`pi_dpsi_joint` sum path is untouched.
+
+The direct API now rejects booleans before conversion and requires a
+`numbers.Real` value that is finite and lies in `[0, 1]`. Separate evaluator
+and optimization-adapter tests cover `True`, `False`, and `"0.25"`; legal
+numeric endpoints and `0.25` retain their previous values.
+
+The new dependency-free `loss_modes.py` is the sole owner of `LOSS_MODES` and
+`PROJECTED_PI_MODES`. The four consumers import those same objects. A routing
+test locks their object identity and exact values, while the real writer test
+continues to protect the existing projected-Pi component and diagnostic
+schema. No Task 5 acceptance or output fields were added.
+
+#### Code-quality review remote provenance
+
+The remote tree was assembled from commit
+`c9c5c67a0a9c953216e5f036962ad7293210ceb6` by `git archive` plus exact
+overlays, not by a remote Git checkout. Its absolute code directory is:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-quality.gYzayf/code
+```
+
+The source archive contains `SIAB` and the tracked H TZDP coefficient fixture.
+The source, test-only RED, and test/production GREEN archive SHA256 values are:
+
+```text
+SOURCE ee8e071204d05b5085263d048c35af05a71afe60179a771854c72bf6b383d13e
+RED    35a98135d962356d1cd5d16f5ca2eba57648d065b97b541a95c3551b7fb94224
+GREEN  5b3d4420386f2f201a2b2911d9b87069652cf94405c9859fa512293d33f5204c
+```
+
+The exact RED and GREEN overlay tree objects are, respectively,
+`3759288aad7ee463d78c62af53bdb4a08f07a4cb` and
+`a831d59d7f35b0af1bd9bcc0700a9d82896bfa1e`. All archives were checked to
+contain no AppleDouble entries. Local and remote SHA256 values for every
+overlaid production file matched before testing.
+
+From the absolute `SIAB/tests` directory above, the targeted command used the
+explicit environment:
+
+```bash
+DOJO_PATH=.../code/Dojo-NC-SR \
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi.ProjectedPiTest.test_sensitivity_alpha_rejects_bool_and_string_values \
+  test_projected_pi_optimization.ProjectedPiOptimizationTest.test_rpa_sensitive_zero_family_losses_have_zero_finite_gradient \
+  test_projected_pi_optimization.ProjectedPiOptimizationTest.test_rpa_sensitive_adapter_rejects_bool_and_string_alpha \
+  test_main_sternheimer.MainRoutingTest.test_loss_modes_have_one_shared_source
+```
+
+With the RED overlay it reported `Ran 4 tests in 0.086s` and
+`FAILED (failures=8)`: six rejected-type subtests did not raise, the zero-loss
+gradient was nonfinite, and the shared module was absent. With the GREEN
+overlay, the same command reported `Ran 4 tests in 0.047s`, `OK`.
+
+The required regression commands used the same explicit `DOJO_PATH`,
+`PYTHONPATH`, Python executable, and working directory:
+
+```bash
+# Task 3 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+
+# Task 4 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi test_projected_pi_optimization \
+  test_loss_and_freeze test_main_sternheimer
+
+# Full SIAB
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest discover -v
+```
+
+They exited zero and reported `Ran 104 tests in 1.279s`,
+`Ran 131 tests in 1.070s`, and `Ran 360 tests in 36.116s`, all with `OK`.
+This is code GREEN only: no optimization, checkpoint promotion, orbital-basis
+improvement, RPA binding energy, BSSE improvement, or physical validation was
+performed.

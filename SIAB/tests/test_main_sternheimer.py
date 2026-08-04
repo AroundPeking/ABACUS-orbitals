@@ -334,6 +334,48 @@ class FixedOrbitalExpansionTest(unittest.TestCase):
 
 
 class MainRoutingTest(unittest.TestCase):
+    def test_loss_modes_have_one_shared_source(self):
+        import importlib
+        import importlib.util
+
+        spec = importlib.util.find_spec("loss_modes")
+        self.assertIsNotNone(spec, "loss_modes must define shared mode sets")
+        loss_modes = importlib.import_module("loss_modes")
+        func_c = importlib.import_module("IO.func_C")
+        optimization_loss = importlib.import_module("optimization_loss")
+
+        self.assertEqual(
+            loss_modes.LOSS_MODES,
+            frozenset(
+                {
+                    "st_only",
+                    "st_constrained",
+                    "st_dpsi_joint",
+                    "pi_dpsi_joint",
+                    "pi_rpa_sensitive_joint",
+                }
+            ),
+        )
+        self.assertEqual(
+            loss_modes.PROJECTED_PI_MODES,
+            frozenset({"pi_dpsi_joint", "pi_rpa_sensitive_joint"}),
+        )
+        self.assertIs(
+            optimization_loss.LOSS_MODES,
+            loss_modes.LOSS_MODES,
+        )
+        for module in (
+            optimization_loss,
+            siab_main,
+            siab_converge,
+            func_c,
+        ):
+            with self.subTest(module=module.__name__):
+                self.assertIs(
+                    module.PROJECTED_PI_MODES,
+                    loss_modes.PROJECTED_PI_MODES,
+                )
+
     def run_input(self, value):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

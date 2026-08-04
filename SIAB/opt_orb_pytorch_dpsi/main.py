@@ -18,6 +18,7 @@ from attribute_dict import AttributeDict
 from opt_orbital_converge import Opt_Orbital_Converge
 from freeze_orbitals import validate_freeze_orbitals
 from IO.read_zero_order_audit import read_zero_order_audit
+from loss_modes import PROJECTED_PI_MODES
 from optimization_loss import normalize_loss_config
 from projected_pi_optimization import (
 	NormalizedPhysicalFamilyProjectedPiOptimization,
@@ -42,11 +43,6 @@ class LoadedSternheimerTargets:
 	families: tuple
 	projected_pi_pairs: tuple = ()
 	zero_order_audits: tuple = ()
-
-
-_PROJECTED_PI_MODES = frozenset(
-	{"pi_dpsi_joint", "pi_rpa_sensitive_joint"}
-)
 
 
 def _sha256(path):
@@ -115,7 +111,7 @@ def _load_sternheimer_data(file_list, info_optimize):
 		if "loss" in stage
 	]
 	modes = {stage["mode"] for stage in stages}
-	projected_pi_modes = modes & _PROJECTED_PI_MODES
+	projected_pi_modes = modes & PROJECTED_PI_MODES
 	projected_pi_mode = bool(projected_pi_modes)
 	if projected_pi_mode and (
 		len(projected_pi_modes) != 1 or modes != projected_pi_modes
@@ -365,7 +361,7 @@ def main():
 	projected_pi_modes = {
 		stage["mode"]
 		for stage in sternheimer_stages
-		if stage["mode"] in _PROJECTED_PI_MODES
+		if stage["mode"] in PROJECTED_PI_MODES
 	}
 	uses_projected_pi = bool(projected_pi_modes)
 	projected_pi_mode = (
@@ -391,8 +387,8 @@ def main():
 		joint_modes = {
 			stage["mode"]
 			for stage in sternheimer_stages
-			if stage["mode"]
-			in ("st_dpsi_joint", "pi_dpsi_joint", "pi_rpa_sensitive_joint")
+			if stage["mode"] == "st_dpsi_joint"
+			or stage["mode"] in PROJECTED_PI_MODES
 		}
 		if joint_modes and "linear" not in file_list:
 			mode = sorted(joint_modes)[0]
@@ -584,7 +580,7 @@ def main():
 
 	loss_diagnostics = None
 	if "loss_components" in data_transmit:
-		if data_transmit.get("loss_mode") in _PROJECTED_PI_MODES:
+		if data_transmit.get("loss_mode") in PROJECTED_PI_MODES:
 			pi_diagnostics = data_transmit["projected_pi_diagnostics"]
 			loss_diagnostics = {
 				"max_projected_pi_condition": data_transmit[
@@ -619,7 +615,7 @@ def main():
 		mode=data_transmit.get("loss_mode"),
 		diagnostics=loss_diagnostics,
 	)
-	if data_transmit.get("loss_mode") in _PROJECTED_PI_MODES:
+	if data_transmit.get("loss_mode") in PROJECTED_PI_MODES:
 		_write_projected_pi_metadata(
 			"PROJECTED_PI_METADATA.json",
 			sternheimer_targets,
