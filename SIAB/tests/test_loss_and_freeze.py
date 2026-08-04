@@ -392,6 +392,16 @@ class OptimizationLossTest(unittest.TestCase):
         self.assertEqual(config["projected_pi_sensitivity_alpha"], 0.25)
         self.assertEqual(config["joint_dpsi_weight"], 0.02)
 
+    def test_rpa_sensitive_joint_requires_explicit_rank_tolerance(self):
+        config = self.rpa_sensitive_config()
+        config.pop("projected_pi_rank_tolerance")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pi_rpa_sensitive_joint requires projected_pi_rank_tolerance",
+        ):
+            normalize_loss_config(config)
+
     def test_rpa_sensitive_joint_requires_explicit_alpha(self):
         config = self.rpa_sensitive_config()
         config.pop("projected_pi_sensitivity_alpha")
@@ -401,6 +411,30 @@ class OptimizationLossTest(unittest.TestCase):
             "pi_rpa_sensitive_joint requires projected_pi_sensitivity_alpha",
         ):
             normalize_loss_config(config)
+
+    def test_rpa_sensitive_joint_requires_explicit_dpsi_weight(self):
+        config = self.rpa_sensitive_config()
+        config.pop("joint_dpsi_weight")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pi_rpa_sensitive_joint requires joint_dpsi_weight",
+        ):
+            normalize_loss_config(config)
+
+    def test_rpa_sensitive_joint_accepts_alpha_zero(self):
+        config = normalize_loss_config(
+            self.rpa_sensitive_config(projected_pi_sensitivity_alpha=0.0)
+        )
+
+        self.assertEqual(config["projected_pi_sensitivity_alpha"], 0.0)
+
+    def test_rpa_sensitive_joint_accepts_alpha_one(self):
+        config = normalize_loss_config(
+            self.rpa_sensitive_config(projected_pi_sensitivity_alpha=1.0)
+        )
+
+        self.assertEqual(config["projected_pi_sensitivity_alpha"], 1.0)
 
     def test_rpa_sensitive_joint_rejects_nonfinite_alpha(self):
         for alpha in (float("nan"), float("inf"), -float("inf")):
@@ -482,6 +516,36 @@ class OptimizationLossTest(unittest.TestCase):
         self.assertAlmostEqual(result["regularization_dpsi"].item(), 0.9)
         self.assertAlmostEqual(result["total"].item(), 1.2)
         self.assertAlmostEqual(projected_pi.grad.item(), 1.0)
+
+    def test_rpa_sensitive_joint_uses_projected_pi_and_weighted_dpsi(self):
+        projected_pi = torch.tensor(
+            0.3, dtype=torch.float64, requires_grad=True
+        )
+        dft = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+        dpsi = torch.tensor(0.9, dtype=torch.float64, requires_grad=True)
+        config = normalize_loss_config(self.rpa_sensitive_config())
+
+        result = compose_loss(
+            "pi_rpa_sensitive_joint",
+            projected_pi,
+            dft,
+            dpsi,
+            {"dft_origin": 1.0, "dft_dpsi": 1.0},
+            config,
+        )
+        result["total"].backward()
+
+        self.assertNotIn("sternheimer", result)
+        self.assertIs(result["projected_pi"], projected_pi)
+        self.assertAlmostEqual(result["regularization_dpsi"].item(), 0.018)
+        self.assertAlmostEqual(result["total"].item(), 0.318)
+        self.assertAlmostEqual(projected_pi.grad.item(), 1.0)
+        self.assertAlmostEqual(dpsi.grad.item(), 0.02)
+
+    def test_rpa_sensitive_joint_selection_uses_total(self):
+        self.assertEqual(
+            selection_component("pi_rpa_sensitive_joint"), "total"
+        )
 
     def test_low_frequency_guard_value_and_gradient(self):
         st = torch.tensor(0.3, dtype=torch.float64, requires_grad=True)

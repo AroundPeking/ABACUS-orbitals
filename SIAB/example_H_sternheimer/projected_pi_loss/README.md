@@ -756,3 +756,87 @@ that already pass cover alpha rejection in every legacy mode, below/above-range
 alpha rejection, ghost rejection, and exact unchanged `pi_dpsi_joint` adapter
 construction. This is **Task 3 RED only**: Task 4 has not started, and there is
 no historical ranking, optimization, candidate orbital, or physical result.
+
+### Task 3 RED spec-review correction (2026-08-04)
+
+The preceding 86-method record is the historical first Task 3 RED. This
+follow-up strengthens only the three test files; production Python remains
+untouched. The `df_dcu` GitHub probe again failed with
+`ssh: Could not resolve hostname github.com: Name or service not known`, so the
+run used the documented source-archive plus exact-overlay fallback. The source
+was `SIAB` at commit `36000cdbbfebb8d5aa6f9ee8b1d40b1bc83b0e3a`, and the
+remote test tree was
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-strengthened-red.ZIvJSz`.
+
+The uncompressed source archive SHA256 was:
+
+```text
+71865df0f6471a55fbb3222243a5cfc65964b385080a38203fb555ed27da7d5e
+```
+
+The exact test-overlay archive SHA256 was
+`f869fe0511fc2735e5e6e0cdcde503c1dfccbe621b9dc32b61c81efcce0071eb`.
+It contained exactly:
+
+```text
+SIAB/tests/test_projected_pi_optimization.py
+  12ea60556002496f2b6bd7108234060bb9f7978f0317c50e09b155650b9142e4
+SIAB/tests/test_loss_and_freeze.py
+  9588a4d9079240edab85a08a4eb1fd0bfc1f1e5e8f4a80af926c0214d42d5fde
+SIAB/tests/test_main_sternheimer.py
+  fbe860644122f691644f23465b8a59b3aca1ab430e362e53d04a241d8aa341b6
+```
+
+Local and remote hashes matched. The untouched production hashes remained:
+
+```text
+SIAB/opt_orb_pytorch_dpsi/projected_pi_optimization.py
+  134bb7085e87311adeb6940a82827399cb6770959b1601c086f5c71cf271c8e3
+SIAB/opt_orb_pytorch_dpsi/optimization_loss.py
+  c063ecfa23270beca67737b54035a7a7fcf5505909a073b49d9671be4a9da10d
+SIAB/opt_orb_pytorch_dpsi/main.py
+  f83ae7540186947e58c9ff671b629719cf5c86083c78f0e6983c28d066819056
+```
+
+The exact command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task3-strengthened-red.ZIvJSz/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+```
+
+The command exited 1 after 2.428 seconds and ran 97 test methods. Exactly 73
+methods passed. Eighteen methods produced 23 failure records because the
+nonfinite-alpha method has 3 failing subtests and the forbidden-penalty method
+has 4; 6 other methods errored. The exact unittest summary was
+`FAILED (failures=23, errors=6)`.
+
+The strengthened contract is feature-specific:
+
+- The legacy default adapter's exact `torch.equal` check against the explicit
+  `H.loss + H2.loss` tensor passes.
+- Independent omission tests for rank tolerance, sensitivity alpha, and dpsi
+  weight fail because the new mode is unknown rather than issuing each required
+  field diagnostic.
+- Alpha endpoints `0.0` and `1.0`, the exact required contract, projected-Pi
+  primary plus weighted-dpsi composition, and `selection_component(...)=total`
+  error because the alpha key or new mode is unsupported.
+- The family fourth-order norm errors because the adapter does not accept
+  `sensitivity_alpha`.
+- Nonfinite alpha produces 3 failure records and forbidden legacy penalties
+  produce 4 because unknown-alpha rejection occurs before their new-mode
+  validation.
+- Four separate tests for mixing with `st_only`, `st_constrained`,
+  `st_dpsi_joint`, and `pi_dpsi_joint` fail because new-mode exclusivity is not
+  implemented.
+- Loader/routing failures cover missing H2, duplicate H, duplicate H2, a
+  syntactically valid ghost target, missing source, missing origin, missing
+  dpsi, absent H/H2 pair construction, and absent forwarding of rank tolerance,
+  alpha, and `family_power=4`.
+
+There was no import, fixture, mock, setup, or test-algebra error. The missing
+dpsi sentinel remains an intentional routing-boundary probe. This is still
+**Task 3 RED only**. There is **no Task 4 implementation, historical ranking,
+optimization, candidate orbital, or physical result**.

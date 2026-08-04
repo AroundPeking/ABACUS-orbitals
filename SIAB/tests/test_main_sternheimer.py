@@ -574,9 +574,47 @@ class MainRoutingTest(unittest.TestCase):
                 [{"loss": self.rpa_sensitive_loss()}],
             )
 
+    def test_rpa_sensitive_loader_rejects_duplicate_h(self):
+        targets = self.projected_pi_targets()
+        targets[1] = {**targets[1], "family": "H"}
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
+    def test_rpa_sensitive_loader_rejects_duplicate_h2(self):
+        targets = self.projected_pi_targets()
+        targets[0] = {**targets[0], "family": "H2"}
+        with mock.patch.object(
+            siab_main,
+            "normalize_loss_config",
+            side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
+        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+            siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": self.rpa_sensitive_loss()}],
+            )
+
     def test_rpa_sensitive_loader_rejects_ghost_target(self):
         targets = self.projected_pi_targets()
-        targets[1] = {**targets[1], "role": "ghost"}
+        targets[1] = {
+            key: value
+            for key, value in {**targets[1], "role": "ghost"}.items()
+            if key not in {"source_path", "zero_order_audit_path"}
+        }
         with mock.patch.object(
             siab_main,
             "normalize_loss_config",
@@ -612,11 +650,15 @@ class MainRoutingTest(unittest.TestCase):
                 [{"loss": self.rpa_sensitive_loss()}],
             )
 
-    def test_rejects_mixed_rpa_sensitive_and_other_loss_stages(self):
+    def assert_mixed_rpa_sensitive_stage_rejected(self, legacy_mode):
         with mock.patch.object(
             siab_main,
             "normalize_loss_config",
             side_effect=lambda config: config,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            return_value="loaded",
         ), self.assertRaisesRegex(
             ValueError, "cannot mix.*pi_rpa_sensitive_joint"
         ):
@@ -624,9 +666,21 @@ class MainRoutingTest(unittest.TestCase):
                 {"sternheimer": self.projected_pi_targets()},
                 [
                     {"loss": self.rpa_sensitive_loss()},
-                    {"loss": {"mode": "pi_dpsi_joint"}},
+                    {"loss": {"mode": legacy_mode}},
                 ],
             )
+
+    def test_rejects_mixed_rpa_sensitive_and_st_only_stages(self):
+        self.assert_mixed_rpa_sensitive_stage_rejected("st_only")
+
+    def test_rejects_mixed_rpa_sensitive_and_st_constrained_stages(self):
+        self.assert_mixed_rpa_sensitive_stage_rejected("st_constrained")
+
+    def test_rejects_mixed_rpa_sensitive_and_st_dpsi_joint_stages(self):
+        self.assert_mixed_rpa_sensitive_stage_rejected("st_dpsi_joint")
+
+    def test_rejects_mixed_rpa_sensitive_and_pi_dpsi_joint_stages(self):
+        self.assert_mixed_rpa_sensitive_stage_rejected("pi_dpsi_joint")
 
     def _run_until_projected_pi_construction(self, stage):
         pairs = (("H", object()), ("H2", object()))

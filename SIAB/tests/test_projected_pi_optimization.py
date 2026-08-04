@@ -52,9 +52,11 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         ).evaluate(coefficients(self.coefficient))
 
         torch.testing.assert_close(result.loss, expected.loss)
-        torch.testing.assert_close(
-            result.loss,
-            expected.results["H"].loss + expected.results["H2"].loss,
+        self.assertTrue(
+            torch.equal(
+                result.loss,
+                expected.results["H"].loss + expected.results["H2"].loss,
+            )
         )
         self.assertEqual(tuple(result.family_results), ("H", "H2"))
         torch.testing.assert_close(
