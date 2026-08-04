@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import errno
 import gc
 import hashlib
 import json
@@ -53,6 +55,9 @@ OUTPUT_FILENAMES = frozenset(
     }
 )
 FIXED_PDF_TIMESTAMP = datetime(2000, 1, 1, tzinfo=timezone.utc)
+LINUX_AT_FDCWD = -100
+LINUX_RENAME_NOREPLACE = 1
+LINUX_X86_64_RENAMEAT2_SYSCALL = 316
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,23 @@ class InputSnapshot:
     size: int
     mtime_ns: int
     sha256: str
+
+
+class StagingCleanupError(RuntimeError):
+    def __init__(self, staging_path, primary_error, cleanup_error):
+        self.staging_path = staging_path
+        self.primary_error = primary_error
+        self.cleanup_error = cleanup_error
+        primary_text = (
+            "none"
+            if primary_error is None
+            else f"{type(primary_error).__name__}: {primary_error}"
+        )
+        super().__init__(
+            f"primary error: {primary_text}; staging cleanup failed for retained "
+            f"path {staging_path}: {type(cleanup_error).__name__}: "
+            f"{cleanup_error}"
+        )
 
 
 class StoreCoefficientOnce(argparse.Action):
@@ -289,6 +311,84 @@ def _evaluate(pairs, coefficients):
         del evaluator
         gc.collect()
     return alpha_results
+
+
+def _rename_directory_noreplace(source, destination):
+    if sys.platform != "linux":
+        raise RuntimeError(
+            "atomic no-replace directory publication requires Linux "
+            "renameat2(RENAME_NOREPLACE); refusing a racy fallback on "
+            f"platform {sys.platform}"
+        )
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+    except OSError as exc:
+        raise RuntimeError(
+            "Linux libc is unavailable for renameat2(RENAME_NOREPLACE); "
+            "refusing a racy publication fallback"
+        ) from exc
+
+    ctypes.set_errno(0)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is not None:
+        renameat2.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        renameat2.restype = ctypes.c_int
+        result = renameat2(
+            LINUX_AT_FDCWD,
+            os.fsencode(source),
+            LINUX_AT_FDCWD,
+            os.fsencode(destination),
+            LINUX_RENAME_NOREPLACE,
+        )
+    else:
+        machine = os.uname().machine
+        if machine != "x86_64" or not hasattr(libc, "syscall"):
+            raise RuntimeError(
+                "Linux renameat2(RENAME_NOREPLACE) has no libc wrapper and "
+                f"the direct syscall policy does not support {machine}; "
+                "refusing a racy publication fallback"
+            )
+        syscall = libc.syscall
+        syscall.restype = ctypes.c_long
+        result = syscall(
+            ctypes.c_long(LINUX_X86_64_RENAMEAT2_SYSCALL),
+            ctypes.c_int(LINUX_AT_FDCWD),
+            ctypes.c_char_p(os.fsencode(source)),
+            ctypes.c_int(LINUX_AT_FDCWD),
+            ctypes.c_char_p(os.fsencode(destination)),
+            ctypes.c_uint(LINUX_RENAME_NOREPLACE),
+        )
+    if result == 0:
+        return
+
+    error_number = ctypes.get_errno()
+    if error_number == errno.EEXIST:
+        raise FileExistsError(
+            error_number,
+            os.strerror(error_number),
+            destination,
+        )
+    unsupported_errors = {
+        errno.ENOSYS,
+        errno.EINVAL,
+        getattr(errno, "EOPNOTSUPP", errno.ENOSYS),
+    }
+    if error_number in unsupported_errors:
+        raise RuntimeError(
+            "Linux renameat2(RENAME_NOREPLACE) is unsupported by this "
+            "runtime/filesystem; refusing a racy publication fallback"
+        )
+    raise OSError(
+        error_number,
+        "renameat2(RENAME_NOREPLACE) failed from "
+        f"{source} to {destination}: {os.strerror(error_number)}",
+    )
 
 
 def _atomic_text(path, value):
@@ -576,6 +676,7 @@ def run(args):
             dir=output_dir.parent,
         )
     )
+    publication_error = None
     try:
         _atomic_text(
             staging_dir / "rpa_sensitive_ranking.json",
@@ -593,15 +694,24 @@ def run(args):
                 f"expected {sorted(OUTPUT_FILENAMES)}, got {sorted(produced)}"
             )
         _verify_input_snapshots(input_paths, snapshots)
-        if os.path.lexists(output_dir):
-            raise FileExistsError(
-                f"output directory already exists: {output_dir}"
-            )
-        os.rename(staging_dir, output_dir)
+        _rename_directory_noreplace(staging_dir, output_dir)
         staging_dir = None
+    except BaseException as error:
+        publication_error = error
+        raise
     finally:
         if staging_dir is not None:
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(staging_dir)
+            except Exception as cleanup_error:
+                diagnostic = StagingCleanupError(
+                    staging_dir,
+                    publication_error,
+                    cleanup_error,
+                )
+                if publication_error is not None:
+                    raise diagnostic from publication_error
+                raise diagnostic from cleanup_error
     return 0 if decision == "pass" else 2
 
 

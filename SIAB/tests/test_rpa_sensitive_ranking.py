@@ -730,6 +730,125 @@ class RpaSensitiveRankingTest(unittest.TestCase):
         self.assertEqual({path.name for path in output.iterdir()}, {"keep.txt"})
         self.assert_no_staging(output)
 
+    def test_atomic_noreplace_helper_handles_absent_and_existing_destinations(self):
+        staging = self.root / "primitive_staging"
+        destination = self.root / "primitive_destination"
+        staging.mkdir()
+        marker = staging / "marker.txt"
+        marker.write_text("staged\n", encoding="ascii")
+
+        ANALYZER._rename_directory_noreplace(staging, destination)
+
+        self.assertFalse(staging.exists())
+        self.assertEqual(
+            (destination / "marker.txt").read_text(encoding="ascii"),
+            "staged\n",
+        )
+
+        refused_staging = self.root / "primitive_refused_staging"
+        existing_destination = self.root / "primitive_existing_destination"
+        refused_staging.mkdir()
+        existing_destination.mkdir()
+        destination_inode = existing_destination.stat().st_ino
+
+        with self.assertRaises(FileExistsError):
+            ANALYZER._rename_directory_noreplace(
+                refused_staging,
+                existing_destination,
+            )
+
+        self.assertTrue(refused_staging.is_dir())
+        self.assertEqual(existing_destination.stat().st_ino, destination_inode)
+        self.assertEqual(list(existing_destination.iterdir()), [])
+
+    def test_last_moment_destination_uses_atomic_noreplace_publication(self):
+        output = self.root / "last_moment_destination"
+        arguments = self.parsed_arguments(output)
+        original_noreplace = getattr(
+            ANALYZER,
+            "_rename_directory_noreplace",
+            None,
+        )
+        observed = {}
+
+        def inject_destination(staging_dir, destination):
+            destination.mkdir()
+            observed["destination_inode"] = destination.stat().st_ino
+            observed["staging_path"] = staging_dir
+            try:
+                return original_noreplace(staging_dir, destination)
+            except FileExistsError:
+                observed["staging_existed_after_refusal"] = staging_dir.is_dir()
+                observed["staged_names"] = {
+                    path.name for path in staging_dir.iterdir()
+                }
+                raise
+
+        with mock.patch.object(
+            ANALYZER,
+            "_evaluate",
+            return_value=synthetic_alpha_results(),
+        ):
+            with mock.patch.object(
+                ANALYZER,
+                "_rename_directory_noreplace",
+                side_effect=inject_destination,
+                create=True,
+            ) as rename_noreplace:
+                with self.assertRaises(FileExistsError):
+                    ANALYZER.run(arguments)
+
+        self.assertEqual(rename_noreplace.call_count, 1)
+        self.assertTrue(output.is_dir())
+        self.assertEqual(output.stat().st_ino, observed["destination_inode"])
+        self.assertEqual(list(output.iterdir()), [])
+        self.assertTrue(observed["staging_existed_after_refusal"])
+        self.assertEqual(observed["staged_names"], EXPECTED_ARTIFACTS)
+        self.assertFalse(observed["staging_path"].exists())
+        self.assert_no_staging(output)
+
+    def test_cleanup_failure_reports_primary_error_and_retained_staging_path(self):
+        output = self.root / "cleanup_failure"
+        arguments = self.parsed_arguments(output)
+        caught = None
+
+        with mock.patch.object(
+            ANALYZER,
+            "_evaluate",
+            return_value=synthetic_alpha_results(),
+        ):
+            with mock.patch.object(
+                ANALYZER,
+                "_write_plot",
+                side_effect=RuntimeError("injected primary generation failure"),
+            ):
+                with mock.patch.object(
+                    ANALYZER.shutil,
+                    "rmtree",
+                    side_effect=OSError("injected cleanup denial"),
+                ) as remove_staging:
+                    try:
+                        ANALYZER.run(arguments)
+                    except Exception as error:
+                        caught = error
+
+        self.assertIsNotNone(caught)
+        self.assertEqual(remove_staging.call_count, 1)
+        retained_staging = Path(remove_staging.call_args.args[0])
+        message = str(caught)
+        self.assertEqual(
+            (
+                isinstance(caught, RuntimeError),
+                "injected primary generation failure" in message,
+                "injected cleanup denial" in message,
+                str(retained_staging) in message,
+            ),
+            (True, True, True, True),
+            message,
+        )
+        self.assertTrue(retained_staging.is_dir())
+        self.assertFalse(output.exists())
+
     def test_input_content_mutation_before_publication_is_rejected(self):
         output = self.root / "mutated"
 

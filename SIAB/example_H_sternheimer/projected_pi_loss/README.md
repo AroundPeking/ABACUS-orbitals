@@ -2061,3 +2061,146 @@ This remains only a synthetic Task 6 code gate. It does not run the real
 historical ranking, freeze a production alpha, optimize or evaluate a new
 candidate, consume SOS/CP energy numerically, or establish physical
 validation. Task 7 has not started.
+
+### Task 6 no-replace publication and cleanup diagnostics (2026-08-05)
+
+Commit `9ba98349e11e8172d0891079aaef089df4ef5096` remains the first
+code-quality hardening commit. Re-review found two remaining publication
+defects. A final `lexists` check followed by `os.rename` could replace an
+empty destination directory created between those operations, and
+`shutil.rmtree(ignore_errors=True)` could silently discard cleanup failure
+evidence.
+
+The publisher now uses only an atomic no-replace primitive. On Linux it first
+uses the libc `renameat2` wrapper when exported. If that symbol is absent, the
+only supported direct syscall policy is Linux `x86_64`, where
+`SYS_renameat2=316`; this invokes the same `renameat2` kernel primitive with
+`RENAME_NOREPLACE`. Existing destinations map to `FileExistsError` without
+moving staging. Non-Linux systems, unsupported Linux architectures, missing
+`syscall`, or kernel/filesystem `ENOSYS`, `EINVAL`, or `EOPNOTSUPP` fail
+explicitly. There is no `os.rename` or other racy fallback, and macOS is not
+claimed as supported by this CLI publisher.
+
+Cleanup now calls `shutil.rmtree` without `ignore_errors`. If cleanup fails,
+`StagingCleanupError` retains the primary exception, cleanup exception, and
+exact staging path; its message exposes all three and leaves the directory in
+place for diagnosis. Normal failure cleanup and retry behavior is unchanged.
+
+#### Accepted no-replace RED
+
+A fresh archive from exact `9ba98349` and test-only overlay were staged with
+matching local/remote SHA256 values:
+
+```text
+source archive
+  a1efcc5f07fb2f0c16384371c9781c3ffde33a8a03d6689478159c04dce1cef4
+test overlay
+  45808bd397a88dc27c36b344dcfa2bb735390b36a911bbe5b391684fa6b6c2b9
+test_rpa_sensitive_ranking.py
+  ef5891abc40a269f40e52aeed186829259cb7189ed980187c728c0d9127d9262
+```
+
+The immutable archive-plus-test-overlay tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-noreplace-red-9ba98349-45808bd3/tree
+```
+
+This was not a remote checkout. On `login08`, with Python 3.10.13, PyTorch
+2.1.0+cpu, Matplotlib 3.10.3, and the fixed project `PYTHONPATH`, the exact
+command `python -m unittest -v test_rpa_sensitive_ranking` ran 14 tests in
+169.838 s. Exactly the two new tests failed, with zero errors: the publisher
+did not call an atomic no-replace helper, and cleanup failure replaced the
+primary exception and omitted the retained path. All earlier Task 6 tests
+passed. Process timing was `real 173.37`, `user 2240.09`, `sys 224.49`; the
+environment and RED log SHA256 values were
+`6bf2c2c940ef9232afb5b8256e2b97296b70dd81bdff311b883f6d4d8f7447a7`
+and
+`39419057bade146d690f81c5e1507ad95638fd99e99bade68042f6de3f59de4c`.
+
+#### Rejected libc-only GREEN
+
+The first production overlay assumed that libc exported `renameat2`. Its
+overlay/analyzer SHA256 values were
+`3f71292be312146e0a6aef3e989385e1d80f8cfe20e07c740289baedb00b23e2`
+and
+`8ab083fd45a91557642f2cfdaf93fdc516af09919f59ea747707eaca0aa39239`.
+The non-checkout tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-noreplace-green-9ba98349-3f71292b/tree
+```
+
+Remote preflight recorded `libc_renameat2_available=False`. Consequently the
+normal pass/stop publishers and related retry/race paths failed closed. The
+run reported 2 failures and 2 errors among 14 tests in 130.630 s
+(`real 134.11`, `user 1241.88`, `sys 182.11`); log SHA256 was
+`8386dc9feb18c18b7fa19daaf3007bc8ddd221a96e09e1a77108602ea662d008`.
+This tree is preserved as rejected controller evidence and is not GREEN.
+
+#### Accepted syscall-enabled GREEN
+
+The controller-approved follow-up retained the libc wrapper when available
+and added the explicit Linux x86_64 syscall mapping. A direct helper test was
+also added after RED: it proves actual remote success when the destination is
+absent and `FileExistsError` with unchanged source/destination state when an
+empty destination exists. The publisher integration test separately injects
+an empty destination at the final call boundary.
+
+The final test/production overlays and resulting files had matching
+local/remote SHA256 values:
+
+```text
+test overlay
+  c08f6969cb9f029563358ae8b072b23e7cbaab27db3ea2da9614c402be942b24
+test_rpa_sensitive_ranking.py
+  eddd03f7473cb1598bc7e35630ec95dbfbc2482f0da51a2aa37363d9eb15e0bd
+production overlay
+  4cdd069bfedb2d1ac10f0deece1826a7329f6487c58e641127be3855cca46c6a
+analyze_rpa_sensitive_ranking.py
+  48d9753fd15dea8946e1012a70be96eb9b00018058b9069e076a4270943260e1
+```
+
+The accepted immutable tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task6-noreplace-green-final2-9ba98349-c08f6969-4cdd069b/tree
+```
+
+Its environment recorded Linux `3.10.0-957.el7.x86_64`, `machine=x86_64`,
+`libc_renameat2_available=False`, `libc_syscall_available=True`, syscall 316,
+Python 3.10.13, PyTorch 2.1.0+cpu, and Matplotlib 3.10.3. Environment SHA256
+was `54c3cdc4a4021d360c9695e8550d28ac0df557476d6d0f2fd66edf1998b75fec`.
+
+From the tree's `SIAB/tests`, all exact commands exited zero:
+
+```bash
+python -m unittest -v test_rpa_sensitive_ranking
+python -m unittest -v \
+  test_rpa_sensitive_ranking test_projected_pi_analysis test_projected_pi
+python -m unittest discover -v
+```
+
+```text
+Task 6 module:
+  Ran 15 tests in 154.089s, OK
+  real 157.56, user 1645.95, sys 203.89
+  log 98284562a8788d7a49af0bdd31995112a3668944726b51edf04ad6702af48eb7
+
+Required three modules:
+  Ran 44 tests in 165.398s, OK
+  real 168.89, user 1749.50, sys 243.09
+  log 5dde9150d7351569b6ce7dd249c3feb93e67f93bc466cf1d2c51dc024b0144ef
+
+Full SIAB discover:
+  Ran 390 tests in 191.609s, OK
+  real 198.01, user 1813.49, sys 240.67
+  log 7cecbc8ea6131ba14b2052eebb579c304d64bc15fdad8e85bdd55fc9b619a543
+```
+
+The pre/post-test tree manifest SHA256 remained
+`63c44fe20ba704325dc3f892d3ebd2912930eac65b52174b0cb949dc6224e0b3`.
+This remains a synthetic Task 6 code gate only. It does not run the real
+historical ranking, freeze a production alpha, optimize/evaluate a new
+candidate, consume SOS/CP energy numerically, or establish physical
+validation. Task 7 has not started.
