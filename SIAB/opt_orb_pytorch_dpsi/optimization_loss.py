@@ -20,8 +20,15 @@ LOSS_DEFAULTS = {
 }
 
 _LOSS_MODES = frozenset(
-    {"st_only", "st_constrained", "st_dpsi_joint", "pi_dpsi_joint"}
+    {
+        "st_only",
+        "st_constrained",
+        "st_dpsi_joint",
+        "pi_dpsi_joint",
+        "pi_rpa_sensitive_joint",
+    }
 )
+_PROJECTED_PI_MODES = frozenset({"pi_dpsi_joint", "pi_rpa_sensitive_joint"})
 _PROJECTED_PI_RANK_TOLERANCE = 1.0e-12
 
 
@@ -29,7 +36,7 @@ def _validate_mode(mode):
     if not isinstance(mode, str) or mode not in _LOSS_MODES:
         raise ValueError(
             f"invalid loss mode {mode!r}; expected st_only, st_constrained, "
-            "st_dpsi_joint, or pi_dpsi_joint"
+            "st_dpsi_joint, pi_dpsi_joint, or pi_rpa_sensitive_joint"
         )
 
 
@@ -47,24 +54,47 @@ def _validate_real(name, value, minimum, strict=False):
 def normalize_loss_config(config):
     if not isinstance(config, dict):
         raise TypeError("loss config must be a dictionary")
-    allowed = set(LOSS_DEFAULTS) | {"mode", "projected_pi_rank_tolerance"}
+    allowed = set(LOSS_DEFAULTS) | {
+        "mode",
+        "projected_pi_rank_tolerance",
+        "projected_pi_sensitivity_alpha",
+    }
     unknown = set(config) - allowed
     if unknown:
         raise ValueError(f"unknown loss config keys: {sorted(unknown)!r}")
     if "mode" not in config:
         raise ValueError("loss config requires mode")
 
-    _validate_mode(config["mode"])
+    mode = config["mode"]
+    _validate_mode(mode)
+    if mode == "pi_rpa_sensitive_joint":
+        for name in (
+            "projected_pi_rank_tolerance",
+            "projected_pi_sensitivity_alpha",
+            "joint_dpsi_weight",
+        ):
+            if name not in config:
+                raise ValueError(f"pi_rpa_sensitive_joint requires {name}")
     normalized = dict(LOSS_DEFAULTS)
     normalized.update(config)
-    if normalized["mode"] == "pi_dpsi_joint":
+    if mode == "pi_dpsi_joint":
         normalized.setdefault(
             "projected_pi_rank_tolerance",
             _PROJECTED_PI_RANK_TOLERANCE,
         )
-    elif "projected_pi_rank_tolerance" in config:
+    elif (
+        mode not in _PROJECTED_PI_MODES
+        and "projected_pi_rank_tolerance" in config
+    ):
         raise ValueError(
-            "projected_pi_rank_tolerance is valid only for pi_dpsi_joint"
+            "projected_pi_rank_tolerance is valid only for projected-Pi modes"
+        )
+    if (
+        mode != "pi_rpa_sensitive_joint"
+        and "projected_pi_sensitivity_alpha" in config
+    ):
+        raise ValueError(
+            "projected_pi_sensitivity_alpha is valid only for pi_rpa_sensitive_joint"
         )
     _validate_real("epsilon", normalized["epsilon"], 0.0, strict=True)
     _validate_real("condition_limit", normalized["condition_limit"], 1.0)
@@ -94,7 +124,7 @@ def normalize_loss_config(config):
         normalized["low_frequency_guard_tolerance"],
         0.0,
     )
-    if normalized["mode"] == "pi_dpsi_joint":
+    if mode in _PROJECTED_PI_MODES:
         _validate_real(
             "projected_pi_rank_tolerance",
             normalized["projected_pi_rank_tolerance"],
@@ -105,6 +135,16 @@ def normalize_loss_config(config):
             raise ValueError(
                 "projected_pi_rank_tolerance must be less than one"
             )
+        if mode == "pi_rpa_sensitive_joint":
+            _validate_real(
+                "projected_pi_sensitivity_alpha",
+                normalized["projected_pi_sensitivity_alpha"],
+                0.0,
+            )
+            if normalized["projected_pi_sensitivity_alpha"] > 1.0:
+                raise ValueError(
+                    "projected_pi_sensitivity_alpha must not exceed one"
+                )
         for name in (
             "low_frequency_guard_weight",
             "low_frequency_guard_tolerance",
@@ -112,7 +152,7 @@ def normalize_loss_config(config):
             "radial_tail_radius",
         ):
             if normalized[name] != 0.0:
-                raise ValueError(f"{name} must be zero for pi_dpsi_joint")
+                raise ValueError(f"{name} must be zero for {mode}")
     if (
         normalized["radial_tail_weight"] > 0.0
         and normalized["radial_tail_radius"] <= 0.0
@@ -178,7 +218,7 @@ def compose_loss(
             f"loss mode {mode!r} does not match config mode {normalized['mode']!r}"
         )
     primary_name = (
-        "projected_pi" if mode == "pi_dpsi_joint" else "sternheimer"
+        "projected_pi" if mode in _PROJECTED_PI_MODES else "sternheimer"
     )
     _validate_loss_tensor(primary_name, st)
     _validate_loss_tensor("dft_origin", dft)
@@ -243,7 +283,11 @@ def compose_loss(
         constraint_dpsi = normalized["constraint_penalty_dpsi"] * torch.relu(
             dpsi_ratio - 1.0 - normalized["tau_dpsi"]
         ).square()
-        if mode in ("st_dpsi_joint", "pi_dpsi_joint"):
+        if mode in (
+            "st_dpsi_joint",
+            "pi_dpsi_joint",
+            "pi_rpa_sensitive_joint",
+        ):
             regularization_dpsi = normalized["joint_dpsi_weight"] * dpsi_ratio
         total = (
             st
@@ -262,7 +306,7 @@ def compose_loss(
         "constraint_dft": constraint_dft,
         "constraint_dpsi": constraint_dpsi,
     }
-    if mode != "pi_dpsi_joint":
+    if mode not in _PROJECTED_PI_MODES:
         components["radial_tail"] = radial_tail
         components["regularization_locality"] = regularization_locality
     if guard_active:
@@ -278,7 +322,11 @@ def selection_component(mode):
     _validate_mode(mode)
     return (
         "total"
-        if mode in ("st_dpsi_joint", "pi_dpsi_joint")
+        if mode in (
+            "st_dpsi_joint",
+            "pi_dpsi_joint",
+            "pi_rpa_sensitive_joint",
+        )
         else "sternheimer"
     )
 

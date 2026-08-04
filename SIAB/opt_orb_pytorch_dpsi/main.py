@@ -44,6 +44,11 @@ class LoadedSternheimerTargets:
 	zero_order_audits: tuple = ()
 
 
+_PROJECTED_PI_MODES = frozenset(
+	{"pi_dpsi_joint", "pi_rpa_sensitive_joint"}
+)
+
+
 def _sha256(path):
 	digest = hashlib.sha256()
 	with Path(path).open("rb") as stream:
@@ -90,7 +95,7 @@ def _write_projected_pi_metadata(path, targets, data_transmit):
 		}
 	payload = {
 		"schema_version": 1,
-		"mode": "pi_dpsi_joint",
+		"mode": data_transmit.get("loss_mode", "pi_dpsi_joint"),
 		"loss_components": data_transmit["loss_components"],
 		"projected_pi": diagnostics,
 		"inputs": inputs,
@@ -110,11 +115,26 @@ def _load_sternheimer_data(file_list, info_optimize):
 		if "loss" in stage
 	]
 	modes = {stage["mode"] for stage in stages}
-	projected_pi_mode = "pi_dpsi_joint" in modes
-	if projected_pi_mode and modes != {"pi_dpsi_joint"}:
-		raise ValueError(
-			"cannot mix pi_dpsi_joint and legacy Sternheimer loss stages"
+	projected_pi_modes = modes & _PROJECTED_PI_MODES
+	projected_pi_mode = bool(projected_pi_modes)
+	if projected_pi_mode and (
+		len(projected_pi_modes) != 1 or modes != projected_pi_modes
+	):
+		mode = (
+			"pi_rpa_sensitive_joint"
+			if "pi_rpa_sensitive_joint" in projected_pi_modes
+			else "pi_dpsi_joint"
 		)
+		if mode == "pi_dpsi_joint":
+			raise ValueError(
+				"cannot mix pi_dpsi_joint and legacy Sternheimer loss stages"
+			)
+		raise ValueError(
+			"cannot mix pi_rpa_sensitive_joint and other loss stages"
+		)
+	projected_pi_label = (
+		next(iter(projected_pi_modes)) if projected_pi_mode else None
+	)
 	if "sternheimer" in file_list:
 		values = file_list["sternheimer"]
 		if not isinstance(values, (list, tuple)) or not values:
@@ -127,16 +147,16 @@ def _load_sternheimer_data(file_list, info_optimize):
 		if projected_pi_mode:
 			if any(entry.role == "ghost" for entry in entries):
 				raise ValueError(
-					"pi_dpsi_joint cannot consume ghost Sternheimer targets"
+					f"{projected_pi_label} cannot consume ghost Sternheimer targets"
 				)
 			for entry in entries:
 				if entry.source_path is None:
 					raise ValueError(
-						f"pi_dpsi_joint target {entry.family} requires source_path"
+						f"{projected_pi_label} target {entry.family} requires source_path"
 					)
 				if entry.zero_order_audit_path is None:
 					raise ValueError(
-						"pi_dpsi_joint target "
+						f"{projected_pi_label} target "
 						f"{entry.family} requires zero_order_audit_path"
 					)
 			family_names = [entry.family for entry in entries]
@@ -146,7 +166,7 @@ def _load_sternheimer_data(file_list, info_optimize):
 				or set(family_names) != {"H", "H2"}
 			):
 				raise ValueError(
-					"pi_dpsi_joint requires exactly one H and one H2 target"
+					f"{projected_pi_label} requires exactly one H and one H2 target"
 				)
 
 			response_by_family = {}
@@ -342,8 +362,14 @@ def main():
 		else None
 	)
 	has_legacy_origin = "origin" in file_list
-	uses_projected_pi = any(
-		stage["mode"] == "pi_dpsi_joint" for stage in sternheimer_stages
+	projected_pi_modes = {
+		stage["mode"]
+		for stage in sternheimer_stages
+		if stage["mode"] in _PROJECTED_PI_MODES
+	}
+	uses_projected_pi = bool(projected_pi_modes)
+	projected_pi_mode = (
+		next(iter(projected_pi_modes)) if uses_projected_pi else None
 	)
 	if not has_legacy_origin:
 		if sternheimer_data is None or not sternheimer_stages:
@@ -351,7 +377,7 @@ def main():
 		if any(stage["mode"] != "st_only" for stage in sternheimer_stages):
 			if uses_projected_pi:
 				raise ValueError(
-					"pi_dpsi_joint requires origin and dpsi data"
+					f"{projected_pi_mode} requires origin and dpsi data"
 				)
 			raise ValueError(
 				"st_constrained and st_dpsi_joint require origin and dpsi data"
@@ -365,7 +391,8 @@ def main():
 		joint_modes = {
 			stage["mode"]
 			for stage in sternheimer_stages
-			if stage["mode"] in ("st_dpsi_joint", "pi_dpsi_joint")
+			if stage["mode"]
+			in ("st_dpsi_joint", "pi_dpsi_joint", "pi_rpa_sensitive_joint")
 		}
 		if joint_modes and "linear" not in file_list:
 			mode = sorted(joint_modes)[0]
@@ -468,16 +495,37 @@ def main():
 			}
 			if len(rank_tolerances) != 1:
 				raise ValueError(
-					"all pi_dpsi_joint stages must use one "
+					f"all {projected_pi_mode} stages must use one "
 					"projected_pi_rank_tolerance"
 				)
-			projected_pi_objective = (
-				NormalizedPhysicalFamilyProjectedPiOptimization(
-					*sternheimer_targets.projected_pi_pairs,
-					relative_rank_tolerance=rank_tolerances.pop(),
-					condition_limit=condition_limit,
+			rank_tolerance = rank_tolerances.pop()
+			if projected_pi_mode == "pi_dpsi_joint":
+				projected_pi_objective = (
+					NormalizedPhysicalFamilyProjectedPiOptimization(
+						*sternheimer_targets.projected_pi_pairs,
+						relative_rank_tolerance=rank_tolerance,
+						condition_limit=condition_limit,
+					)
 				)
-			)
+			else:
+				sensitivity_alphas = {
+					stage["projected_pi_sensitivity_alpha"]
+					for stage in sternheimer_stages
+				}
+				if len(sensitivity_alphas) != 1:
+					raise ValueError(
+						"all pi_rpa_sensitive_joint stages must use one "
+						"projected_pi_sensitivity_alpha"
+					)
+				projected_pi_objective = (
+					NormalizedPhysicalFamilyProjectedPiOptimization(
+						*sternheimer_targets.projected_pi_pairs,
+						relative_rank_tolerance=rank_tolerance,
+						condition_limit=condition_limit,
+						sensitivity_alpha=sensitivity_alphas.pop(),
+						family_power=4,
+					)
+				)
 			for family, pair in sternheimer_targets.projected_pi_pairs:
 				for warning in pair.provenance_warnings:
 					print(f"projected-Pi {family} warning: {warning}")
@@ -536,7 +584,7 @@ def main():
 
 	loss_diagnostics = None
 	if "loss_components" in data_transmit:
-		if data_transmit.get("loss_mode") == "pi_dpsi_joint":
+		if data_transmit.get("loss_mode") in _PROJECTED_PI_MODES:
 			pi_diagnostics = data_transmit["projected_pi_diagnostics"]
 			loss_diagnostics = {
 				"max_projected_pi_condition": data_transmit[
@@ -571,7 +619,7 @@ def main():
 		mode=data_transmit.get("loss_mode"),
 		diagnostics=loss_diagnostics,
 	)
-	if data_transmit.get("loss_mode") == "pi_dpsi_joint":
+	if data_transmit.get("loss_mode") in _PROJECTED_PI_MODES:
 		_write_projected_pi_metadata(
 			"PROJECTED_PI_METADATA.json",
 			sternheimer_targets,

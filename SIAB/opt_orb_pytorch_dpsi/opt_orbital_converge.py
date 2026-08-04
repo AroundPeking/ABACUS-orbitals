@@ -36,7 +36,7 @@ def _projected_pi_diagnostics(result, rank_tolerance):
 				float(value) for value in family.frequency_loss
 			]
 		families[name] = record
-	return {
+	diagnostics = {
 		"frequency_ha": [float(value) for value in result.frequency_ha],
 		"frequency_loss": [float(value) for value in result.frequency_loss],
 		"lowest_frequency_ha": float(result.lowest_frequency_ha),
@@ -46,6 +46,19 @@ def _projected_pi_diagnostics(result, rank_tolerance):
 		"family_names": list(result.family_results),
 		"families": families,
 	}
+	if getattr(result, "sensitivity_alpha", None) is not None:
+		diagnostics.update(
+			{
+				"mode": "pi_rpa_sensitive_joint",
+				"sensitivity_alpha": float(result.sensitivity_alpha),
+				"family_power": int(result.family_power),
+			}
+		)
+	return diagnostics
+
+
+def _is_projected_pi_mode(mode):
+	return mode in ("pi_dpsi_joint", "pi_rpa_sensitive_joint")
 
 
 class Opt_Orbital_Converge:
@@ -133,11 +146,11 @@ class Opt_Orbital_Converge:
 		if new_stage_indices:
 			for stage_index in new_stage_indices:
 				loss_config = loss_configs[stage_index]
-				if loss_config["mode"] == "pi_dpsi_joint":
+				if _is_projected_pi_mode(loss_config["mode"]):
 					evaluator = getattr(self, "projected_pi_objective", None)
 					if not callable(getattr(evaluator, "evaluate", None)):
 						raise ValueError(
-							"pi_dpsi_joint requires a projected-Pi evaluator; "
+							f"{loss_config['mode']} requires a projected-Pi evaluator; "
 							"call set_projected_pi_objective first"
 						)
 				else:
@@ -162,7 +175,8 @@ class Opt_Orbital_Converge:
 				else:
 					if loss_config["mode"] != "st_only":
 						raise ValueError(
-							"st_constrained, st_dpsi_joint, and pi_dpsi_joint "
+							"st_constrained, st_dpsi_joint, pi_dpsi_joint, and "
+							"pi_rpa_sensitive_joint "
 							"require legacy "
 							"DFT and dpsi data"
 						)
@@ -212,7 +226,7 @@ class Opt_Orbital_Converge:
 			new_loss_stage = stage_index in loss_configs
 			pi_mode = (
 				new_loss_stage
-				and loss_configs[stage_index]["mode"] == "pi_dpsi_joint"
+				and _is_projected_pi_mode(loss_configs[stage_index]["mode"])
 			)
 			guard_active = (
 				new_loss_stage

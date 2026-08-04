@@ -362,6 +362,7 @@ class NormalizedPhysicalFamilyProjectedPi:
         named_pairs,
         relative_rank_tolerance=1.0e-12,
         condition_limit=1.0e12,
+        sensitivity_alpha=None,
     ):
         if isinstance(named_pairs, Mapping):
             named_pairs = tuple(named_pairs.items())
@@ -378,13 +379,13 @@ class NormalizedPhysicalFamilyProjectedPi:
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("physical family names must be nonempty")
             names.append(name)
-            evaluators.append(
-                ProjectedPiEvaluator(
-                    pair,
-                    relative_rank_tolerance=relative_rank_tolerance,
-                    condition_limit=condition_limit,
-                )
-            )
+            evaluator_options = {
+                "relative_rank_tolerance": relative_rank_tolerance,
+                "condition_limit": condition_limit,
+            }
+            if sensitivity_alpha is not None:
+                evaluator_options["sensitivity_alpha"] = sensitivity_alpha
+            evaluators.append(ProjectedPiEvaluator(pair, **evaluator_options))
         if not names or len(names) != len(set(names)):
             raise ValueError("physical family names must be nonempty and unique")
         self._names = tuple(names)

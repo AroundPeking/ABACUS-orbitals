@@ -17,6 +17,8 @@ class ProjectedPiOptimizationResult:
     frequency_ha: torch.Tensor
     frequency_loss: torch.Tensor
     family_results: dict
+    sensitivity_alpha: float | None = None
+    family_power: int | None = None
 
     @property
     def lowest_frequency_ha(self):
@@ -33,6 +35,8 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
         *named_pairs,
         relative_rank_tolerance=1.0e-12,
         condition_limit=1.0e12,
+        sensitivity_alpha=None,
+        family_power=None,
     ):
         items = _normalize_named_pairs(named_pairs)
         names = tuple(name for name, _ in items)
@@ -49,11 +53,27 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
             (name, pair_by_name[name]) for name in _PHYSICAL_FAMILIES
         )
         self._condition_limit = _positive_condition_limit(condition_limit)
-        self._family = NormalizedPhysicalFamilyProjectedPi(
-            ordered,
-            relative_rank_tolerance=relative_rank_tolerance,
-            condition_limit=self._condition_limit,
-        )
+        if sensitivity_alpha is None:
+            if family_power is not None:
+                raise ValueError(
+                    "family_power requires an RPA-sensitive projected-Pi objective"
+                )
+            self._family_power = None
+        else:
+            self._family_power = _fourth_order_family_power(family_power)
+        if sensitivity_alpha is None:
+            self._family = NormalizedPhysicalFamilyProjectedPi(
+                ordered,
+                relative_rank_tolerance=relative_rank_tolerance,
+                condition_limit=self._condition_limit,
+            )
+        else:
+            self._family = NormalizedPhysicalFamilyProjectedPi(
+                ordered,
+                relative_rank_tolerance=relative_rank_tolerance,
+                condition_limit=self._condition_limit,
+                sensitivity_alpha=sensitivity_alpha,
+            )
 
     def evaluate(self, coefficients):
         family = self._family.evaluate(coefficients)
@@ -73,17 +93,30 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
             raise ValueError("H and H2 projected-Pi frequency grids differ")
         if not torch.equal(h.frequency_weight, h2.frequency_weight):
             raise ValueError("H and H2 projected-Pi frequency weights differ")
+        if self._family_power is None:
+            loss = family.loss
+            sensitivity_alpha = None
+        else:
+            family_losses = torch.stack(
+                tuple(family.results[name].loss for name in _PHYSICAL_FAMILIES)
+            )
+            loss = torch.sum(family_losses.pow(4)).pow(1.0 / 4)
+            sensitivity_alpha = h.sensitivity_alpha
+        if not bool(torch.isfinite(loss)):
+            raise RuntimeError("projected-Pi optimization loss must be finite")
         frequency_loss = (h.frequency_loss + h2.frequency_loss) / 2.0
         if not bool(torch.all(torch.isfinite(frequency_loss))):
             raise RuntimeError(
                 "projected-Pi optimization frequency loss must be finite"
             )
         return ProjectedPiOptimizationResult(
-            loss=family.loss,
+            loss=loss,
             max_condition=family.max_candidate_condition,
             frequency_ha=h.frequency_ha,
             frequency_loss=frequency_loss,
             family_results=family.results,
+            sensitivity_alpha=sensitivity_alpha,
+            family_power=self._family_power,
         )
 
 
@@ -119,4 +152,10 @@ def _positive_condition_limit(value):
         raise ValueError("condition_limit must be finite and at least 1") from exc
     if not math.isfinite(value) or value < 1.0:
         raise ValueError("condition_limit must be finite and at least 1")
+    return value
+
+
+def _fourth_order_family_power(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value != 4:
+        raise ValueError("family_power must be exactly 4")
     return value

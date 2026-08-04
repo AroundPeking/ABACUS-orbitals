@@ -946,3 +946,135 @@ and adapter arguments. There was no import, fixture, mock-setup, or test-algebra
 error in the counted run. This is still **Task 3 RED only**: there is **no Task
 4 implementation, historical ranking, optimization, candidate orbital, or
 physical result**.
+
+### Task 4 code GREEN: `pi_rpa_sensitive_joint` (2026-08-04)
+
+Task 4 adds the training mode without changing the numerical or construction
+path of `pi_dpsi_joint`. The new mode requires all three fields explicitly:
+
+```json
+{
+  "mode": "pi_rpa_sensitive_joint",
+  "projected_pi_rank_tolerance": 1.0e-12,
+  "projected_pi_sensitivity_alpha": 0.25,
+  "joint_dpsi_weight": 0.02
+}
+```
+
+The alpha must be a finite real number in `[0, 1]`; legacy modes reject the
+alpha key. Radial-tail and low-frequency penalties must remain zero. A new
+mode campaign cannot be mixed with another loss mode. Its target list is
+strictly one physical `H` and one physical `H2` entry, each with response,
+source, and zero-order-audit paths; ghost, duplicate, or incomplete entries
+are rejected. Origin and linear dpsi data remain mandatory.
+
+The adapter passes the frozen alpha to both family evaluators. It retains the
+legacy exact sum when alpha and family power are absent. The sensitive path
+accepts only integer `family_power=4` and evaluates, without detaching,
+
+```python
+family_losses = torch.stack(
+    tuple(family.results[name].loss for name in ("H", "H2"))
+)
+loss = torch.sum(family_losses.pow(4)).pow(1.0 / 4)
+```
+
+Both family results expose the alpha and their blended sensitivity losses are
+the values entering this norm. Loss composition treats both projected modes
+as projected-Pi primary plus joint dpsi. The existing projected-Pi metadata
+hook records the new mode, alpha, and family power. This stage does not define
+the Task 5 checkpoint-acceptance contract or a new final output schema.
+
+The implementation also makes the minimum matching change in
+`opt_orbital_converge.py`: the new mode uses the already existing
+`set_projected_pi_objective` route and projected-Pi diagnostics. No atomic or
+family checkpoint-improvement gate from Task 5 is present.
+
+#### Remote GREEN provenance
+
+`df_dcu` cannot resolve `github.com`, so no remote Git checkout was claimed or
+used. The final tested tree is the absolute directory:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-green-impl2.Y3YKtG/code
+```
+
+It was built from a local `git archive` of `SIAB` at
+`c5ca6ff8ed8e8a482e1c0eb02a9e8f73b747659f` plus an exact five-file production
+overlay. The uncompressed source archive SHA256 is:
+
+```text
+285dd50035366151a2d738dda1c20025b63e28a61669c66771c850866ff5467d
+```
+
+The final overlay archive contains no AppleDouble or extended-attribute
+entries. Its SHA256 is:
+
+```text
+55df65363b7ac8044498812e969e23dde990f87be23ae390d86a030d633821ea
+```
+
+Its exact contents and local/remote matching SHA256 values are:
+
+```text
+SIAB/opt_orb_pytorch_dpsi/projected_pi.py
+  edc2837f2c6d85b6ffb7cc275d58e129612ef2740ac813dbe4728feb883a0258
+SIAB/opt_orb_pytorch_dpsi/projected_pi_optimization.py
+  aa875b9ade5394fa038e366e792d8306c5e754538e0252a153ea2185f8662c9a
+SIAB/opt_orb_pytorch_dpsi/optimization_loss.py
+  6ead41b5b53e79ca9ae83c8210ebe843cb6c3c7b45638fd13b3ed6c1ec503729
+SIAB/opt_orb_pytorch_dpsi/main.py
+  1a9d35baff0b9e98fe85d9ff814516d386c10d97bf53796120af5685eb7c3ced
+SIAB/opt_orb_pytorch_dpsi/opt_orbital_converge.py
+  b939ae4cb3cc6e85d4b150d141988d0a9e7ad6c6ab08bbec2a81e240b688f562
+```
+
+The first implementation feedback run used
+`code-task4-green-impl1.bAtGcw`. It ran 126 tests and ended with one error:
+the direct legacy metadata-hook test omitted `loss_mode`, while the first
+implementation indexed that key. The compatibility fix uses the actual mode
+when present and preserves `pi_dpsi_joint` as the old direct-call default.
+That first overlay also contained macOS AppleDouble/xattr entries, so it is not
+the final provenance archive.
+
+The exact required final command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-green-impl2.Y3YKtG/code/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi test_projected_pi_optimization \
+  test_loss_and_freeze test_main_sternheimer
+```
+
+It exited zero and reported `Ran 126 tests in 1.123s` and `OK`. The count is
+126 rather than 101 because the requested command includes the 25 tests in
+`test_projected_pi`; the three Task 3 modules alone were also rerun and
+reported `Ran 101 tests in 0.863s`, `OK`.
+
+The risk-based full SIAB discovery initially found five missing-fixture errors
+because the `SIAB`-only source archive does not contain the tracked H TZDP
+coefficient file. The same commit supplied that one file through a second
+`git archive`, SHA256:
+
+```text
+e9e4d9f1868a6548db1d13346555ff4a9b2fc3ea528568a300dad29a164838db
+```
+
+After extracting it into the same code tree, the exact regression command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-green-impl2.Y3YKtG/code/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest discover -v
+```
+
+It exited zero and reported `Ran 355 tests in 25.231s` and `OK`. This is code
+GREEN only. No historical alpha ranking, optimization, checkpoint promotion,
+new orbital basis, RPA binding energy, BSSE improvement, or physical validation
+has been produced.
+
+A fresh pre-commit verification on the same five matching production-file
+hashes reported `Ran 126 tests in 1.056s`, `Ran 101 tests in 0.859s`, and
+`Ran 355 tests in 24.329s`; all three commands exited zero with `OK`.
