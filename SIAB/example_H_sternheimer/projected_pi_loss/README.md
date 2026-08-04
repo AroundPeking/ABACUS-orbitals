@@ -493,3 +493,14 @@ and frequency convergence below the same tolerance. Only after that gate is
 the basis frozen for production; production then uses the raw SOS-RPA result
 without H+ghost or CP correction. At this point only the design is complete:
 no new ranking, optimized orbital, or RPA result has been produced.
+
+### Implementation plan frozen (2026-08-04)
+
+The executable task sequence is now recorded in
+`docs/superpowers/plans/2026-08-04-siab-rpa-sensitive-response-loss.md`.
+It separates RED tests, the backward-compatible implementation, historical
+five-basis alpha selection, fixed-size optimization, and the equilibrium
+SOS/CP gate into distinct commits. It also requires an autograd-versus-centered
+finite-difference check before the new loss can be used. The current state is
+still **plan only**: no RED test, implementation, historical ranking, new
+optimization, or physical result has been run.
