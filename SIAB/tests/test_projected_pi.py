@@ -4,6 +4,7 @@ import unittest
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
+import projected_pi
 from projected_pi import (
     NormalizedPhysicalFamilyProjectedPi,
     ProjectedPiEvaluator,
@@ -331,6 +332,108 @@ class ProjectedPiTest(unittest.TestCase):
             / (2.0 * step)
         )
         self.assertAlmostEqual(analytic, finite_difference, delta=2.0e-7)
+
+    def test_sensitivity_alpha_defaults_to_legacy_path(self):
+        result = ProjectedPiEvaluator(self.pair).evaluate(
+            coefficients(self.coefficient)
+        )
+
+        for field in (
+            "base_loss",
+            "sensitivity_loss",
+            "frequency_base_loss",
+            "frequency_sensitivity_loss",
+            "trace_log_difference",
+            "minimum_reference_dielectric_eigenvalue",
+            "minimum_candidate_dielectric_eigenvalue",
+            "sensitivity_alpha",
+        ):
+            self.assertIsNone(getattr(result, field))
+
+    def test_sensitivity_alpha_accepts_endpoints(self):
+        pair = scaled_pair(self.pair)
+        for alpha in (0.0, 1.0):
+            with self.subTest(alpha=alpha):
+                result = ProjectedPiEvaluator(
+                    pair,
+                    sensitivity_alpha=alpha,
+                ).evaluate(coefficients(self.coefficient))
+                self.assertEqual(result.sensitivity_alpha, alpha)
+                expected_loss = (
+                    result.sensitivity_loss if alpha == 0.0 else result.base_loss
+                )
+                expected_frequency_loss = (
+                    result.frequency_sensitivity_loss
+                    if alpha == 0.0
+                    else result.frequency_base_loss
+                )
+                torch.testing.assert_close(result.loss, expected_loss)
+                torch.testing.assert_close(
+                    result.frequency_loss,
+                    expected_frequency_loss,
+                )
+
+    def test_sensitivity_alpha_rejects_out_of_range_values(self):
+        for alpha in (-0.1, 1.1):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "sensitivity_alpha must be finite and between zero and one",
+                ):
+                    ProjectedPiEvaluator(self.pair, sensitivity_alpha=alpha)
+
+    def test_sensitivity_alpha_rejects_nonfinite_values(self):
+        for alpha in (float("nan"), float("inf"), -float("inf")):
+            with self.subTest(alpha=alpha):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "sensitivity_alpha must be finite and between zero and one",
+                ):
+                    ProjectedPiEvaluator(self.pair, sensitivity_alpha=alpha)
+
+    def test_rpa_sensitivity_helper_rejects_nonfinite_pi(self):
+        reference = torch.zeros((1, 2, 2), dtype=torch.complex128)
+        candidate = reference.clone()
+        frequency_weight = torch.ones(1, dtype=torch.float64)
+        for name in ("reference", "candidate"):
+            with self.subTest(name=name):
+                values = {
+                    "reference": reference.clone(),
+                    "candidate": candidate.clone(),
+                }
+                values[name][0, 0, 0] = complex(float("nan"), 0.0)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"{name} Pi must be finite",
+                ):
+                    projected_pi.evaluate_rpa_sensitivity(
+                        values["reference"],
+                        values["candidate"],
+                        frequency_weight,
+                        1.0e-12,
+                    )
+
+    def test_rpa_sensitivity_helper_rejects_materially_nonhermitian_pi(self):
+        reference = torch.zeros((1, 2, 2), dtype=torch.complex128)
+        candidate = reference.clone()
+        frequency_weight = torch.ones(1, dtype=torch.float64)
+        for name in ("reference", "candidate"):
+            with self.subTest(name=name):
+                values = {
+                    "reference": reference.clone(),
+                    "candidate": candidate.clone(),
+                }
+                values[name][0, 0, 1] = 1.0
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"{name} Pi is materially non-Hermitian",
+                ):
+                    projected_pi.evaluate_rpa_sensitivity(
+                        values["reference"],
+                        values["candidate"],
+                        frequency_weight,
+                        1.0e-12,
+                    )
 
     def test_rpa_sensitivity_matches_independent_eigendecomposition(self):
         scale = 1.0e-2

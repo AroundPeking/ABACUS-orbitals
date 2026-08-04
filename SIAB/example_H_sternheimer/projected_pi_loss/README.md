@@ -572,3 +572,92 @@ Every new test stopped for the same feature-specific reason:
 `TypeError: ProjectedPiEvaluator.__init__() got an unexpected keyword argument
 'sensitivity_alpha'`. The exit status was 1. There was no import, fixture,
 or test-algebra failure. This is RED evidence only: no implementation or physical result exists.
+
+### Task 2 GREEN: per-family RPA sensitivity implementation (2026-08-04)
+
+`SIAB/opt_orb_pytorch_dpsi/projected_pi.py` now provides the standalone
+`evaluate_rpa_sensitivity(reference_pi, candidate_pi, frequency_weight,
+relative_tolerance)` helper and an optional `sensitivity_alpha` argument on
+`ProjectedPiEvaluator`. `ProjectedPiResult` appends these defaulted fields, so
+existing positional and keyword constructors remain valid:
+
+```text
+base_loss
+sensitivity_loss
+frequency_base_loss
+frequency_sensitivity_loss
+trace_log_difference
+minimum_reference_dielectric_eigenvalue
+minimum_candidate_dielectric_eigenvalue
+sensitivity_alpha
+```
+
+At each frequency the helper validates finite reference and candidate Pi, then
+rejects a Hermitian residual larger than
+`10 * relative_tolerance * max(1, ||Pi||_F)` before any eigensolve. Accepted
+matrices are diagonalized as Hermitian matrices. With
+`epsilon_a = 1 - lambda_a`, it requires `min(epsilon_a) >
+relative_tolerance` for both spectra and defines
+
+```text
+g_a = abs(1 - 1 / epsilon_a)
+W^(1/2) = U diag(sqrt(g_a / max(g))) U^H
+e_p = ||W_p^(1/2) (Pi_candidate,p - Pi_reference,p) W_p^(1/2)||_F^2
+r_p = ||W_p^(1/2) Pi_reference,p W_p^(1/2)||_F^2
+L_sensitivity = sum_p w_p e_p / sum_p w_p r_p
+L_sensitivity,p = e_p / r_p
+```
+
+The diagnostic at each frequency is
+
+```text
+Delta F_p = Tr[log(I-Pi_candidate,p) + Pi_candidate,p]
+          - Tr[log(I-Pi_reference,p) + Pi_reference,p].
+```
+
+When `sensitivity_alpha` is supplied, it is normalized to a finite scalar in
+`[0,1]` and the evaluator returns
+
+```text
+loss_p = alpha * base_loss_p + (1-alpha) * sensitivity_loss_p
+loss   = alpha * base_loss   + (1-alpha) * sensitivity_loss.
+```
+
+When the argument is absent, the evaluator returns directly from the legacy
+equations, does not run dielectric checks, and leaves the appended fields
+`None`. The original direct-complex oracle remains unchanged at
+`rtol=atol=1e-13`.
+
+The GREEN test used a source archive from starting commit
+`de2becbf9a73fcf58769b681295cb44be98541e9` on branch
+`codex/sternheimer-siab-h`, not a GitHub checkout. The archive contains the
+committed `SIAB` tree and has SHA256
+`8183788af219ab61516161ef6e8bc17fa06054c93b59905c18b24014f430eb90`.
+The exact overlays were:
+
+```text
+SIAB/opt_orb_pytorch_dpsi/projected_pi.py
+  f7843d17f23d6dba2ce00797ad49ae0f8a548164514bb19cf3e1ad4c827cc7ec
+SIAB/tests/test_projected_pi.py
+  043a219c9111b69a1b42ea0836918651d17da6c1a51ad73cd5e8cd24d03325f3
+```
+
+The untouched starting `projected_pi.py` SHA256 was
+`f78d08285b296a0a41acb557bf7df622ebc8b3e74e44ba2548705ff8e02e505b`.
+The disposable remote tree was
+`/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task2-alpha-red`.
+The exact first-attempt GREEN command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task2-alpha-red/SIAB/tests
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_projected_pi test_projected_pi_optimization
+```
+
+It ran 30 tests in 0.254 seconds and returned `OK`: 11 legacy projected-Pi
+tests, the 8 approved Task 1 sensitivity tests, 6 new Task 2 tests for missing,
+endpoint, out-of-range and nonfinite alpha plus reference/candidate finite and
+Hermitian validation, and 5 optimization-adapter regression tests.
+
+**GREEN code test only; no historical ranking, optimization, or physical result**

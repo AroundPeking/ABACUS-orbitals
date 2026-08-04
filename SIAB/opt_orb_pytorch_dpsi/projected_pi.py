@@ -20,6 +20,14 @@ class ProjectedPiResult:
     reference_pi: torch.Tensor
     reference_rank: int
     max_candidate_condition: float
+    base_loss: torch.Tensor | None = None
+    sensitivity_loss: torch.Tensor | None = None
+    frequency_base_loss: torch.Tensor | None = None
+    frequency_sensitivity_loss: torch.Tensor | None = None
+    trace_log_difference: torch.Tensor | None = None
+    minimum_reference_dielectric_eigenvalue: torch.Tensor | None = None
+    minimum_candidate_dielectric_eigenvalue: torch.Tensor | None = None
+    sensitivity_alpha: float | None = None
 
 
 @dataclass(frozen=True)
@@ -29,12 +37,150 @@ class ProjectedPiFamilyResult:
     max_candidate_condition: float
 
 
+def evaluate_rpa_sensitivity(
+    reference_pi,
+    candidate_pi,
+    frequency_weight,
+    relative_tolerance,
+):
+    """Return positive sensitivity losses and trace-log diagnostics."""
+    try:
+        relative_tolerance = float(relative_tolerance)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "relative_tolerance must be finite and between zero and one"
+        ) from exc
+    if (
+        not math.isfinite(relative_tolerance)
+        or relative_tolerance <= 0.0
+        or relative_tolerance >= 1.0
+    ):
+        raise ValueError(
+            "relative_tolerance must be finite and between zero and one"
+        )
+    if (
+        reference_pi.ndim != 3
+        or candidate_pi.shape != reference_pi.shape
+        or reference_pi.shape[-2] != reference_pi.shape[-1]
+    ):
+        raise ValueError(
+            "reference and candidate Pi must be matching frequency matrices"
+        )
+    if frequency_weight.ndim != 1 or frequency_weight.shape[0] != reference_pi.shape[0]:
+        raise ValueError("frequency_weight must match the Pi frequency dimension")
+    if not bool(torch.all(torch.isfinite(frequency_weight))) or not bool(
+        torch.all(frequency_weight > 0.0)
+    ):
+        raise ValueError("frequency_weight must be positive and finite")
+
+    hermitian_inputs = []
+    for name, values in (
+        ("reference", reference_pi),
+        ("candidate", candidate_pi),
+    ):
+        if not bool(torch.all(torch.isfinite(values))):
+            raise RuntimeError(f"{name} Pi must be finite")
+        matrix_norm = torch.linalg.matrix_norm(values, dim=(-2, -1))
+        hermitian_error = torch.linalg.matrix_norm(
+            values - values.mH,
+            dim=(-2, -1),
+        )
+        hermitian_threshold = 10.0 * relative_tolerance * torch.maximum(
+            torch.ones_like(matrix_norm),
+            matrix_norm,
+        )
+        if bool(torch.any(hermitian_error > hermitian_threshold)):
+            raise RuntimeError(f"{name} Pi is materially non-Hermitian")
+        hermitian_inputs.append((values + values.mH) / 2.0)
+
+    reference_pi, candidate_pi = hermitian_inputs
+    sensitivity_error = []
+    sensitivity_reference_norm = []
+    trace_log_difference = []
+    minimum_reference_dielectric_eigenvalue = []
+    minimum_candidate_dielectric_eigenvalue = []
+    for reference, candidate in zip(reference_pi, candidate_pi):
+        reference_eigenvalue, reference_eigenvector = torch.linalg.eigh(reference)
+        candidate_eigenvalue = torch.linalg.eigvalsh(candidate)
+        reference_dielectric = 1.0 - reference_eigenvalue
+        candidate_dielectric = 1.0 - candidate_eigenvalue
+        minimum_reference = torch.min(reference_dielectric)
+        minimum_candidate = torch.min(candidate_dielectric)
+        if float(minimum_reference) <= relative_tolerance:
+            raise RuntimeError("reference I-Pi is not positive")
+        if float(minimum_candidate) <= relative_tolerance:
+            raise RuntimeError("candidate I-Pi is not positive")
+
+        g = torch.abs(1.0 - 1.0 / reference_dielectric)
+        maximum_g = torch.max(g)
+        if float(maximum_g) <= relative_tolerance:
+            raise RuntimeError("RPA sensitivity is numerically zero")
+        weight_sqrt = (
+            reference_eigenvector
+            @ torch.diag(torch.sqrt(g / maximum_g)).to(
+                reference_eigenvector.dtype
+            )
+            @ reference_eigenvector.mH
+        )
+        weighted_error = weight_sqrt @ (candidate - reference) @ weight_sqrt
+        weighted_reference = weight_sqrt @ reference @ weight_sqrt
+        sensitivity_error.append(
+            torch.sum(torch.abs(weighted_error) ** 2).real
+        )
+        sensitivity_reference_norm.append(
+            torch.sum(torch.abs(weighted_reference) ** 2).real
+        )
+        trace_log_difference.append(
+            torch.sum(torch.log(candidate_dielectric) + candidate_eigenvalue)
+            - torch.sum(torch.log(reference_dielectric) + reference_eigenvalue)
+        )
+        minimum_reference_dielectric_eigenvalue.append(minimum_reference)
+        minimum_candidate_dielectric_eigenvalue.append(minimum_candidate)
+
+    sensitivity_error = torch.stack(sensitivity_error)
+    sensitivity_reference_norm = torch.stack(sensitivity_reference_norm)
+    if not bool(torch.all(torch.isfinite(sensitivity_error))):
+        raise RuntimeError("RPA sensitivity squared error must be finite")
+    if not bool(
+        torch.all(torch.isfinite(sensitivity_reference_norm))
+    ) or not bool(torch.all(sensitivity_reference_norm > 0.0)):
+        raise RuntimeError(
+            "RPA sensitivity reference norm must be positive and finite"
+        )
+    frequency_sensitivity_loss = (
+        sensitivity_error / sensitivity_reference_norm
+    )
+    sensitivity_loss = torch.sum(frequency_weight * sensitivity_error) / torch.sum(
+        frequency_weight * sensitivity_reference_norm
+    )
+    trace_log_difference = torch.stack(trace_log_difference)
+    if not bool(torch.isfinite(sensitivity_loss)) or not bool(
+        torch.all(torch.isfinite(frequency_sensitivity_loss))
+    ):
+        raise RuntimeError("RPA sensitivity loss must be finite")
+    if not bool(torch.all(torch.isfinite(trace_log_difference))):
+        raise RuntimeError("RPA trace-log difference must be finite")
+
+    return {
+        "sensitivity_loss": sensitivity_loss,
+        "frequency_sensitivity_loss": frequency_sensitivity_loss,
+        "trace_log_difference": trace_log_difference,
+        "minimum_reference_dielectric_eigenvalue": torch.stack(
+            minimum_reference_dielectric_eigenvalue
+        ),
+        "minimum_candidate_dielectric_eigenvalue": torch.stack(
+            minimum_candidate_dielectric_eigenvalue
+        ),
+    }
+
+
 class ProjectedPiEvaluator:
     def __init__(
         self,
         pair,
         relative_rank_tolerance=1.0e-12,
         condition_limit=1.0e12,
+        sensitivity_alpha=None,
     ):
         if not isinstance(pair, SternheimerResponseSourcePair):
             raise ValueError("pair must be SternheimerResponseSourcePair")
@@ -43,6 +189,7 @@ class ProjectedPiEvaluator:
             relative_rank_tolerance
         )
         self.condition_limit = _normalize_condition_limit(condition_limit)
+        self.sensitivity_alpha = _normalize_sensitivity_alpha(sensitivity_alpha)
 
         (
             self._occupied_states,
@@ -150,6 +297,39 @@ class ProjectedPiEvaluator:
         if not bool(torch.isfinite(loss)):
             raise RuntimeError("projected-Pi loss must be finite")
 
+        if self.sensitivity_alpha is None:
+            return ProjectedPiResult(
+                loss=loss,
+                frequency_ha=self._frequency_ha,
+                frequency_weight=self._frequency_weight,
+                frequency_loss=frequency_loss,
+                candidate_a=candidate_a,
+                reference_a=self._reference_a,
+                candidate_pi=candidate_pi,
+                reference_pi=self._reference_pi,
+                reference_rank=self._reference_rank,
+                max_candidate_condition=condition,
+            )
+
+        base_loss = loss
+        frequency_base_loss = frequency_loss
+        sensitivity = evaluate_rpa_sensitivity(
+            self._reference_pi,
+            candidate_pi,
+            self._frequency_weight,
+            self.relative_rank_tolerance,
+        )
+        sensitivity_loss = sensitivity["sensitivity_loss"]
+        frequency_sensitivity_loss = sensitivity[
+            "frequency_sensitivity_loss"
+        ]
+        alpha = self.sensitivity_alpha
+        loss = alpha * base_loss + (1.0 - alpha) * sensitivity_loss
+        frequency_loss = (
+            alpha * frequency_base_loss
+            + (1.0 - alpha) * frequency_sensitivity_loss
+        )
+
         return ProjectedPiResult(
             loss=loss,
             frequency_ha=self._frequency_ha,
@@ -161,6 +341,18 @@ class ProjectedPiEvaluator:
             reference_pi=self._reference_pi,
             reference_rank=self._reference_rank,
             max_candidate_condition=condition,
+            base_loss=base_loss,
+            sensitivity_loss=sensitivity_loss,
+            frequency_base_loss=frequency_base_loss,
+            frequency_sensitivity_loss=frequency_sensitivity_loss,
+            trace_log_difference=sensitivity["trace_log_difference"],
+            minimum_reference_dielectric_eigenvalue=sensitivity[
+                "minimum_reference_dielectric_eigenvalue"
+            ],
+            minimum_candidate_dielectric_eigenvalue=sensitivity[
+                "minimum_candidate_dielectric_eigenvalue"
+            ],
+            sensitivity_alpha=alpha,
         )
 
 
@@ -391,4 +583,20 @@ def _normalize_condition_limit(value):
         raise ValueError("condition_limit must be finite and at least 1") from exc
     if not math.isfinite(value) or value < 1.0:
         raise ValueError("condition_limit must be finite and at least 1")
+    return value
+
+
+def _normalize_sensitivity_alpha(value):
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "sensitivity_alpha must be finite and between zero and one"
+        ) from exc
+    if not math.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(
+            "sensitivity_alpha must be finite and between zero and one"
+        )
     return value
