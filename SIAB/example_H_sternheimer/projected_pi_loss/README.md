@@ -1312,3 +1312,170 @@ zero with `OK`. Their measured process wall times were 5.19, 4.71, and 28.18
 seconds. This independently closes Task 4 at the code-regression gate only.
 There is still no optimized basis, checkpoint promotion, RPA binding energy,
 BSSE result, or physical validation.
+
+### Task 5 RED: atomic and family checkpoint gates (2026-08-04)
+
+Task 5 first changes only `test_loss_and_freeze.py` and
+`test_main_sternheimer.py`. The checkpoint contract is the pair of strict
+inequalities
+
+```text
+family_improved := L_family(C) < L_family(C0)
+atom_improved   := L_H(C)      < L_H(C0)
+```
+
+in addition to the existing DFT, dpsi, condition, locality, and low-frequency
+gates. The initial point has exactly the baseline losses, so both strict
+comparisons are false without a step-index exception. A differentiable fake
+provides one candidate whose fourth-order H/H2 family loss improves while H
+worsens, followed by a candidate for which both losses improve. The tests also
+require bitwise restoration of the fixed column and prove that
+`pi_dpsi_joint` still accepts and selects under its old contract.
+
+The new-mode output contract keeps compact scalar H/H2 total, base,
+sensitivity, blend, gate, and condition columns in `Spillage.dat`.
+`ORBITAL_RESULTS.txt` has a separate scalar-only schema. GreenX frequencies
+and weights, per-frequency losses, trace-log differences, and dielectric
+eigenvalue minima are long diagnostics and belong only in
+`PROJECTED_PI_METADATA.json`. The old `pi_dpsi_joint` header, acceptance,
+selection, and writer block are byte-locked by regression tests.
+
+Because `df_dcu` has no GitHub DNS, the remote RED did not use or claim a Git
+checkout. The local source archive was made from exact commit
+`1991b1583e52726a3b6be6b34cc2584417d9045d`; its local and remote SHA256 was
+
+```text
+52fd6e85733daa76429b0d04b460c7b6e0284b580b6cb810e752a1ba137b690a
+```
+
+The final test-only ustar overlay had SHA256
+
+```text
+d28a1bad0baac1391d6bdb4a394b76410f1b66911bcaa292594d44bca85b4cdd
+```
+
+and produced matching remote test-file hashes
+
+```text
+test_loss_and_freeze.py
+  97b7616f2cb16a77f1ec2cc698fd02368976ae426be2a8d501c114652331fea9
+test_main_sternheimer.py
+  b4b20a1ca0c6a9d6698b35fb1e535455a72b6b88dd77c1c8d239ec85faf2f974
+```
+
+The absolute extracted tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task5-red-1991b158-0e193bb1/tree
+```
+
+From that tree's `SIAB/tests`, with `DOJO_PATH` pointing to its archived
+`Dojo-NC-SR`, the required RED command was
+
+```bash
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest -v test_loss_and_freeze test_main_sternheimer
+```
+
+It ran 98 test methods: 93 passed, two methods produced two failure records,
+and three methods produced three error records. The exact summary was
+`FAILED (failures=2, errors=3)`. The failures were the absent dual gate/new
+`Spillage.dat` header and the absent fatal no-accepted behavior. The errors
+were the absent baseline-aware diagnostic signature, main scalar-schema
+routing, and independent writer schema. No failing record came from a
+subtest. The new old-mode acceptance/selection regression passed. This is
+Task 5 RED only: no production implementation, optimization, historical alpha
+ranking, candidate basis, SOS/CP calculation, or physical validation exists.
+
+### Task 5 GREEN: atomic and family checkpoint gates (2026-08-04)
+
+The new `pi_rpa_sensitive_joint` checkpoint contract is now
+
+```text
+accepted := original_gates
+            and L_family(C) < L_family(C0)
+            and L_H(C)      < L_H(C0)
+```
+
+where `original_gates` denotes the existing DFT, dpsi, condition, locality,
+and low-frequency gates. Setup evaluates the baseline once and stores detached
+clones of the aggregate H/H2 family loss and the H loss. Since the initial
+point equals those baselines, both strict inequalities are false naturally;
+there is no step-index exception. A candidate that improves the fourth-power
+family aggregate while worsening H is rejected, whereas a later candidate
+that strictly improves both is selected. Fixed columns remain bitwise equal
+after candidate evaluation. The `pi_dpsi_joint` acceptance, selection,
+`Spillage.dat` columns, and `ORBITAL_RESULTS.txt` block remain on their old
+path.
+
+When no candidate is accepted, the violation ordering and fatal error include
+the finite normalized quantities
+
+```text
+v_family = max(0, (L_family(C) - L_family(C0))
+                  / max(L_family(C0), epsilon))
+v_atom   = max(0, (L_H(C) - L_H(C0)) / max(L_H(C0), epsilon))
+```
+
+so a zero or near-zero baseline does not create `NaN` or infinity. The new
+`Spillage.dat` row is compact: H/H2 total, base, sensitivity, and blend losses,
+the family/atom gate decisions, and the maximum overlap condition are scalar
+columns only. `ORBITAL_RESULTS.txt` uses an independent new-mode scalar schema
+containing alpha, family power, initial/final family and H losses, H/H2 scalar
+components, maximum condition, and rank tolerance. Long arrays are serialized
+only to `PROJECTED_PI_METADATA.json`: GreenX `frequency_ha` and
+`frequency_weight`; per-frequency total, base, and sensitivity losses;
+trace-log differences; and minimum reference/candidate dielectric eigenvalues.
+JSON output is finite and uses the real metadata serialization path.
+
+The GREEN tree was assembled without a remote checkout from the same source
+archive used by RED, followed by the exact test and production overlays. The
+production overlay SHA256 was
+
+```text
+4210906e15217efc0728a2a195a8ef22d4daff72d4de48afbe918c32385c6d00
+```
+
+and its three production-file SHA256 values were
+
+```text
+opt_orbital_converge.py
+  4a9af6a7f4e996c5d3abb31bc4ba0f3c8966dba1f08fdcccad4a1eba6c0dba32
+IO/func_C.py
+  c8e9faac25b3e33f6e4beff6777a0289788e860ade0645d2fd0ee2a86575ced0
+main.py
+  b65ebfe58e4749b91989fee640319ca3f02baac4b26684e8f5c3ec61afc681b7
+```
+
+The Task 4 writer test still encoded the preliminary shared-schema behavior.
+After that test was aligned with the final Task 5 independent scalar schema,
+the one-file overlay SHA256 was
+
+```text
+5cd34e00b732a5fce02fa28b1aa22c2039bceec85b01973f4d34a013104584b3
+```
+
+with `test_projected_pi.py` SHA256
+`75e79effade34786130bd7bc1fd1d110a7791744c0eaf696b53b9e1d5921c719`.
+The absolute final tree was
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task5-green-final-1991b158-5cd34e00/tree
+```
+
+From its `SIAB/tests` directory, using the RED environment and archived
+`DOJO_PATH`, the final reproducibility rerun gave 98 test methods in 0.795 s
+for the targeted two modules, 135 methods in 1.049 s for the Task 4 four
+modules, and 364 methods in 26.738 s for full discovery. Every final run
+reported `OK` with zero failures and zero errors; there were no failing
+subtests. The three log SHA256 values were, respectively,
+`5b7187ae2c86627c299ca14cdb98c821a0a299d1f081312304d084c41f0ecf14`,
+`c098fd7b9457ea3ebfd28244f7840ea96ab2d88b5fcb5aa081330e4892117bc7`,
+and `53ed5896d0421dd1b175341095cfafed4bfc396f1add8916c9c6e734c128911b`.
+The earlier broad run exposed exactly the obsolete shared-schema expectation
+and was not treated as GREEN.
+
+This completes only the Task 5 code checkpoint gate and diagnostic schema. It
+does not produce an optimized basis, rank historical alpha values, run Task 6,
+or establish any RPA/SOS/CP or physical-validation result.

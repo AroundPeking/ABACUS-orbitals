@@ -61,6 +61,40 @@ _PROJECTED_PI_LOSS_DIAGNOSTICS = (
 	("projected_pi_rank_tolerance", "Projected Pi rank tolerance"),
 )
 
+_RPA_SENSITIVE_LOSS_DIAGNOSTICS = (
+	("alpha", "Sensitivity alpha"),
+	("family_power", "Family aggregation power"),
+	(
+		"initial_projected_pi_family_loss",
+		"Initial aggregate projected Pi family loss",
+	),
+	(
+		"final_projected_pi_family_loss",
+		"Final aggregate projected Pi family loss",
+	),
+	("initial_projected_pi_h_loss", "Initial H projected Pi loss"),
+	("final_projected_pi_h_loss", "Final H projected Pi loss"),
+	("projected_pi_h_total_loss", "H total projected Pi loss"),
+	("projected_pi_h_base_loss", "H base projected Pi loss"),
+	(
+		"projected_pi_h_sensitivity_loss",
+		"H sensitivity projected Pi loss",
+	),
+	("projected_pi_h_blend_loss", "H blended projected Pi loss"),
+	("projected_pi_h2_total_loss", "H2 total projected Pi loss"),
+	("projected_pi_h2_base_loss", "H2 base projected Pi loss"),
+	(
+		"projected_pi_h2_sensitivity_loss",
+		"H2 sensitivity projected Pi loss",
+	),
+	("projected_pi_h2_blend_loss", "H2 blended projected Pi loss"),
+	(
+		"max_projected_pi_condition",
+		"Maximum projected Pi overlap condition",
+	),
+	("projected_pi_rank_tolerance", "Projected Pi rank tolerance"),
+)
+
 def _component_schema(guarded, mode=None):
 	if mode in PROJECTED_PI_MODES:
 		return _PROJECTED_PI_LOSS_COMPONENTS
@@ -140,16 +174,19 @@ def _validate_loss_diagnostics(diagnostics, mode):
 	if not isinstance(diagnostics, Mapping):
 		raise TypeError("loss diagnostics must be a mapping")
 	if mode in PROJECTED_PI_MODES:
-		expected = {name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS}
+		schema = (
+			_RPA_SENSITIVE_LOSS_DIAGNOSTICS
+			if mode == "pi_rpa_sensitive_joint"
+			else _PROJECTED_PI_LOSS_DIAGNOSTICS
+		)
+		expected = {name for name, _ in schema}
 		if set(diagnostics) != expected:
 			raise ValueError(
 				f"{mode} loss diagnostics must contain exactly "
-				+ ", ".join(
-					name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS
-				)
+				+ ", ".join(name for name, _ in schema)
 			)
 		validated = {}
-		for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS:
+		for name, _ in schema:
 			value = diagnostics[name]
 			minimum = 1.0 if name == "max_projected_pi_condition" else 0.0
 			if (
@@ -158,6 +195,13 @@ def _validate_loss_diagnostics(diagnostics, mode):
 				or not math.isfinite(value)
 				or value < minimum
 				or (name == "projected_pi_rank_tolerance" and value >= 1.0)
+				or (
+					mode == "pi_rpa_sensitive_joint"
+					and name == "projected_pi_rank_tolerance"
+					and value <= 0.0
+				)
+				or (name == "alpha" and value > 1.0)
+				or (name == "family_power" and value != 4)
 			):
 				raise ValueError(
 					f"{name} diagnostic is outside the valid range"
@@ -382,7 +426,9 @@ def write_C(
 			for name, label in _component_schema(guarded_components, mode):
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
 			if diagnostics is not None:
-				if mode in PROJECTED_PI_MODES:
+				if mode == "pi_rpa_sensitive_joint":
+					diagnostic_schema = _RPA_SENSITIVE_LOSS_DIAGNOSTICS
+				elif mode in PROJECTED_PI_MODES:
 					diagnostic_schema = _PROJECTED_PI_LOSS_DIAGNOSTICS
 				else:
 					diagnostic_schema = _LOSS_DIAGNOSTICS

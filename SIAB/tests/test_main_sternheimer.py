@@ -1,5 +1,6 @@
 import contextlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -82,6 +83,71 @@ PROJECTED_PI_DIAGNOSTICS = {
     "lowest_projected_pi_frequency_ha": 0.0687,
     "lowest_projected_pi_loss": 0.19,
     "projected_pi_rank_tolerance": 1.0e-12,
+}
+
+RPA_SENSITIVE_SCALAR_DIAGNOSTICS = {
+    "alpha": 0.25,
+    "family_power": 4,
+    "initial_projected_pi_family_loss": 0.82,
+    "final_projected_pi_family_loss": 0.214,
+    "initial_projected_pi_h_loss": 0.4,
+    "final_projected_pi_h_loss": 0.12,
+    "projected_pi_h_total_loss": 0.12,
+    "projected_pi_h_base_loss": 0.10,
+    "projected_pi_h_sensitivity_loss": 0.126666666666,
+    "projected_pi_h_blend_loss": 0.12,
+    "projected_pi_h2_total_loss": 0.18,
+    "projected_pi_h2_base_loss": 0.16,
+    "projected_pi_h2_sensitivity_loss": 0.186666666666,
+    "projected_pi_h2_blend_loss": 0.18,
+    "max_projected_pi_condition": 5.0,
+    "projected_pi_rank_tolerance": 1.0e-12,
+}
+
+RPA_SENSITIVE_PROJECTED_PI_DIAGNOSTICS = {
+    "mode": "pi_rpa_sensitive_joint",
+    "alpha": 0.25,
+    "family_power": 4,
+    "initial_family_loss": 0.82,
+    "final_family_loss": 0.214,
+    "initial_h_loss": 0.4,
+    "final_h_loss": 0.12,
+    "frequency_ha": [0.1, 1.0],
+    "frequency_weight": [0.25, 0.75],
+    "frequency_total_loss": [0.17, 0.14],
+    "max_overlap_condition": 5.0,
+    "rank_tolerance": 1.0e-12,
+    "family_names": ["H", "H2"],
+    "families": {
+        "H": {
+            "total_loss": 0.12,
+            "base_loss": 0.10,
+            "sensitivity_loss": 0.126666666666,
+            "blend_loss": 0.12,
+            "reference_rank": 2,
+            "max_candidate_condition": 4.0,
+            "frequency_total_loss": [0.13, 0.11],
+            "frequency_base_loss": [0.10, 0.09],
+            "frequency_sensitivity_loss": [0.14, 0.116666666666],
+            "trace_log_difference": [0.01, -0.02],
+            "minimum_reference_dielectric_eigenvalue": [0.8, 0.9],
+            "minimum_candidate_dielectric_eigenvalue": [0.7, 0.85],
+        },
+        "H2": {
+            "total_loss": 0.18,
+            "base_loss": 0.16,
+            "sensitivity_loss": 0.186666666666,
+            "blend_loss": 0.18,
+            "reference_rank": 3,
+            "max_candidate_condition": 5.0,
+            "frequency_total_loss": [0.20, 0.16],
+            "frequency_base_loss": [0.18, 0.14],
+            "frequency_sensitivity_loss": [0.206666666666, 0.166666666666],
+            "trace_log_difference": [0.03, -0.04],
+            "minimum_reference_dielectric_eigenvalue": [0.75, 0.88],
+            "minimum_candidate_dielectric_eigenvalue": [0.65, 0.82],
+        },
+    },
 }
 
 
@@ -922,24 +988,69 @@ class MainRoutingTest(unittest.TestCase):
         family_results = {
             "H": types.SimpleNamespace(
                 loss=torch.tensor(0.12, dtype=torch.float64),
+                base_loss=torch.tensor(0.10, dtype=torch.float64),
+                sensitivity_loss=torch.tensor(
+                    0.126666666666, dtype=torch.float64
+                ),
                 reference_rank=2,
                 max_candidate_condition=4.0,
                 frequency_loss=torch.tensor(
                     [0.13, 0.11], dtype=torch.float64
                 ),
+                frequency_base_loss=torch.tensor(
+                    [0.10, 0.09], dtype=torch.float64
+                ),
+                frequency_sensitivity_loss=torch.tensor(
+                    [0.14, 0.116666666666], dtype=torch.float64
+                ),
+                trace_log_difference=torch.tensor(
+                    [0.01, -0.02], dtype=torch.float64
+                ),
+                minimum_reference_dielectric_eigenvalue=torch.tensor(
+                    [0.8, 0.9], dtype=torch.float64
+                ),
+                minimum_candidate_dielectric_eigenvalue=torch.tensor(
+                    [0.7, 0.85], dtype=torch.float64
+                ),
+                frequency_weight=torch.tensor(
+                    [0.25, 0.75], dtype=torch.float64
+                ),
                 sensitivity_alpha=0.25,
             ),
             "H2": types.SimpleNamespace(
                 loss=torch.tensor(0.18, dtype=torch.float64),
+                base_loss=torch.tensor(0.16, dtype=torch.float64),
+                sensitivity_loss=torch.tensor(
+                    0.186666666666, dtype=torch.float64
+                ),
                 reference_rank=3,
                 max_candidate_condition=5.0,
                 frequency_loss=torch.tensor(
                     [0.20, 0.16], dtype=torch.float64
                 ),
+                frequency_base_loss=torch.tensor(
+                    [0.18, 0.14], dtype=torch.float64
+                ),
+                frequency_sensitivity_loss=torch.tensor(
+                    [0.206666666666, 0.166666666666], dtype=torch.float64
+                ),
+                trace_log_difference=torch.tensor(
+                    [0.03, -0.04], dtype=torch.float64
+                ),
+                minimum_reference_dielectric_eigenvalue=torch.tensor(
+                    [0.75, 0.88], dtype=torch.float64
+                ),
+                minimum_candidate_dielectric_eigenvalue=torch.tensor(
+                    [0.65, 0.82], dtype=torch.float64
+                ),
+                frequency_weight=torch.tensor(
+                    [0.25, 0.75], dtype=torch.float64
+                ),
                 sensitivity_alpha=0.25,
             ),
         }
         result = types.SimpleNamespace(
+            loss=torch.tensor(0.214, dtype=torch.float64),
             frequency_ha=torch.tensor([0.1, 1.0], dtype=torch.float64),
             frequency_loss=torch.tensor([0.17, 0.14], dtype=torch.float64),
             lowest_frequency_ha=torch.tensor(0.1, dtype=torch.float64),
@@ -951,44 +1062,56 @@ class MainRoutingTest(unittest.TestCase):
         )
 
         diagnostics = siab_converge._projected_pi_diagnostics(
-            result, 1.0e-12
+            result,
+            1.0e-12,
+            {
+                "projected_pi_family": torch.tensor(0.82, dtype=torch.float64),
+                "projected_pi_h": torch.tensor(0.4, dtype=torch.float64),
+            },
         )
 
-        self.assertEqual(diagnostics["family_names"], ["H", "H2"])
         self.assertEqual(
             {
-                name: diagnostics.get(name)
-                for name in ("mode", "sensitivity_alpha", "family_power")
+                name: diagnostics[name]
+                for name in (
+                    "mode",
+                    "alpha",
+                    "family_power",
+                    "initial_family_loss",
+                    "final_family_loss",
+                    "initial_h_loss",
+                    "final_h_loss",
+                    "frequency_ha",
+                    "frequency_weight",
+                    "frequency_total_loss",
+                    "max_overlap_condition",
+                    "rank_tolerance",
+                    "family_names",
+                )
             },
             {
                 "mode": "pi_rpa_sensitive_joint",
-                "sensitivity_alpha": 0.25,
+                "alpha": 0.25,
                 "family_power": 4,
+                "initial_family_loss": 0.82,
+                "final_family_loss": 0.214,
+                "initial_h_loss": 0.4,
+                "final_h_loss": 0.12,
+                "frequency_ha": [0.1, 1.0],
+                "frequency_weight": [0.25, 0.75],
+                "frequency_total_loss": [0.17, 0.14],
+                "max_overlap_condition": 5.0,
+                "rank_tolerance": 1.0e-12,
+                "family_names": ["H", "H2"],
             },
         )
         self.assertEqual(
-            diagnostics["families"]["H"]["frequency_loss"],
-            [0.13, 0.11],
-        )
-        self.assertEqual(
-            diagnostics["families"]["H2"]["frequency_loss"],
-            [0.2, 0.16],
+            diagnostics["families"],
+            RPA_SENSITIVE_PROJECTED_PI_DIAGNOSTICS["families"],
         )
 
     def test_rpa_sensitive_routes_existing_projected_pi_metadata_hook(self):
-        projected_pi_diagnostics = {
-            "mode": "pi_rpa_sensitive_joint",
-            "frequency_ha": [0.1, 1.0],
-            "frequency_loss": [0.17, 0.14],
-            "lowest_frequency_ha": 0.1,
-            "lowest_frequency_loss": 0.17,
-            "max_condition": 5.0,
-            "rank_tolerance": 1.0e-12,
-            "family_names": ["H", "H2"],
-            "families": {"H": {"loss": 0.12}, "H2": {"loss": 0.18}},
-            "sensitivity_alpha": 0.25,
-            "family_power": 4,
-        }
+        projected_pi_diagnostics = RPA_SENSITIVE_PROJECTED_PI_DIAGNOSTICS
         data_transmit = {
             "C": {
                 "H": [torch.eye(2, dtype=torch.float64)]
@@ -1020,12 +1143,7 @@ class MainRoutingTest(unittest.TestCase):
             {
                 "metadata_calls": 1,
                 "mode": "pi_rpa_sensitive_joint",
-                "diagnostics": {
-                    "max_projected_pi_condition": 5.0,
-                    "lowest_projected_pi_frequency_ha": 0.1,
-                    "lowest_projected_pi_loss": 0.17,
-                    "projected_pi_rank_tolerance": 1.0e-12,
-                },
+                "diagnostics": RPA_SENSITIVE_SCALAR_DIAGNOSTICS,
             },
         )
         observed.metadata_writer.assert_called_once_with(
@@ -1175,6 +1293,47 @@ class MainRoutingTest(unittest.TestCase):
                 self.assertEqual(len(record["zero_order_audit_sha256"]), 64)
                 self.assertEqual(record["response_provenance"]["kernel"], "full_coulomb")
                 self.assertTrue(record["zero_order_identity"]["passed"])
+
+            rpa_output = root / "RPA_SENSITIVE_METADATA.json"
+            siab_main._write_projected_pi_metadata(
+                rpa_output,
+                targets,
+                {
+                    "loss_mode": "pi_rpa_sensitive_joint",
+                    "loss_components": PROJECTED_PI_COMPONENTS,
+                    "projected_pi_diagnostics": (
+                        RPA_SENSITIVE_PROJECTED_PI_DIAGNOSTICS
+                    ),
+                },
+            )
+            rpa_payload = json.loads(rpa_output.read_text())
+            self.assertEqual(rpa_payload["mode"], "pi_rpa_sensitive_joint")
+            self.assertEqual(
+                rpa_payload["projected_pi"],
+                RPA_SENSITIVE_PROJECTED_PI_DIAGNOSTICS,
+            )
+            self.assertEqual(
+                rpa_payload["projected_pi"]["families"]["H"][
+                    "frequency_total_loss"
+                ],
+                [0.13, 0.11],
+            )
+
+            def assert_json_finite(value):
+                if isinstance(value, float):
+                    self.assertTrue(math.isfinite(value))
+                elif isinstance(value, dict):
+                    for item in value.values():
+                        assert_json_finite(item)
+                elif isinstance(value, list):
+                    for item in value:
+                        assert_json_finite(item)
+                else:
+                    self.assertIsInstance(
+                        value, (str, int, bool, type(None))
+                    )
+
+            assert_json_finite(rpa_payload)
 
     def test_rejects_targets_without_a_physical_family(self):
         target = {
@@ -1330,12 +1489,73 @@ class WriteCoefficientMetadataTest(unittest.TestCase):
             positions = [text.index(line) for line in expected_lines]
             self.assertEqual(positions, sorted(positions))
             self.assertNotIn("Sternheimer loss =", text)
+            self.assertEqual(
+                text[text.index("<Mkb>") :],
+                "<Mkb>\n"
+                "Left spillage = 4.1400000000e-01\n"
+                "Mode = pi_dpsi_joint\n"
+                "DFT origin loss = 3.0000000000e-01\n"
+                "DFT dpsi loss = 2.0000000000e-01\n"
+                "Projected Pi loss = 2.1400000000e-01\n"
+                "dpsi regularization loss = 2.0000000000e-01\n"
+                "DFT constraint loss = 0.0000000000e+00\n"
+                "dpsi constraint loss = 0.0000000000e+00\n"
+                "Total loss = 4.1400000000e-01\n"
+                "Lowest projected Pi frequency (Ha) = 6.8700000000e-02\n"
+                "Lowest-frequency projected Pi loss = 1.9000000000e-01\n"
+                "Maximum projected Pi overlap condition = 5.5620000000e+03\n"
+                "Projected Pi rank tolerance = 1.0000000000e-12\n"
+                "</Mkb>\n",
+            )
 
             parsed, indices = read_C_init(
                 output, {"H": info(Nl=1, Ne=2, Nu=[2])}
             )
             torch.testing.assert_close(parsed["H"][0], self.c["H"][0])
             self.assertEqual(indices, {("H", 0, 0), ("H", 0, 1)})
+
+    def test_rpa_sensitive_metadata_uses_independent_scalar_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "rpa_sensitive.dat"
+            write_C(
+                output,
+                self.c,
+                PROJECTED_PI_COMPONENTS["total"],
+                loss_components=PROJECTED_PI_COMPONENTS,
+                mode="pi_rpa_sensitive_joint",
+                diagnostics=RPA_SENSITIVE_SCALAR_DIAGNOSTICS,
+            )
+            text = output.read_text()
+
+            expected_lines = (
+                "Mode = pi_rpa_sensitive_joint",
+                "Sensitivity alpha = 2.5000000000e-01",
+                "Family aggregation power = 4.0000000000e+00",
+                "Initial aggregate projected Pi family loss = 8.2000000000e-01",
+                "Final aggregate projected Pi family loss = 2.1400000000e-01",
+                "Initial H projected Pi loss = 4.0000000000e-01",
+                "Final H projected Pi loss = 1.2000000000e-01",
+                "H total projected Pi loss = 1.2000000000e-01",
+                "H base projected Pi loss = 1.0000000000e-01",
+                "H sensitivity projected Pi loss = 1.2666666667e-01",
+                "H blended projected Pi loss = 1.2000000000e-01",
+                "H2 total projected Pi loss = 1.8000000000e-01",
+                "H2 base projected Pi loss = 1.6000000000e-01",
+                "H2 sensitivity projected Pi loss = 1.8666666667e-01",
+                "H2 blended projected Pi loss = 1.8000000000e-01",
+                "Maximum projected Pi overlap condition = 5.0000000000e+00",
+                "Projected Pi rank tolerance = 1.0000000000e-12",
+            )
+            positions = [text.index(line) for line in expected_lines]
+            self.assertEqual(positions, sorted(positions))
+            for long_label in (
+                "frequency_ha",
+                "frequency_weight",
+                "trace_log_difference",
+                "dielectric eigenvalue",
+                "[",
+            ):
+                self.assertNotIn(long_label, text)
 
     def test_rejects_partial_or_mismatched_guarded_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,8 +1,11 @@
 import copy
 import io
 import json
+import math
 from pathlib import Path
+import re
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -112,6 +115,27 @@ def make_converge_case(mode=None, max_steps=8, freeze_specs=None):
     return converge, c
 
 
+def make_rpa_sensitive_converge(max_steps=2):
+    converge, c = make_converge_case(
+        "pi_dpsi_joint",
+        max_steps=max_steps,
+        freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+    )
+    converge.info_optimize[0]["loss"] = normalize_loss_config(
+        {
+            "mode": "pi_rpa_sensitive_joint",
+            "projected_pi_rank_tolerance": 1.0e-12,
+            "projected_pi_sensitivity_alpha": 0.25,
+            "joint_dpsi_weight": 0.0,
+            "tau_dft": 1.0e6,
+            "tau_dpsi": 1.0e6,
+            "constraint_penalty_dft": 0.0,
+            "constraint_penalty_dpsi": 0.0,
+        }
+    )
+    return converge, c
+
+
 def make_single_orbital_converge(max_steps=11):
     info_stru = [info(Na={"H": 1}, Nb_true=1, weight=torch.tensor([1.0]))]
     info_element = {"H": info(Nl=1, Ne=2, Nu=[1])}
@@ -191,6 +215,87 @@ class QuadraticProjectedPi:
             frequency_loss=frequency_loss,
             family_results={"H": object(), "H2": object()},
         )
+
+
+class CheckpointRpaSensitiveProjectedPi:
+    def __init__(self, near_zero=False, legacy=False):
+        self.near_zero = near_zero
+        self.legacy = legacy
+
+    @staticmethod
+    def _family(loss, condition):
+        base = 0.8 * loss
+        sensitivity = (loss - 0.25 * base) / 0.75
+        return types.SimpleNamespace(
+            loss=loss,
+            base_loss=base,
+            sensitivity_loss=sensitivity,
+            frequency_loss=torch.stack((loss, 0.5 * loss)),
+            frequency_base_loss=torch.stack((base, 0.5 * base)),
+            frequency_sensitivity_loss=torch.stack(
+                (sensitivity, 0.5 * sensitivity)
+            ),
+            trace_log_difference=torch.stack((0.1 * loss, -0.1 * loss)),
+            minimum_reference_dielectric_eigenvalue=torch.stack(
+                (torch.ones_like(loss), 1.1 * torch.ones_like(loss))
+            ),
+            minimum_candidate_dielectric_eigenvalue=torch.stack(
+                (0.9 * torch.ones_like(loss), torch.ones_like(loss))
+            ),
+            frequency_weight=torch.tensor(
+                [0.25, 0.75], dtype=loss.dtype, device=loss.device
+            ),
+            reference_rank=2,
+            max_candidate_condition=condition,
+            sensitivity_alpha=0.25,
+        )
+
+    def evaluate(self, c):
+        x = c["H"][0][0, 1]
+        if self.near_zero:
+            h_loss = x.square()
+            h2_loss = x.square()
+            condition = 100.0 if float(x) == 0.0 else 1.0
+        else:
+            h_loss = -0.2 * x.square() + 0.3 * x + 0.4
+            h2_loss = 0.35 * x.square() - 0.95 * x + 0.8
+            condition = 3.0
+        family_results = {
+            "H": self._family(h_loss, condition),
+            "H2": self._family(h2_loss, condition),
+        }
+        family_loss = torch.linalg.vector_norm(
+            torch.stack((h_loss, h2_loss)), ord=4
+        )
+        return ProjectedPiOptimizationResult(
+            loss=family_loss,
+            max_condition=condition,
+            frequency_ha=torch.tensor(
+                [0.1, 1.0], dtype=x.dtype, device=x.device
+            ),
+            frequency_loss=(
+                family_results["H"].frequency_loss
+                + family_results["H2"].frequency_loss
+            )
+            / 2.0,
+            family_results=family_results,
+            sensitivity_alpha=None if self.legacy else 0.25,
+            family_power=None if self.legacy else 4,
+        )
+
+
+class ScriptedCandidateStep:
+    def __init__(self, c, values):
+        self.c = c
+        self.values = iter(values)
+
+    def zero_grad(self):
+        self.c["H"][0].grad = None
+
+    def step(self, closure):
+        closure()
+        with torch.no_grad():
+            self.c["H"][0][0, 1] = next(self.values)
 
 
 class SingleOrbitalSternheimer:
@@ -993,6 +1098,155 @@ class ConvergeIntegrationTest(unittest.TestCase):
         self.assertEqual(
             result["projected_pi_diagnostics"]["family_names"], ["H", "H2"]
         )
+
+    def test_rpa_sensitive_requires_atom_and_family_improvement(self):
+        converge, c = make_rpa_sensitive_converge(max_steps=2)
+        evaluator = CheckpointRpaSensitiveProjectedPi()
+        converge.set_projected_pi_objective(evaluator)
+        fixed_before = c["H"][0][:, 0].detach().clone()
+        files = self.files()
+
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=ScriptedCandidateStep(c, [1.0, 2.0]),
+        ):
+            result = converge.cal_converge(c, files)
+
+        header = files[1].getvalue().splitlines()[0].split("\t")
+        self.assertEqual(
+            header,
+            [
+                "istep_big",
+                "istep_small",
+                "istep_all",
+                "dft_origin",
+                "dft_dpsi",
+                "projected_pi_family",
+                "projected_pi_h_total",
+                "projected_pi_h_base",
+                "projected_pi_h_sensitivity",
+                "projected_pi_h_blend",
+                "projected_pi_h2_total",
+                "projected_pi_h2_base",
+                "projected_pi_h2_sensitivity",
+                "projected_pi_h2_blend",
+                "regularization_dpsi",
+                "constraint_dft",
+                "constraint_dpsi",
+                "total",
+                "family_improved",
+                "atom_improved",
+                "max_projected_pi_condition",
+                "accepted",
+            ],
+        )
+        rows = [
+            dict(zip(header, line.split("\t")))
+            for line in files[1].getvalue().splitlines()[1:]
+        ]
+        self.assertEqual(
+            [row["accepted"] for row in rows], ["false", "false", "true"]
+        )
+        self.assertEqual(
+            [row["family_improved"] for row in rows],
+            ["false", "true", "true"],
+        )
+        self.assertEqual(
+            [row["atom_improved"] for row in rows],
+            ["false", "false", "true"],
+        )
+        self.assertLess(
+            float(rows[1]["projected_pi_family"]),
+            float(rows[0]["projected_pi_family"]),
+        )
+        self.assertGreater(
+            float(rows[1]["projected_pi_h_total"]),
+            float(rows[0]["projected_pi_h_total"]),
+        )
+        self.assertEqual(result["C"]["H"][0][0, 1].item(), 2.0)
+        self.assertTrue(torch.equal(result["C"]["H"][0][:, 0], fixed_before))
+        self.assertTrue(torch.equal(c["H"][0][:, 0], fixed_before))
+        self.assertAlmostEqual(
+            result["loss_baseline"]["projected_pi_family"],
+            evaluator.evaluate({"H": [torch.eye(2, dtype=torch.float64)]}).loss.item(),
+        )
+        self.assertEqual(
+            result["projected_pi_diagnostics"]["initial_h_loss"], 0.4
+        )
+        self.assertAlmostEqual(
+            result["projected_pi_diagnostics"]["final_h_loss"], 0.2
+        )
+        for long_name in (
+            "frequency_ha",
+            "frequency_weight",
+            "trace_log_difference",
+            "dielectric_eigenvalue",
+        ):
+            self.assertNotIn(long_name, header)
+
+    def test_pi_dpsi_joint_acceptance_and_selection_remain_unchanged(self):
+        converge, c = make_converge_case(
+            "pi_dpsi_joint",
+            max_steps=1,
+            freeze_specs=[{"element": "H", "l": 0, "zeta": 1}],
+        )
+        converge.info_optimize[0]["loss"].update(
+            {
+                "joint_dpsi_weight": 0.0,
+                "tau_dft": 1.0e6,
+                "tau_dpsi": 1.0e6,
+                "constraint_penalty_dft": 0.0,
+                "constraint_penalty_dpsi": 0.0,
+            }
+        )
+        converge.set_projected_pi_objective(
+            CheckpointRpaSensitiveProjectedPi(legacy=True)
+        )
+        files = self.files()
+
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=ScriptedCandidateStep(c, [1.0]),
+        ):
+            result = converge.cal_converge(c, files)
+
+        rows = [
+            line.split("\t")
+            for line in files[1].getvalue().splitlines()[1:]
+        ]
+        self.assertEqual([row[-1] for row in rows], ["true", "true"])
+        self.assertEqual(result["C"]["H"][0][0, 1].item(), 1.0)
+        self.assertEqual(
+            files[1].getvalue().splitlines()[0],
+            "istep_big\tistep_small\tistep_all\tdft_origin\tdft_dpsi\t"
+            "projected_pi\tprojected_pi_lowest_frequency\t"
+            "regularization_dpsi\tconstraint_dft\tconstraint_dpsi\t"
+            "total\tmax_projected_pi_condition\taccepted",
+        )
+
+    def test_rpa_sensitive_fatal_violation_is_finite_near_zero_baseline(self):
+        converge, c = make_rpa_sensitive_converge(max_steps=1)
+        converge.info_optimize[0]["loss"]["condition_limit"] = 1.5
+        converge.set_projected_pi_objective(
+            CheckpointRpaSensitiveProjectedPi(near_zero=True)
+        )
+
+        with mock.patch(
+            "opt_orbital_converge.optimize.get_optim",
+            return_value=ScriptedCandidateStep(c, [1.0e-7]),
+        ):
+            with self.assertRaises(RuntimeError) as context:
+                converge.cal_converge(c, self.files())
+
+        message = str(context.exception)
+        self.assertNotIn("inf", message.lower())
+        match = re.search(
+            r"atom=([0-9.eE+-]+), family=([0-9.eE+-]+)", message
+        )
+        self.assertIsNotNone(match)
+        values = [float(value) for value in match.groups()]
+        self.assertTrue(all(math.isfinite(value) for value in values))
+        self.assertTrue(all(value >= 0.0 for value in values))
 
     def test_low_frequency_guard_rejects_regressed_candidate(self):
         converge, c = make_converge_case("st_only", max_steps=1)

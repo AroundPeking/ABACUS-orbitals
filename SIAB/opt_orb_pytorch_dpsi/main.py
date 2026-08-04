@@ -99,7 +99,7 @@ def _write_projected_pi_metadata(path, targets, data_transmit):
 		"uses_ghost_family": False,
 	}
 	Path(path).write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + "\n",
+		json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
 		encoding="utf-8",
 	)
 
@@ -580,7 +580,41 @@ def main():
 
 	loss_diagnostics = None
 	if "loss_components" in data_transmit:
-		if data_transmit.get("loss_mode") in PROJECTED_PI_MODES:
+		if data_transmit.get("loss_mode") == "pi_rpa_sensitive_joint":
+			pi_diagnostics = data_transmit["projected_pi_diagnostics"]
+			h = pi_diagnostics["families"]["H"]
+			h2 = pi_diagnostics["families"]["H2"]
+			loss_diagnostics = {
+				"alpha": pi_diagnostics["alpha"],
+				"family_power": pi_diagnostics["family_power"],
+				"initial_projected_pi_family_loss": pi_diagnostics[
+					"initial_family_loss"
+				],
+				"final_projected_pi_family_loss": pi_diagnostics[
+					"final_family_loss"
+				],
+				"initial_projected_pi_h_loss": pi_diagnostics[
+					"initial_h_loss"
+				],
+				"final_projected_pi_h_loss": pi_diagnostics["final_h_loss"],
+				"projected_pi_h_total_loss": h["total_loss"],
+				"projected_pi_h_base_loss": h["base_loss"],
+				"projected_pi_h_sensitivity_loss": h["sensitivity_loss"],
+				"projected_pi_h_blend_loss": h["blend_loss"],
+				"projected_pi_h2_total_loss": h2["total_loss"],
+				"projected_pi_h2_base_loss": h2["base_loss"],
+				"projected_pi_h2_sensitivity_loss": h2[
+					"sensitivity_loss"
+				],
+				"projected_pi_h2_blend_loss": h2["blend_loss"],
+				"max_projected_pi_condition": pi_diagnostics[
+					"max_overlap_condition"
+				],
+				"projected_pi_rank_tolerance": pi_diagnostics[
+					"rank_tolerance"
+				],
+			}
+		elif data_transmit.get("loss_mode") == "pi_dpsi_joint":
 			pi_diagnostics = data_transmit["projected_pi_diagnostics"]
 			loss_diagnostics = {
 				"max_projected_pi_condition": data_transmit[

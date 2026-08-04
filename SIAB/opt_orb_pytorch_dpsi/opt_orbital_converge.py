@@ -20,7 +20,93 @@ import torch
 import numpy as np
 
 
-def _projected_pi_diagnostics(result, rank_tolerance):
+def _finite_float(name, value):
+	value = float(value)
+	if not math.isfinite(value):
+		raise ValueError(f"{name} must be finite")
+	return value
+
+
+def _finite_list(name, values):
+	return [
+		_finite_float(f"{name}[{index}]", value)
+		for index, value in enumerate(values)
+	]
+
+
+def _projected_pi_diagnostics(result, rank_tolerance, loss_baseline=None):
+	if getattr(result, "sensitivity_alpha", None) is not None:
+		if not isinstance(loss_baseline, dict):
+			raise ValueError("RPA-sensitive diagnostics require loss baselines")
+		for name in ("projected_pi_family", "projected_pi_h"):
+			if name not in loss_baseline:
+				raise ValueError(
+					f"RPA-sensitive diagnostics require {name} baseline"
+				)
+		families = {}
+		for name, family in result.family_results.items():
+			families[name] = {
+				"total_loss": _finite_float(f"{name} total loss", family.loss),
+				"base_loss": _finite_float(f"{name} base loss", family.base_loss),
+				"sensitivity_loss": _finite_float(
+					f"{name} sensitivity loss", family.sensitivity_loss
+				),
+				"blend_loss": _finite_float(f"{name} blend loss", family.loss),
+				"reference_rank": int(family.reference_rank),
+				"max_candidate_condition": _finite_float(
+					f"{name} maximum candidate condition",
+					family.max_candidate_condition,
+				),
+				"frequency_total_loss": _finite_list(
+					f"{name} frequency total loss", family.frequency_loss
+				),
+				"frequency_base_loss": _finite_list(
+					f"{name} frequency base loss", family.frequency_base_loss
+				),
+				"frequency_sensitivity_loss": _finite_list(
+					f"{name} frequency sensitivity loss",
+					family.frequency_sensitivity_loss,
+				),
+				"trace_log_difference": _finite_list(
+					f"{name} trace-log difference", family.trace_log_difference
+				),
+				"minimum_reference_dielectric_eigenvalue": _finite_list(
+					f"{name} minimum reference dielectric eigenvalue",
+					family.minimum_reference_dielectric_eigenvalue,
+				),
+				"minimum_candidate_dielectric_eigenvalue": _finite_list(
+					f"{name} minimum candidate dielectric eigenvalue",
+					family.minimum_candidate_dielectric_eigenvalue,
+				),
+			}
+		h_family = result.family_results["H"]
+		return {
+			"mode": "pi_rpa_sensitive_joint",
+			"alpha": _finite_float("sensitivity alpha", result.sensitivity_alpha),
+			"family_power": int(result.family_power),
+			"initial_family_loss": _finite_float(
+				"initial family loss", loss_baseline["projected_pi_family"]
+			),
+			"final_family_loss": _finite_float("final family loss", result.loss),
+			"initial_h_loss": _finite_float(
+				"initial H loss", loss_baseline["projected_pi_h"]
+			),
+			"final_h_loss": _finite_float("final H loss", h_family.loss),
+			"frequency_ha": _finite_list("frequency", result.frequency_ha),
+			"frequency_weight": _finite_list(
+				"frequency weight", h_family.frequency_weight
+			),
+			"frequency_total_loss": _finite_list(
+				"frequency total loss", result.frequency_loss
+			),
+			"max_overlap_condition": _finite_float(
+				"maximum overlap condition", result.max_condition
+			),
+			"rank_tolerance": _finite_float("rank tolerance", rank_tolerance),
+			"family_names": list(result.family_results),
+			"families": families,
+		}
+
 	families = {}
 	for name, family in result.family_results.items():
 		record = {}
@@ -47,14 +133,6 @@ def _projected_pi_diagnostics(result, rank_tolerance):
 		"family_names": list(result.family_results),
 		"families": families,
 	}
-	if getattr(result, "sensitivity_alpha", None) is not None:
-		diagnostics.update(
-			{
-				"mode": "pi_rpa_sensitive_joint",
-				"sensitivity_alpha": float(result.sensitivity_alpha),
-				"family_power": int(result.family_power),
-			}
-		)
 	return diagnostics
 
 
@@ -190,11 +268,23 @@ class Opt_Orbital_Converge:
 					"dft_origin": baseline_components["dft_origin"].detach().clone(),
 					"dft_dpsi": baseline_components["dft_dpsi"].detach().clone(),
 				}
-				if loss_config["low_frequency_guard_weight"] > 0.0:
+				baseline_st = None
+				if (
+					loss_config["low_frequency_guard_weight"] > 0.0
+					or loss_config["mode"] == "pi_rpa_sensitive_joint"
+				):
 					baseline_st = evaluator.evaluate(C_initial)
+				if loss_config["low_frequency_guard_weight"] > 0.0:
 					loss_baselines[stage_index][
 						"sternheimer_lowest_frequency"
 					] = baseline_st.lowest_frequency_loss.detach().clone()
+				if loss_config["mode"] == "pi_rpa_sensitive_joint":
+					loss_baselines[stage_index]["projected_pi_family"] = (
+						baseline_st.loss.detach().clone()
+					)
+					loss_baselines[stage_index]["projected_pi_h"] = (
+						baseline_st.family_results["H"].loss.detach().clone()
+					)
 
 		best_accepted = None
 		best_violation = None
@@ -221,6 +311,17 @@ class Opt_Orbital_Converge:
 			"constraint_dft", "constraint_dpsi", "total",
 			"max_projected_pi_condition", "accepted",
 		)
+		rpa_sensitive_header = (
+			"istep_big", "istep_small", "istep_all", "dft_origin",
+			"dft_dpsi", "projected_pi_family", "projected_pi_h_total",
+			"projected_pi_h_base", "projected_pi_h_sensitivity",
+			"projected_pi_h_blend", "projected_pi_h2_total",
+			"projected_pi_h2_base", "projected_pi_h2_sensitivity",
+			"projected_pi_h2_blend", "regularization_dpsi",
+			"constraint_dft", "constraint_dpsi", "total",
+			"family_improved", "atom_improved",
+			"max_projected_pi_condition", "accepted",
+		)
 		legacy_header = ("istep_big", "istep_small", "istep_all", "Spillage")
 
 		for stage_index, info_opt in enumerate(self.info_optimize):
@@ -228,6 +329,11 @@ class Opt_Orbital_Converge:
 			pi_mode = (
 				new_loss_stage
 				and _is_projected_pi_mode(loss_configs[stage_index]["mode"])
+			)
+			rpa_sensitive_mode = (
+				new_loss_stage
+				and loss_configs[stage_index]["mode"]
+				== "pi_rpa_sensitive_joint"
 			)
 			guard_active = (
 				new_loss_stage
@@ -238,7 +344,9 @@ class Opt_Orbital_Converge:
 			if new_loss_stage:
 				print(
 					*(
-						projected_pi_header
+						rpa_sensitive_header
+						if rpa_sensitive_mode
+						else projected_pi_header
 						if pi_mode
 						else guarded_header if guard_active else new_header
 					),
@@ -335,164 +443,233 @@ class Opt_Orbital_Converge:
 							locality_result,
 							components,
 						) = calculate_components()
-					constraints_ok = (
-						loss_config["mode"] == "st_only"
-						or constraints_satisfied(
-							legacy_components["dft_origin"],
-							legacy_components["dft_dpsi"],
+						constraints_ok = (
+							loss_config["mode"] == "st_only"
+							or constraints_satisfied(
+								legacy_components["dft_origin"],
+								legacy_components["dft_dpsi"],
+								loss_baseline,
+								loss_config,
+							)
+						)
+						condition_ok = (
+							st_result.max_condition <= loss_config["condition_limit"]
+						)
+						locality_condition_ok = (
+							locality_result.max_condition
+							<= loss_config["radial_tail_condition_limit"]
+						)
+						low_frequency_ok = low_frequency_guard_satisfied(
+							(
+								st_result.lowest_frequency_loss
+								if guard_active
+								else st_result.loss
+							),
 							loss_baseline,
 							loss_config,
 						)
-					)
-					condition_ok = (
-						st_result.max_condition <= loss_config["condition_limit"]
-					)
-					locality_condition_ok = (
-						locality_result.max_condition
-						<= loss_config["radial_tail_condition_limit"]
-					)
-					low_frequency_ok = low_frequency_guard_satisfied(
-						(
-							st_result.lowest_frequency_loss
-							if guard_active
-							else st_result.loss
-						),
-						loss_baseline,
-						loss_config,
-					)
-					accepted = (
-						constraints_ok
-						and condition_ok
-						and locality_condition_ok
-						and low_frequency_ok
-					)
+						if rpa_sensitive_mode:
+							family_improved = bool(
+								st_result.loss
+								< loss_baseline["projected_pi_family"]
+							)
+							atom_improved = bool(
+								st_result.family_results["H"].loss
+								< loss_baseline["projected_pi_h"]
+							)
+						else:
+							family_improved = True
+							atom_improved = True
+						accepted = (
+							constraints_ok
+							and condition_ok
+							and locality_condition_ok
+							and low_frequency_ok
+							and family_improved
+							and atom_improved
+						)
 
-					baseline_dft = max(
-						loss_baseline["dft_origin"].item(), loss_config["epsilon"]
-					)
-					baseline_dpsi = max(
-						loss_baseline["dft_dpsi"].item(), loss_config["epsilon"]
-					)
-					dft_violation = max(
-						0.0,
-						legacy_components["dft_origin"].item() / baseline_dft
-						- 1.0 - loss_config["tau_dft"],
-					)
-					dpsi_violation = max(
-						0.0,
-						legacy_components["dft_dpsi"].item() / baseline_dpsi
-						- 1.0 - loss_config["tau_dpsi"],
-					)
-					condition_violation = max(
-						0.0,
-						st_result.max_condition / loss_config["condition_limit"] - 1.0,
-					)
-					locality_condition_violation = max(
-						0.0,
-						locality_result.max_condition
-						/ loss_config["radial_tail_condition_limit"]
-						- 1.0,
-					)
-					if guard_active:
-						baseline_low_frequency = loss_baseline[
-							"sternheimer_lowest_frequency"
-						].item()
-						low_frequency_violation = max(
+						baseline_dft = max(
+							loss_baseline["dft_origin"].item(), loss_config["epsilon"]
+						)
+						baseline_dpsi = max(
+							loss_baseline["dft_dpsi"].item(), loss_config["epsilon"]
+						)
+						dft_violation = max(
 							0.0,
-							st_result.lowest_frequency_loss.item()
-							/ baseline_low_frequency
-							- 1.0
-							- loss_config["low_frequency_guard_tolerance"],
+							legacy_components["dft_origin"].item() / baseline_dft
+							- 1.0 - loss_config["tau_dft"],
 						)
-					else:
-						low_frequency_violation = 0.0
-					violation_key = (
-						max(
-							dft_violation,
-							dpsi_violation,
-							condition_violation,
-							locality_condition_violation,
-							low_frequency_violation,
-						),
-						(
-							dft_violation
-							+ dpsi_violation
-							+ condition_violation
-							+ locality_condition_violation
-							+ low_frequency_violation
-						),
-					)
-					if best_violation is None or violation_key < best_violation["key"]:
-						best_violation = {
-							"key": violation_key,
-							"dft": dft_violation,
-							"dpsi": dpsi_violation,
-							"condition": condition_violation,
-							"locality_condition": locality_condition_violation,
-							"low_frequency": low_frequency_violation,
-							"max_st_condition": st_result.max_condition,
-							"condition_limit": loss_config["condition_limit"],
-							"max_locality_condition": locality_result.max_condition,
-							"locality_condition_limit": (
-								loss_config["radial_tail_condition_limit"]
+						dpsi_violation = max(
+							0.0,
+							legacy_components["dft_dpsi"].item() / baseline_dpsi
+							- 1.0 - loss_config["tau_dpsi"],
+						)
+						condition_violation = max(
+							0.0,
+							st_result.max_condition / loss_config["condition_limit"] - 1.0,
+						)
+						locality_condition_violation = max(
+							0.0,
+							locality_result.max_condition
+							/ loss_config["radial_tail_condition_limit"]
+							- 1.0,
+						)
+						if guard_active:
+							baseline_low_frequency = loss_baseline[
+								"sternheimer_lowest_frequency"
+							].item()
+							low_frequency_violation = max(
+								0.0,
+								st_result.lowest_frequency_loss.item()
+								/ baseline_low_frequency
+								- 1.0
+								- loss_config["low_frequency_guard_tolerance"],
+							)
+						else:
+							low_frequency_violation = 0.0
+						if rpa_sensitive_mode:
+							baseline_family = loss_baseline[
+								"projected_pi_family"
+							].item()
+							baseline_h = loss_baseline["projected_pi_h"].item()
+							family_violation = max(
+								0.0,
+								(st_result.loss.item() - baseline_family)
+								/ max(baseline_family, loss_config["epsilon"]),
+							)
+							atom_violation = max(
+								0.0,
+								(
+									st_result.family_results["H"].loss.item()
+									- baseline_h
+								)
+								/ max(baseline_h, loss_config["epsilon"]),
+							)
+						else:
+							family_violation = 0.0
+							atom_violation = 0.0
+						violation_key = (
+							max(
+								dft_violation,
+								dpsi_violation,
+								condition_violation,
+								locality_condition_violation,
+								low_frequency_violation,
+								family_violation,
+								atom_violation,
 							),
-						}
-
-					row = [
-						istep_big,
-						closure_count,
-						data_transmit["istep_all"],
-						components["dft_origin"].item(),
-						components["dft_dpsi"].item(),
-						components[
-							"projected_pi" if pi_mode else "sternheimer"
-						].item(),
-					]
-					if pi_mode:
-						row.append(st_result.lowest_frequency_loss.item())
-					elif guard_active:
-						row.extend(
-							[
-								components[
-									"sternheimer_lowest_frequency"
-								].item(),
-								components[
-									"regularization_low_frequency"
-								].item(),
-							]
+							(
+								dft_violation
+								+ dpsi_violation
+								+ condition_violation
+								+ locality_condition_violation
+								+ low_frequency_violation
+								+ family_violation
+								+ atom_violation
+							),
 						)
-					row.extend(
-						[
-							components["regularization_dpsi"].item(),
-							components["constraint_dft"].item(),
-							components["constraint_dpsi"].item(),
-							components["total"].item(),
+						if best_violation is None or violation_key < best_violation["key"]:
+							best_violation = {
+								"key": violation_key,
+								"dft": dft_violation,
+								"dpsi": dpsi_violation,
+								"atom": atom_violation,
+								"family": family_violation,
+								"condition": condition_violation,
+								"locality_condition": locality_condition_violation,
+								"low_frequency": low_frequency_violation,
+								"max_st_condition": st_result.max_condition,
+								"condition_limit": loss_config["condition_limit"],
+								"max_locality_condition": locality_result.max_condition,
+								"locality_condition_limit": (
+									loss_config["radial_tail_condition_limit"]
+								),
+							}
+
+						row = [
+							istep_big,
+							closure_count,
+							data_transmit["istep_all"],
+							components["dft_origin"].item(),
+							components["dft_dpsi"].item(),
 						]
-					)
-					if pi_mode:
-						row.extend(
-							[st_result.max_condition, str(accepted).lower()]
-						)
-					else:
+						if rpa_sensitive_mode:
+							h = st_result.family_results["H"]
+							h2 = st_result.family_results["H2"]
+							row.extend(
+								[
+									components["projected_pi"].item(),
+									h.loss.item(),
+									h.base_loss.item(),
+									h.sensitivity_loss.item(),
+									h.loss.item(),
+									h2.loss.item(),
+									h2.base_loss.item(),
+									h2.sensitivity_loss.item(),
+									h2.loss.item(),
+								]
+							)
+						else:
+							row.append(
+								components[
+									"projected_pi" if pi_mode else "sternheimer"
+								].item()
+							)
+						if pi_mode and not rpa_sensitive_mode:
+							row.append(st_result.lowest_frequency_loss.item())
+						elif guard_active:
+							row.extend(
+								[
+									components[
+										"sternheimer_lowest_frequency"
+									].item(),
+									components[
+										"regularization_low_frequency"
+									].item(),
+								]
+							)
 						row.extend(
 							[
-								components["radial_tail"].item(),
-								components["regularization_locality"].item(),
-								st_result.max_condition,
-								locality_result.max_condition,
-								str(accepted).lower(),
+								components["regularization_dpsi"].item(),
+								components["constraint_dft"].item(),
+								components["constraint_dpsi"].item(),
+								components["total"].item(),
 							]
 						)
-					print(*row, sep="\t", file=files[1])
-					data_transmit["istep_all"] += 1
-					data_transmit.update(
-						{
-							"Loss": components["total"].item(),
-							"Spillage": components["total"].item(),
-						}
-					)
+						if rpa_sensitive_mode:
+							row.extend(
+								[
+									str(family_improved).lower(),
+									str(atom_improved).lower(),
+									st_result.max_condition,
+									str(accepted).lower(),
+								]
+							)
+						elif pi_mode:
+							row.extend(
+								[st_result.max_condition, str(accepted).lower()]
+							)
+						else:
+							row.extend(
+								[
+									components["radial_tail"].item(),
+									components["regularization_locality"].item(),
+									st_result.max_condition,
+									locality_result.max_condition,
+									str(accepted).lower(),
+								]
+							)
+						print(*row, sep="\t", file=files[1])
+						data_transmit["istep_all"] += 1
+						data_transmit.update(
+							{
+								"Loss": components["total"].item(),
+								"Spillage": components["total"].item(),
+							}
+						)
 
-					selection_name = selection_component(loss_config["mode"])
+						selection_name = selection_component(loss_config["mode"])
 					if accepted and (
 						best_accepted is None
 						or components[selection_name].item()
@@ -518,6 +695,7 @@ class Opt_Orbital_Converge:
 									loss_config[
 										"projected_pi_rank_tolerance"
 									],
+									loss_baseline if rpa_sensitive_mode else None,
 								)
 							)
 						else:
@@ -651,9 +829,11 @@ class Opt_Orbital_Converge:
 				raise RuntimeError(
 					"no accepted Sternheimer optimization point; smallest observed "
 					"violation candidate: "
-					f"dft={best_violation['dft']:.8g}, "
-					f"dpsi={best_violation['dpsi']:.8g}, "
-					f"low_frequency={best_violation['low_frequency']:.8g}, "
+						f"dft={best_violation['dft']:.8g}, "
+						f"dpsi={best_violation['dpsi']:.8g}, "
+						f"atom={best_violation['atom']:.8g}, "
+						f"family={best_violation['family']:.8g}, "
+						f"low_frequency={best_violation['low_frequency']:.8g}, "
 					f"condition={best_violation['condition']:.8g}; "
 					f"locality_condition={best_violation['locality_condition']:.8g}; "
 					f"max_st_condition={best_violation['max_st_condition']:.8g}, "

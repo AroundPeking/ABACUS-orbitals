@@ -34,6 +34,25 @@ PROJECTED_PI_DIAGNOSTICS = {
     "projected_pi_rank_tolerance": 1.0e-12,
 }
 
+RPA_SENSITIVE_DIAGNOSTICS = {
+    "alpha": 0.25,
+    "family_power": 4,
+    "initial_projected_pi_family_loss": 0.82,
+    "final_projected_pi_family_loss": 0.214,
+    "initial_projected_pi_h_loss": 0.4,
+    "final_projected_pi_h_loss": 0.12,
+    "projected_pi_h_total_loss": 0.12,
+    "projected_pi_h_base_loss": 0.10,
+    "projected_pi_h_sensitivity_loss": 0.126666666666,
+    "projected_pi_h_blend_loss": 0.12,
+    "projected_pi_h2_total_loss": 0.18,
+    "projected_pi_h2_base_loss": 0.16,
+    "projected_pi_h2_sensitivity_loss": 0.186666666666,
+    "projected_pi_h2_blend_loss": 0.18,
+    "max_projected_pi_condition": 5.0,
+    "projected_pi_rank_tolerance": 1.0e-12,
+}
+
 
 def provenance():
     return {
@@ -821,7 +840,7 @@ class ProjectedPiTest(unittest.TestCase):
 
 
 class ProjectedPiWriterRoutingTest(unittest.TestCase):
-    def test_rpa_sensitive_writer_reuses_projected_pi_schema(self):
+    def test_rpa_sensitive_writer_uses_independent_scalar_schema(self):
         coefficient = {
             "H": [
                 torch.tensor(
@@ -833,30 +852,31 @@ class ProjectedPiWriterRoutingTest(unittest.TestCase):
             path = Path(directory)
             legacy_output = path / "pi_dpsi_joint.dat"
             sensitive_output = path / "pi_rpa_sensitive_joint.dat"
-            writer_options = {
-                "loss_components": PROJECTED_PI_COMPONENTS,
-                "diagnostics": PROJECTED_PI_DIAGNOSTICS,
-            }
             write_C(
                 legacy_output,
                 coefficient,
                 PROJECTED_PI_COMPONENTS["total"],
                 mode="pi_dpsi_joint",
-                **writer_options,
+                loss_components=PROJECTED_PI_COMPONENTS,
+                diagnostics=PROJECTED_PI_DIAGNOSTICS,
             )
             write_C(
                 sensitive_output,
                 coefficient,
                 PROJECTED_PI_COMPONENTS["total"],
                 mode="pi_rpa_sensitive_joint",
-                **writer_options,
+                loss_components=PROJECTED_PI_COMPONENTS,
+                diagnostics=RPA_SENSITIVE_DIAGNOSTICS,
             )
 
-            expected = legacy_output.read_text().replace(
-                "Mode = pi_dpsi_joint",
-                "Mode = pi_rpa_sensitive_joint",
-            )
-            self.assertEqual(sensitive_output.read_text(), expected)
+            legacy_text = legacy_output.read_text()
+            sensitive_text = sensitive_output.read_text()
+            self.assertIn("Lowest projected Pi frequency (Ha) =", legacy_text)
+            self.assertNotIn("Sensitivity alpha =", legacy_text)
+            self.assertIn("Sensitivity alpha = 2.5000000000e-01", sensitive_text)
+            self.assertIn("Family aggregation power = 4.0000000000e+00", sensitive_text)
+            self.assertNotIn("Lowest projected Pi frequency (Ha) =", sensitive_text)
+            self.assertNotEqual(sensitive_text, legacy_text)
 
 
 if __name__ == "__main__":
