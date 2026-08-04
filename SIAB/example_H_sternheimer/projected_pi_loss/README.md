@@ -1078,3 +1078,93 @@ has been produced.
 A fresh pre-commit verification on the same five matching production-file
 hashes reported `Ran 126 tests in 1.056s`, `Ran 101 tests in 0.859s`, and
 `Ran 355 tests in 24.329s`; all three commands exited zero with `OK`.
+
+### Task 4 specification-review fix: real projected-Pi writer (2026-08-04)
+
+The Task 4 specification review found a P1 integration gap. The main-path test
+mocked `IO.func_C.write_C`, so the previous GREEN did not exercise the real
+writer. `main.py` supplied `mode=pi_rpa_sensitive_joint`, but `func_C.py`
+accepted and routed only `pi_dpsi_joint`. A real run therefore raised
+`ValueError` before `ORBITAL_RESULTS.txt` was written and before the existing
+`PROJECTED_PI_METADATA.json` hook could be reached.
+
+The regression test now calls the real writer for both projected modes with
+the same components and diagnostics. It asserts that the complete sensitive
+output is byte-for-byte the legacy projected-Pi output with only the `Mode`
+line changed. This covers mode validation, component validation/order,
+diagnostic validation/order, and protects the old `pi_dpsi_joint` schema.
+
+The production fix defines the local projected-mode set
+`{"pi_dpsi_joint", "pi_rpa_sensitive_joint"}` in `IO/func_C.py` and uses it
+for every projected-only writer branch. No component or diagnostic field was
+added. In particular, there are no Task 5 initial/final H arrays, family arrays,
+checkpoint-acceptance fields, or output-schema changes.
+
+#### Review-fix remote provenance
+
+The remote tree was assembled by archive and exact overlay, not by remote Git
+checkout. Its absolute code directory is:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-spec-fix.OYVRA0/code
+```
+
+The source archive contains `SIAB` plus the tracked H TZDP coefficient fixture
+from commit `8eb18566364424d85dba252367394f2e65b06490`:
+
+```text
+db4942142e7c0a7727ad714f22480664a917f69f90c789b9c82e3f59313a9ceb
+```
+
+The final-position RED test-only overlay and final GREEN test/production
+overlay contain no macOS xattr entries. Their SHA256 values are:
+
+```text
+RED   0e0d04c14c5171a9df4b09b4f1974c9093fbea6e9de97214551dcaa2c28e963c
+GREEN 56a8c31cce2633576ac3fa1efda1334c1e21d3a550328e485fac8a0bbb462260
+```
+
+The final local/remote matching file SHA256 values are:
+
+```text
+SIAB/tests/test_projected_pi.py
+  84f56c3c7815375fe9233f7c1db5e4ed723515ace4e19351e246e509672d977f
+SIAB/opt_orb_pytorch_dpsi/IO/func_C.py
+  9df3975c4a45bdcc096b597a113bb148d0d6e163f7b1b60d93aaedb5de6fdb15
+```
+
+With the source archive plus the RED overlay, the exact targeted command was:
+
+```bash
+cd /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-spec-fix.OYVRA0/code/SIAB/tests
+DOJO_PATH=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-spec-fix.OYVRA0/code/Dojo-NC-SR \
+PYTHONPATH=/work1/ghj/runtime/siab-projected-pi-mpl-20260801 \
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi.ProjectedPiWriterRoutingTest.test_rpa_sensitive_writer_reuses_projected_pi_schema
+```
+
+It reported `Ran 1 test in 0.016s`, `FAILED (errors=1)`, with the expected
+`ValueError: invalid mode 'pi_rpa_sensitive_joint'`. After applying the GREEN
+overlay, the same command reported `Ran 1 test in 0.004s`, `OK`.
+
+The required three-module, four-module, and discovery commands used the same
+explicit `DOJO_PATH`, `PYTHONPATH`, and Python executable:
+
+```bash
+# Task 3 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+
+# Task 4 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi test_projected_pi_optimization \
+  test_loss_and_freeze test_main_sternheimer
+
+# Full SIAB
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest discover -v
+```
+
+They exited zero and reported, respectively, `Ran 101 tests in 1.494s`,
+`Ran 127 tests in 1.103s`, and `Ran 356 tests in 25.672s`, all with `OK`.
+This remains a code/output-routing GREEN only; it does not provide a promoted
+basis, RPA binding energy, BSSE improvement, or any physical validation.

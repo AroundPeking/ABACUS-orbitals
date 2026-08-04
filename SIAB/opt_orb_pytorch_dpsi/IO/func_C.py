@@ -60,9 +60,13 @@ _PROJECTED_PI_LOSS_DIAGNOSTICS = (
 	("projected_pi_rank_tolerance", "Projected Pi rank tolerance"),
 )
 
+_PROJECTED_PI_MODES = frozenset(
+	{"pi_dpsi_joint", "pi_rpa_sensitive_joint"}
+)
+
 
 def _component_schema(guarded, mode=None):
-	if mode == "pi_dpsi_joint":
+	if mode in _PROJECTED_PI_MODES:
 		return _PROJECTED_PI_LOSS_COMPONENTS
 	if not guarded:
 		return _LOSS_COMPONENTS
@@ -89,6 +93,7 @@ def _validate_loss_metadata(loss_components, mode):
 		"st_constrained",
 		"st_dpsi_joint",
 		"pi_dpsi_joint",
+		"pi_rpa_sensitive_joint",
 	):
 		raise ValueError(f"invalid mode {mode!r}")
 	if not isinstance(loss_components, Mapping):
@@ -97,17 +102,17 @@ def _validate_loss_metadata(loss_components, mode):
 		name
 		for name, _ in (
 			_PROJECTED_PI_LOSS_COMPONENTS
-			if mode == "pi_dpsi_joint"
+			if mode in _PROJECTED_PI_MODES
 			else _LOSS_COMPONENTS
 		)
 	}
 	guard = {name for name, _ in _GUARDED_LOSS_COMPONENTS}
 	provided = set(loss_components)
-	if mode == "pi_dpsi_joint" and provided == base:
+	if mode in _PROJECTED_PI_MODES and provided == base:
 		guarded = False
-	elif mode == "pi_dpsi_joint":
+	elif mode in _PROJECTED_PI_MODES:
 		raise ValueError(
-			"pi_dpsi_joint loss_components must contain exactly "
+			f"{mode} loss_components must contain exactly "
 			+ ", ".join(name for name, _ in _PROJECTED_PI_LOSS_COMPONENTS)
 		)
 	elif provided == base:
@@ -144,11 +149,11 @@ def _validate_loss_diagnostics(diagnostics, mode):
 		return None
 	if not isinstance(diagnostics, Mapping):
 		raise TypeError("loss diagnostics must be a mapping")
-	if mode == "pi_dpsi_joint":
+	if mode in _PROJECTED_PI_MODES:
 		expected = {name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS}
 		if set(diagnostics) != expected:
 			raise ValueError(
-				"pi_dpsi_joint loss diagnostics must contain exactly "
+				f"{mode} loss diagnostics must contain exactly "
 				+ ", ".join(
 					name for name, _ in _PROJECTED_PI_LOSS_DIAGNOSTICS
 				)
@@ -387,7 +392,7 @@ def write_C(
 			for name, label in _component_schema(guarded_components, mode):
 				print(f"{label} = {loss_components[name]:.10e}", file=file)
 			if diagnostics is not None:
-				if mode == "pi_dpsi_joint":
+				if mode in _PROJECTED_PI_MODES:
 					diagnostic_schema = _PROJECTED_PI_LOSS_DIAGNOSTICS
 				else:
 					diagnostic_schema = _LOSS_DIAGNOSTICS

@@ -1,9 +1,12 @@
 from dataclasses import replace
+from pathlib import Path
+import tempfile
 import unittest
 
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
+from IO.func_C import write_C
 import projected_pi
 from projected_pi import (
     NormalizedPhysicalFamilyProjectedPi,
@@ -12,6 +15,24 @@ from projected_pi import (
 from sternheimer_data import PrimitiveBlock, SternheimerData
 from sternheimer_source_data import SternheimerSourceData
 from sternheimer_source_pair import pair_response_and_source
+
+
+PROJECTED_PI_COMPONENTS = {
+    "dft_origin": 0.3,
+    "dft_dpsi": 0.2,
+    "projected_pi": 0.214,
+    "regularization_dpsi": 0.2,
+    "constraint_dft": 0.0,
+    "constraint_dpsi": 0.0,
+    "total": 0.414,
+}
+
+PROJECTED_PI_DIAGNOSTICS = {
+    "max_projected_pi_condition": 5562.0,
+    "lowest_projected_pi_frequency_ha": 0.0687,
+    "lowest_projected_pi_loss": 0.19,
+    "projected_pi_rank_tolerance": 1.0e-12,
+}
 
 
 def provenance():
@@ -788,6 +809,45 @@ class ProjectedPiTest(unittest.TestCase):
             with self.subTest(named_pairs=named_pairs):
                 with self.assertRaisesRegex(ValueError, "physical family names"):
                     NormalizedPhysicalFamilyProjectedPi(named_pairs)
+
+
+class ProjectedPiWriterRoutingTest(unittest.TestCase):
+    def test_rpa_sensitive_writer_reuses_projected_pi_schema(self):
+        coefficient = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0]], dtype=torch.float64
+                )
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            legacy_output = path / "pi_dpsi_joint.dat"
+            sensitive_output = path / "pi_rpa_sensitive_joint.dat"
+            writer_options = {
+                "loss_components": PROJECTED_PI_COMPONENTS,
+                "diagnostics": PROJECTED_PI_DIAGNOSTICS,
+            }
+            write_C(
+                legacy_output,
+                coefficient,
+                PROJECTED_PI_COMPONENTS["total"],
+                mode="pi_dpsi_joint",
+                **writer_options,
+            )
+            write_C(
+                sensitive_output,
+                coefficient,
+                PROJECTED_PI_COMPONENTS["total"],
+                mode="pi_rpa_sensitive_joint",
+                **writer_options,
+            )
+
+            expected = legacy_output.read_text().replace(
+                "Mode = pi_dpsi_joint",
+                "Mode = pi_rpa_sensitive_joint",
+            )
+            self.assertEqual(sensitive_output.read_text(), expected)
 
 
 if __name__ == "__main__":
