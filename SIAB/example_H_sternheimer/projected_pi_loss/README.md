@@ -1267,3 +1267,48 @@ They exited zero and reported `Ran 104 tests in 1.279s`,
 This is code GREEN only: no optimization, checkpoint promotion, orbital-basis
 improvement, RPA binding energy, BSSE improvement, or physical validation was
 performed.
+
+### Task 4 controller-independent final regression (2026-08-04)
+
+After both independent reviews approved the implementation, the controller
+created a fresh tree directly from final commit
+`77d42e4d18a0dde4afdd9693dce30695f5a5a33b`. This run did not reuse an
+implementer overlay or a remote Git checkout. The local `git archive` contained
+the tracked `SIAB` and `Dojo-NC-SR` trees, had no AppleDouble entries, and had
+SHA256:
+
+```text
+db0e14f9452d418812797c9ff2edee6902f8a2bfa4cc41b0576a90529431a02c
+```
+
+The uploaded archive had the same hash. Its absolute extracted tree was:
+
+```text
+/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_tdd_20260804/code-task4-controller-final-77d42e4d
+```
+
+From that tree's `SIAB/tests` directory, the controller set
+`DOJO_PATH` to the archived `Dojo-NC-SR`, used the same explicit
+`PYTHONPATH` and Python executable as the implementation runs, and executed:
+
+```bash
+# Task 3 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi_optimization test_loss_and_freeze test_main_sternheimer
+
+# Task 4 modules
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python -m unittest -v \
+  test_projected_pi test_projected_pi_optimization \
+  test_loss_and_freeze test_main_sternheimer
+
+# Full SIAB
+/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python \
+  -m unittest discover -v
+```
+
+The fresh run reported `Ran 104 tests in 0.919s`,
+`Ran 131 tests in 1.037s`, and `Ran 360 tests in 24.323s`; all three exited
+zero with `OK`. Their measured process wall times were 5.19, 4.71, and 28.18
+seconds. This independently closes Task 4 at the code-regression gate only.
+There is still no optimized basis, checkpoint promotion, RPA binding energy,
+BSSE result, or physical validation.
