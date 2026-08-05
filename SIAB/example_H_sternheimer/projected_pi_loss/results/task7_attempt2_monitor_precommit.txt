@@ -1,0 +1,5 @@
+2026-08-05T12:17:37+0800
+             JOBID PARTITION                     NAME     USER ST       TIME TIME_LIMIT NODE NODELIST(REASON)
+          21513290    normal            siab-rpa-hist      ghj PD       0:00 1-00:00:00    1 (Priority)
+JobID|State|ExitCode|Elapsed|Start|End
+21513290|PENDING|0:0|00:00:00|Unknown|Unknown

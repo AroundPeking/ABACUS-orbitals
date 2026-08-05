@@ -1805,6 +1805,107 @@ freeze a production alpha, does not optimize or evaluate a new candidate,
 does not read SOS/CP energies, and does not provide physical validation.
 Task 7 has not started.
 
+### Task 7 real historical metric campaign ledger (2026-08-05)
+
+#### Proposal and controller preflight
+
+Task 7 will run the unchanged analyzer from exact commit
+`1a229d77d735ed18689e77db0bba1f3b94e2308b` against the five archived basis
+labels. It is limited to the real historical response-metric decision. It
+will not create a Task 8 input, optimize a basis, read SOS/CP/RPA energies as
+numeric inputs, or evaluate a ghost family or new candidate.
+
+The controller independently resolved and hashed all eleven requested files
+on `login08`. Every SHA256 matched the frozen Task 7 list. The `normal`
+partition reported 32 CPUs and 126500 MiB per node with a 24-hour limit, so
+the immutable job will request exactly one node, one Python process, 30 CPUs,
+110610 MiB, and `24:00:00`. The code source is a local tracked `git archive`
+of `SIAB` and `Dojo-NC-SR` at the exact commit; its SHA256 is
+`bc945bccaa1e27a1ebb0b8380e69c62d7ef992ce506953fba233c23f372fa533`.
+
+The wrapper will hash the archive and all inputs again inside the allocation,
+record the source/runtime/thread/Slurm manifests, run the analyzer twice into
+distinct absent output directories under `/usr/bin/time -v`, require exactly
+the four specified artifacts for each run, require all three forbidden-input
+flags to be false, and compare parsed JSON structurally and number by number.
+Analyzer exit 2 is an expected scientific stop only when both JSON files say
+`decision=stop_galerkin_required` and `selected_alpha=null`; otherwise the
+largest admissible frozen alpha is the metric-only selection.
+
+#### Submission
+
+The immutable wrapper SHA256 is
+`d7d5956cc8e48c3c7d44c3ffbf03be325e9bb02adbefeb6f0a861e95c075851a`.
+After remote shell/Python syntax checks, eleven-link hash verification, and a
+successful `sbatch --test-only`, it was submitted once as Slurm job
+`21508723`. The immediate `squeue` record was `PENDING (None)`, not
+`BadConstraints`. `scontrol` recorded partition `normal`, one node, one task,
+30 CPUs with `CPUs/Task=30`, `MinMemoryNode=110610M`, and
+`TimeLimit=1-00:00:00`. This is only the submission state; no alpha decision
+is inferred from it.
+
+#### Attempt 1 filesystem failure and corrected controller
+
+Job `21508723` remained pending with reason `Priority` and zero runtime. A
+four-thread login-node postprocessing preview used the same immutable code
+archive and all eleven frozen inputs to test the analyzer before the queued
+job started. The numerical work finished in 5:28.58 with 1,758,528 KiB peak
+RSS, but publication failed closed because `/work1` does not support
+`renameat2(RENAME_NOREPLACE)`. No result directory survived. This was a
+filesystem/controller failure after numerical evaluation, not exit 2 and not
+a Galerkin decision. The pending job was therefore cancelled before start;
+its inputs, wrapper, scheduler records, error, timing, and hashes remain under
+the attempt-1 evidence directory.
+
+The production analyzer was not weakened. A direct preflight proved that its
+same no-replace helper succeeds under `/tmp`. The attempt-2 wrapper therefore
+runs both analyzers and their atomic publication under node-local `/tmp`,
+copies only complete four-file directories into the unique `/work1` campaign,
+and runs the unchanged reproduction validator on the copied artifacts before
+writing `completed.ok`. Its SHA256 is
+`afeadeb93c4011c7672460ce32d3ed5c0e709079aa40e78a71ffa89a9e7e41fb`.
+It passed shell syntax, archive/input hash, `/tmp` no-replace, and
+`sbatch --test-only` preflights. Formal `normal` job `21513290` retains one
+node, 30 CPUs, 110610 MiB, and 24 hours; it is still pending with reason
+`Priority` and has zero runtime.
+
+#### Reproduced login-node real-data hard stop
+
+Because this analyzer is read-only postprocessing, two independent
+four-thread previews were completed under `/tmp` while the formal job waited.
+They took 4:24.40 and 4:26.80, used 1,772,292 and 1,782,232 KiB peak RSS, and
+both exited 2 with `decision=stop_galerkin_required`,
+`selected_alpha=null`, and no admissible alpha. The unchanged validator
+compared 7,559 JSON numbers and 8,258 JSON nodes exactly. All four PDF, PNG,
+JSON, and Markdown SHA256 values also matched. The forbidden-input flags are
+all false: no SOS energy was a numeric input, no ghost family was used, and no
+new candidate was evaluated.
+
+| alpha | `3s2p2d` | `+1f` | `+1f1g` | `+2f1g` | `+1f2g` | first f | first g | second f not better | second g not better |
+|---:|---:|---:|---:|---:|---:|:---:|:---:|:---:|:---:|
+| 0.00 | 0.0127739 | 0.0141990 | 0.0150154 | 0.0148782 | 0.0152320 | false | false | false | true |
+| 0.10 | 0.0169039 | 0.0169952 | 0.0173311 | 0.0169174 | 0.0174287 | false | false | false | true |
+| 0.25 | 0.0231354 | 0.0212077 | 0.0208099 | 0.0199790 | 0.0207267 | true | true | false | false |
+| 0.50 | 0.0335713 | 0.0282664 | 0.0266215 | 0.0250893 | 0.0262314 | true | true | false | false |
+| 1.00 | 0.0545151 | 0.0424646 | 0.0382811 | 0.0353325 | 0.0372630 | true | true | false | false |
+
+For alpha 0 and 0.1, the first `f` and first `g` do not improve the blended
+loss. For alpha 0.25, 0.5, and 1, they do improve it, but the second `f` and
+second `g` improve it again instead of reproducing the archived saturation
+decision. Thus no alpha satisfies all four gates.
+
+This result exposes a method limitation rather than evidence that high
+angular momentum is unimportant. The current source-projected loss measures
+how much of a fixed reference response can be represented in a candidate AO
+space. Extra functions can continue to reduce that approximation error, while
+the held-out raw RPA binding and BSSE decision can be non-monotonic. The
+frozen plan therefore stops before Task 8: no production alpha and no
+`pi_rpa_sensitive_joint` training input are created. The next method must be a
+separate candidate-space Galerkin Sternheimer design or an independently
+justified richer target. The double login-node result is reproducible real
+data, but formal 30-thread job `21513290` remains a pending certification and
+is not reported as completed.
+
 ### Task 6 spec-review fix: reject duplicate coefficient options (2026-08-05)
 
 Commit `c1236f29fa819e76c0d63919811e00b1eb3dac72` is preserved as the first

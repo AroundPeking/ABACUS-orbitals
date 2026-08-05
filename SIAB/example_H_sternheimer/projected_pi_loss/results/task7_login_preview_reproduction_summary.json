@@ -1,0 +1,38 @@
+{
+  "all_artifact_hashes_equal": true,
+  "analyzer_exit_codes": [
+    2,
+    2
+  ],
+  "decision": "stop_galerkin_required",
+  "exact_four_artifacts_each_run": true,
+  "flags": {
+    "new_candidate_was_evaluated": false,
+    "uses_ghost_family": false,
+    "uses_sos_energy_as_numeric_input": false
+  },
+  "job_id": "login-preview-attempt2",
+  "json_node_count": 8258,
+  "json_numeric_count": 7559,
+  "numeric_json_equality": true,
+  "output_sha256": {
+    "rpa_sensitive_frequency.pdf": {
+      "run1": "c6a557db56250e9054ed4cb4893a0acda24e789072c84c6a6c9320a10bfadf37",
+      "run2": "c6a557db56250e9054ed4cb4893a0acda24e789072c84c6a6c9320a10bfadf37"
+    },
+    "rpa_sensitive_frequency.png": {
+      "run1": "38f6d093354985b35783205acd6e5d9874300e99678a07901d3cfd060ad22d1d",
+      "run2": "38f6d093354985b35783205acd6e5d9874300e99678a07901d3cfd060ad22d1d"
+    },
+    "rpa_sensitive_ranking.json": {
+      "run1": "5711094a316297ad428b9290ace43c25cb706def68f235934ad8171a520f3619",
+      "run2": "5711094a316297ad428b9290ace43c25cb706def68f235934ad8171a520f3619"
+    },
+    "rpa_sensitive_ranking.md": {
+      "run1": "557c4e1a67d2839f19ae254a3aa4ee587edebad3061401ad982e37495ee61ae7",
+      "run2": "557c4e1a67d2839f19ae254a3aa4ee587edebad3061401ad982e37495ee61ae7"
+    }
+  },
+  "selected_alpha": null,
+  "structural_json_equality": true
+}

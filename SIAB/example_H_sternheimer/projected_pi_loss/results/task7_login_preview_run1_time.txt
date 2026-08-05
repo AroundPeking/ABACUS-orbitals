@@ -1,0 +1,24 @@
+Command exited with non-zero status 2
+	Command being timed: "/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/controller/task7_torch_launcher.py /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/preview/code/SIAB/example_H_sternheimer/projected_pi_loss/analyze_rpa_sensitive_ranking.py --h-response /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H_response --h2-response /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H2_response --h-source /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H_source --h2-source /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H2_source --h-audit /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H_audit --h2-audit /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/H2_audit --two-d /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/two_d --first-f /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/first_f --first-g /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/first_g --second-f /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/second_f --second-g /work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/inputs/second_g --output-dir /tmp/siab-task7-preview-attempt2/run"
+	User time (seconds): 781.47
+	System time (seconds): 26.50
+	Percent of CPU this job got: 305%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:24.40
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1772292
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 135
+	Minor (reclaiming a frame) page faults: 10457300
+	Voluntary context switches: 42257
+	Involuntary context switches: 2554
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 1472
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 2

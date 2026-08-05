@@ -1,0 +1,26 @@
+JobId=21513290 JobName=siab-rpa-hist
+   UserId=ghj(4257) GroupId=ghj(11077) MCS_label=N/A
+   Priority=1116 Nice=0 Account=ghj QOS=user_ghj
+   JobState=PENDING Reason=Priority Dependency=(null)
+   Requeue=0 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:00 TimeLimit=1-00:00:00 TimeMin=12:00:00
+   SubmitTime=2026-08-05T11:52:50 EligibleTime=2026-08-05T11:52:50
+   AccrueTime=Unknown
+   StartTime=Unknown EndTime=Unknown Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-08-05T11:52:50 Scheduler=Main
+   Partition=normal AllocNode:Sid=login08:35795
+   ReqNodeList=(null) ExcNodeList=(null)
+   NodeList=
+   NumNodes=1-1 NumCPUs=30 NumTasks=1 CPUs/Task=30 ReqB:S:C:T=0:0:*:*
+   TRES=cpu=30,mem=110610M,node=1,billing=30
+   Socks/Node=* NtasksPerN:B:S:C=1:0:*:* CoreSpec=*
+   MinCPUsNode=30 MinMemoryNode=110610M MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null)
+   Command=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/controller_attempt2/task7_rpa_sensitive_historical_ranking.slurm
+   WorkDir=/public/home/ghj
+   StdErr=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/evidence/slurm-21513290.err
+   StdIn=/dev/null
+   StdOut=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/evidence/slurm-21513290.out
+   Power=
+   GresEnforceBind=Yes

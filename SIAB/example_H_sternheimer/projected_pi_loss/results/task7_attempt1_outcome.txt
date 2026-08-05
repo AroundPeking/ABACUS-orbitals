@@ -1,0 +1,5 @@
+job_id=21508723
+state=CANCELLED
+reason=work1_renameat2_noreplace_unsupported
+preview_elapsed=00:05:28.58
+preview_max_rss_kb=1758528
