@@ -24,7 +24,13 @@ def evaluate_galerkin_response(
     relative_rank_tolerance=1.0e-12,
     condition_limit=1.0e12,
 ):
-    relative_rank_tolerance, condition_limit = _validate_inputs(
+    (
+        transformed_hamiltonian,
+        transformed_perturbation,
+        energy,
+        eigenvector,
+        overlap_condition,
+    ) = _prepare_orthonormal_problem(
         overlap,
         hamiltonian,
         perturbation,
@@ -33,24 +39,6 @@ def evaluate_galerkin_response(
         relative_rank_tolerance,
         condition_limit,
     )
-    overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
-    maximum_overlap = torch.max(overlap_eigenvalue)
-    threshold = relative_rank_tolerance * maximum_overlap
-    if bool(torch.any(overlap_eigenvalue <= threshold)):
-        raise RuntimeError("overlap is rank deficient")
-    overlap_condition = float(maximum_overlap / torch.min(overlap_eigenvalue))
-    if overlap_condition > condition_limit:
-        raise RuntimeError("overlap condition number exceeds limit")
-
-    lowdin = (
-        overlap_eigenvector
-        @ torch.diag(overlap_eigenvalue.rsqrt()).to(torch.complex128)
-        @ overlap_eigenvector.mH
-    )
-    transformed_hamiltonian = lowdin.mH @ hamiltonian @ lowdin
-    transformed_perturbation = lowdin.mH @ perturbation @ lowdin
-    energy, eigenvector = torch.linalg.eigh(transformed_hamiltonian)
-
     occupied = occupation > 0.0
     occupied_eigenvector = eigenvector[:, occupied]
     occupied_projector = occupied_eigenvector @ occupied_eigenvector.mH
@@ -102,6 +90,116 @@ def evaluate_galerkin_response(
         response_half=response_half,
         response=response,
         overlap_condition=overlap_condition,
+    )
+
+
+def evaluate_sos_response(
+    overlap,
+    hamiltonian,
+    perturbation,
+    occupation,
+    frequency_ha,
+    *,
+    relative_rank_tolerance=1.0e-12,
+    condition_limit=1.0e12,
+):
+    (
+        _,
+        transformed_perturbation,
+        energy,
+        eigenvector,
+        overlap_condition,
+    ) = _prepare_orthonormal_problem(
+        overlap,
+        hamiltonian,
+        perturbation,
+        occupation,
+        frequency_ha,
+        relative_rank_tolerance,
+        condition_limit,
+    )
+    occupied = occupation > 0.0
+    virtual = ~occupied
+    virtual_eigenvector = eigenvector[:, virtual]
+    virtual_energy = energy[virtual]
+
+    response_half = []
+    for frequency in frequency_ha:
+        half = torch.zeros(
+            (perturbation.shape[0], perturbation.shape[0]),
+            dtype=torch.complex128,
+            device=hamiltonian.device,
+        )
+        for occupied_index in torch.nonzero(occupied, as_tuple=False).flatten():
+            state = eigenvector[:, occupied_index]
+            perturbation_on_state = torch.matmul(
+                transformed_perturbation,
+                state,
+            )
+            coupling = virtual_eigenvector.mH @ perturbation_on_state.mT
+            denominator = (
+                virtual_energy - energy[occupied_index] + 1.0j * frequency
+            )
+            virtual_response = -coupling / denominator[:, None]
+            response_state = virtual_eigenvector @ virtual_response
+            half = half + occupation[occupied_index] * (
+                perturbation_on_state.conj() @ response_state
+            )
+        response_half.append(half)
+
+    response_half = torch.stack(response_half)
+    response = response_half + response_half.mH
+    return FiniteAOResponseResult(
+        energy=energy,
+        occupation=occupation,
+        frequency_ha=frequency_ha,
+        response_half=response_half,
+        response=response,
+        overlap_condition=overlap_condition,
+    )
+
+
+def _prepare_orthonormal_problem(
+    overlap,
+    hamiltonian,
+    perturbation,
+    occupation,
+    frequency_ha,
+    relative_rank_tolerance,
+    condition_limit,
+):
+    relative_rank_tolerance, condition_limit = _validate_inputs(
+        overlap,
+        hamiltonian,
+        perturbation,
+        occupation,
+        frequency_ha,
+        relative_rank_tolerance,
+        condition_limit,
+    )
+    overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
+    maximum_overlap = torch.max(overlap_eigenvalue)
+    threshold = relative_rank_tolerance * maximum_overlap
+    if bool(torch.any(overlap_eigenvalue <= threshold)):
+        raise RuntimeError("overlap is rank deficient")
+    overlap_condition = float(maximum_overlap / torch.min(overlap_eigenvalue))
+    if overlap_condition > condition_limit:
+        raise RuntimeError("overlap condition number exceeds limit")
+
+    lowdin = (
+        overlap_eigenvector
+        @ torch.diag(overlap_eigenvalue.rsqrt()).to(torch.complex128)
+        @ overlap_eigenvector.mH
+    )
+    transformed_hamiltonian = lowdin.mH @ hamiltonian @ lowdin
+    transformed_perturbation = lowdin.mH @ perturbation @ lowdin
+    energy, eigenvector = torch.linalg.eigh(transformed_hamiltonian)
+    return (
+        transformed_hamiltonian,
+        transformed_perturbation,
+        energy,
+        eigenvector,
+        overlap_condition,
     )
 
 

@@ -3,7 +3,10 @@ import unittest
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
-from galerkin_sternheimer import evaluate_galerkin_response
+from galerkin_sternheimer import (
+    evaluate_galerkin_response,
+    evaluate_sos_response,
+)
 
 
 class GalerkinSternheimerTest(unittest.TestCase):
@@ -18,6 +21,47 @@ class GalerkinSternheimerTest(unittest.TestCase):
         )
         occupation = torch.tensor([2.0, 0.0], dtype=torch.float64)
         frequency = torch.tensor([0.4], dtype=torch.float64)
+        return (
+            overlap,
+            hamiltonian,
+            perturbation,
+            occupation,
+            frequency,
+        )
+
+    def dense_inputs(self):
+        generator = torch.Generator().manual_seed(731)
+
+        def random_complex(*shape):
+            real = torch.randn(*shape, generator=generator, dtype=torch.float64)
+            imag = torch.randn(*shape, generator=generator, dtype=torch.float64)
+            return torch.complex(real, imag)
+
+        basis_transform = torch.eye(4, dtype=torch.complex128)
+        basis_transform = basis_transform + 0.12 * random_complex(4, 4)
+        overlap = basis_transform.mH @ basis_transform
+
+        unitary, _ = torch.linalg.qr(random_complex(4, 4))
+        energy = torch.tensor([-0.8, -0.3, 0.4, 1.2], dtype=torch.float64)
+        orthonormal_hamiltonian = (
+            unitary @ torch.diag(energy).to(torch.complex128) @ unitary.mH
+        )
+        hamiltonian = (
+            basis_transform.mH
+            @ orthonormal_hamiltonian
+            @ basis_transform
+        )
+
+        perturbation = random_complex(3, 4, 4)
+        perturbation = (perturbation + perturbation.mH) / 2.0
+        perturbation = torch.stack(
+            tuple(
+                basis_transform.mH @ value @ basis_transform
+                for value in perturbation
+            )
+        )
+        occupation = torch.tensor([2.0, 1.0, 0.0, 0.0], dtype=torch.float64)
+        frequency = torch.tensor([0.2, 1.3], dtype=torch.float64)
         return (
             overlap,
             hamiltonian,
@@ -103,6 +147,33 @@ class GalerkinSternheimerTest(unittest.TestCase):
             "overlap condition number exceeds limit",
         ):
             evaluate_galerkin_response(*inputs, condition_limit=1.0e6)
+
+    def test_dense_complex_galerkin_matches_full_virtual_sos(self):
+        inputs = self.dense_inputs()
+
+        galerkin = evaluate_galerkin_response(*inputs)
+        sos = evaluate_sos_response(*inputs)
+
+        difference = galerkin.response - sos.response
+        relative = torch.linalg.vector_norm(difference) / torch.linalg.vector_norm(
+            sos.response
+        )
+        maximum_absolute = torch.max(torch.abs(difference))
+        self.assertLess(float(relative), 1.0e-11)
+        self.assertLess(float(maximum_absolute), 1.0e-12)
+        torch.testing.assert_close(
+            galerkin.response_half,
+            sos.response_half,
+            rtol=1.0e-11,
+            atol=1.0e-12,
+        )
+        for result in (galerkin, sos):
+            torch.testing.assert_close(
+                result.response,
+                result.response.mH,
+                rtol=0.0,
+                atol=0.0,
+            )
 
 
 if __name__ == "__main__":
