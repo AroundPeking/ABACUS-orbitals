@@ -1,0 +1,18 @@
+test_galerkin_sternheimer (unittest.loader._FailedTest) ... ERROR
+
+======================================================================
+ERROR: test_galerkin_sternheimer (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_galerkin_sternheimer
+Traceback (most recent call last):
+  File "/work1/ghj/runtime/siab-py310-cpu-20260720/lib/python3.10/unittest/loader.py", line 154, in loadTestsFromName
+    module = __import__(module_name)
+  File "/tmp/siab-galerkin-red-login-20260807/SIAB/tests/test_galerkin_sternheimer.py", line 6, in <module>
+    from galerkin_sternheimer import evaluate_galerkin_response
+ModuleNotFoundError: No module named 'galerkin_sternheimer'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (errors=1)

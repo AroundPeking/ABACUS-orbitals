@@ -1,0 +1,8 @@
+job_id=21539843
+partition=normal
+initial_state=PENDING
+initial_reason=Priority
+archive_sha256=cdf589ea7ad2cf48ab8bf89f3216ba1d6e3f4595b5db185062dd1b0cc99c1c65
+controller_sha256=5c0fc37c8b9a4b46e15972752ffeb1e88955e68fed0b9f42d6cc96871bc9b791
+login_preview_rc=1
+login_preview_expected_error=No module named 'galerkin_sternheimer'
