@@ -1,0 +1,37 @@
+2026-08-05T20:38:40+0800
+k04r2n14
+SLURM_JOB_ID=21513290
+SLURM_JOB_PARTITION=normal
+SLURM_JOB_NUM_NODES=1
+SLURM_NTASKS=1
+SLURM_CPUS_PER_TASK=30
+SLURM_MEM_PER_NODE=110610
+SLURM_JOB_NODELIST=k04r2n14
+pid 27062's current affinity list: 0-22,24-30
+JobId=21513290 JobName=siab-rpa-hist
+   UserId=ghj(4257) GroupId=ghj(11077) MCS_label=N/A
+   Priority=1142 Nice=0 Account=ghj QOS=user_ghj
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=0 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:14 TimeLimit=1-00:00:00 TimeMin=12:00:00
+   SubmitTime=2026-08-05T11:52:50 EligibleTime=2026-08-05T11:52:50
+   AccrueTime=2026-08-05T11:52:50
+   StartTime=2026-08-05T20:38:26 EndTime=2026-08-06T08:38:26 Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2026-08-05T20:38:26 Scheduler=Backfill
+   Partition=normal AllocNode:Sid=login08:35795
+   ReqNodeList=(null) ExcNodeList=(null)
+   NodeList=k04r2n14
+   BatchHost=k04r2n14
+   NumNodes=1 NumCPUs=30 NumTasks=1 CPUs/Task=30 ReqB:S:C:T=0:0:*:*
+   TRES=cpu=30,mem=110610M,node=1,billing=30
+   Socks/Node=* NtasksPerN:B:S:C=1:0:*:* CoreSpec=*
+   MinCPUsNode=30 MinMemoryNode=110610M MinTmpDiskNode=0
+   Features=(null) DelayBoot=00:00:00
+   OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null)
+   Command=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/controller_attempt2/task7_rpa_sensitive_historical_ranking.slurm
+   WorkDir=/public/home/ghj
+   StdErr=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/evidence/slurm-21513290.err
+   StdIn=/dev/null
+   StdOut=/work1/ghj/sternheimer_abacus_tests/siab_rpa_sensitive_historical_ranking_20260805_task7_1a229d77/evidence/slurm-21513290.out
+   Power=
+   GresEnforceBind=Yes

@@ -1,0 +1,10 @@
+{
+  "executable": "/work1/ghj/runtime/siab-py310-cpu-20260720/bin/python",
+  "matplotlib_version": "3.10.3",
+  "platform": "Linux-3.10.0-957.el7.x86_64-x86_64-with-glibc2.17",
+  "python_version": "3.10.13",
+  "torch_config_parallel_info": "ATen/Parallel:\n\tat::get_num_threads() : 30\n\tat::get_num_interop_threads() : 1\nOpenMP 201511 (a.k.a. OpenMP 4.5)\n\tomp_get_max_threads() : 30\nIntel(R) oneAPI Math Kernel Library Version 2022.2-Product Build 20220804 for Intel(R) 64 architecture applications\n\tmkl_get_max_threads() : 30\nIntel(R) MKL-DNN v3.1.1 (Git Hash 64f6bcbcbab628e96f33a62c3e975f8535a7bde4)\nstd::thread::hardware_concurrency() : 32\nEnvironment variables:\n\tOMP_NUM_THREADS : 30\n\tMKL_NUM_THREADS : 30\nATen parallel backend: OpenMP\n",
+  "torch_interop_threads": 1,
+  "torch_intraop_threads": 30,
+  "torch_version": "2.1.0+cpu"
+}

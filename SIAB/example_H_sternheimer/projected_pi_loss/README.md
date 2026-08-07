@@ -1866,8 +1866,9 @@ writing `completed.ok`. Its SHA256 is
 `afeadeb93c4011c7672460ce32d3ed5c0e709079aa40e78a71ffa89a9e7e41fb`.
 It passed shell syntax, archive/input hash, `/tmp` no-replace, and
 `sbatch --test-only` preflights. Formal `normal` job `21513290` retains one
-node, 30 CPUs, 110610 MiB, and 24 hours; it is still pending with reason
-`Priority` and has zero runtime.
+node, 30 CPUs, 110610 MiB, and 24 hours. Immediately after submission it was
+pending with reason `Priority` and had zero runtime; its completed state is
+recorded below.
 
 #### Reproduced login-node real-data hard stop
 
@@ -1894,6 +1895,30 @@ loss. For alpha 0.25, 0.5, and 1, they do improve it, but the second `f` and
 second `g` improve it again instead of reproducing the archived saturation
 decision. Thus no alpha satisfies all four gates.
 
+#### Formal 30-thread certification
+
+Slurm job `21513290` completed on `k04r2n14` with scheduler exit code 0 after
+10:21 and 03:07:04 aggregate CPU time. The two analyzer invocations took
+4:32.77 and 4:56.18 and reached 1,785,728 and 1,818,720 KiB peak RSS. Both
+analyzers returned the expected scientific stop code 2; the wrapper accepted
+that code only after confirming `decision=stop_galerkin_required` and
+`selected_alpha=null` in both JSON files, and then wrote `completed.ok`.
+
+The formal validator compared 7,559 JSON numbers and 8,258 JSON nodes. The two
+formal runs are structurally and numerically identical, and all four output
+files have identical SHA256 values between runs. Relative to the four-thread
+login preview, the JSON structure, gate truth values, selected alpha, and
+decision are unchanged. Thread-dependent floating-point reduction changes
+4,590 stored numbers: the largest absolute difference is
+`2.918631173409736e-07`; the largest relative difference is
+`3.220102936430253e-04` for a quantity of about `3.08e-05`. These differences
+do not alter any reported table entry at the displayed precision or any gate.
+
+The archived formal evidence is prefixed by `task7_formal_` and the exact
+run-1 products by `rpa_sensitive_historical_formal_` under `results/`. The
+formal certification closes Task 7 with a hard method stop; it does not
+authorize Task 8.
+
 This result exposes a method limitation rather than evidence that high
 angular momentum is unimportant. The current source-projected loss measures
 how much of a fixed reference response can be represented in a candidate AO
@@ -1902,9 +1927,8 @@ the held-out raw RPA binding and BSSE decision can be non-monotonic. The
 frozen plan therefore stops before Task 8: no production alpha and no
 `pi_rpa_sensitive_joint` training input are created. The next method must be a
 separate candidate-space Galerkin Sternheimer design or an independently
-justified richer target. The double login-node result is reproducible real
-data, but formal 30-thread job `21513290` remains a pending certification and
-is not reported as completed.
+justified richer target. The double login-node result and formal 30-thread
+certification agree on this conclusion.
 
 ### Task 6 spec-review fix: reject duplicate coefficient options (2026-08-05)
 

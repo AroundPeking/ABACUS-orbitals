@@ -1,0 +1,24 @@
+{
+  "preview_file": "rpa_sensitive_historical_ranking.json",
+  "formal_file": "rpa_sensitive_historical_formal_ranking.json",
+  "decision_equal": true,
+  "decision": "stop_galerkin_required",
+  "selected_alpha_equal": true,
+  "selected_alpha": null,
+  "structure_equal": true,
+  "numeric_count": 7559,
+  "numeric_values_different": 4590,
+  "max_absolute_difference": {
+    "value": 2.918631173409736e-07,
+    "path": "$.alpha_results[0].bases.first_g.families.H2.trace_log_difference[1]",
+    "preview": 0.0051655804400205785,
+    "formal": 0.0051652885769032375
+  },
+  "max_relative_difference": {
+    "value": 0.0003220102936430253,
+    "path": "$.alpha_results[0].bases.second_f.families.H2.frequency_sensitivity_loss[1]",
+    "preview": 3.0775783675553e-05,
+    "formal": 3.076587355641454e-05
+  },
+  "non_numeric_or_structural_differences": []
+}

@@ -1,0 +1,38 @@
+{
+  "all_artifact_hashes_equal": true,
+  "analyzer_exit_codes": [
+    2,
+    2
+  ],
+  "decision": "stop_galerkin_required",
+  "exact_four_artifacts_each_run": true,
+  "flags": {
+    "new_candidate_was_evaluated": false,
+    "uses_ghost_family": false,
+    "uses_sos_energy_as_numeric_input": false
+  },
+  "job_id": "21513290",
+  "json_node_count": 8258,
+  "json_numeric_count": 7559,
+  "numeric_json_equality": true,
+  "output_sha256": {
+    "rpa_sensitive_frequency.pdf": {
+      "run1": "020f7c46d75fb5eb0a772d7bb0073e45d568e6625d4927ffee5ec0867111c2ac",
+      "run2": "020f7c46d75fb5eb0a772d7bb0073e45d568e6625d4927ffee5ec0867111c2ac"
+    },
+    "rpa_sensitive_frequency.png": {
+      "run1": "0cc9e340f49a1c344915ef0fc51a892f880adc32539e085ac2c347452ddcd1ce",
+      "run2": "0cc9e340f49a1c344915ef0fc51a892f880adc32539e085ac2c347452ddcd1ce"
+    },
+    "rpa_sensitive_ranking.json": {
+      "run1": "d1f33e828fc12d0752c0ea6f26cfb3145f172a039fe9f99aa7e55a094b83a052",
+      "run2": "d1f33e828fc12d0752c0ea6f26cfb3145f172a039fe9f99aa7e55a094b83a052"
+    },
+    "rpa_sensitive_ranking.md": {
+      "run1": "d33633147beb3688855ade8a568c4a843867e281d60bb1291f58ef95e8ce667b",
+      "run2": "d33633147beb3688855ade8a568c4a843867e281d60bb1291f58ef95e8ce667b"
+    }
+  },
+  "selected_alpha": null,
+  "structural_json_equality": true
+}
