@@ -1,0 +1,56 @@
+<STERNHEIMER_GALERKIN_HEADER>
+format_version 1
+representation fixed_lcao_gamma
+energy_unit Ha
+n_basis 2
+n_spin 2
+n_auxiliary 1
+n_frequency 2
+</STERNHEIMER_GALERKIN_HEADER>
+<AUXILIARY_CHANNELS>
+# channel_index atom_index l radial_index m label
+0 0 1 2 -1 H0_l1_n2_m-1
+</AUXILIARY_CHANNELS>
+<SPIN_METADATA>
+# spin_index state_index eigenvalue_ha occupation
+0 0 -0.6 1.0
+0 1 0.8 0.0
+1 0 -0.55 1.0
+1 1 0.85 0.0
+</SPIN_METADATA>
+<OVERLAP_S>
+# row-major <phi_a|phi_b>, real imag
+1.0 0.0
+0.1 0.2
+0.1 -0.2
+1.5 0.0
+</OVERLAP_S>
+<HAMILTONIAN_H>
+# row-major H_ab in Ha; matrices follow spin_index order
+# spin_index 0
+-0.5 0.0
+0.0 0.02
+0.0 -0.02
+0.7 0.0
+# spin_index 1
+-0.45 0.0
+0.01 0.0
+0.01 0.0
+0.75 0.0
+</HAMILTONIAN_H>
+<PERTURBATION_V>
+# row-major V_ab in Ha; matrices follow channel_index order
+# channel_index 0
+0.3 0.0
+0.1 0.05
+0.1 -0.05
+-0.2 0.0
+</PERTURBATION_V>
+<FREQUENCY_GRID>
+# frequency_index frequency_ha weight_ha
+0 0.2 0.3
+1 0.8 0.7
+</FREQUENCY_GRID>
+<PROVENANCE_JSON>
+{"abacus_commit":"19ab21e01d02cc805604ed77a6e269af698fdd1d","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,0.0,0.0,0.0,20.0,0.0,0.0,0.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
+</PROVENANCE_JSON>
