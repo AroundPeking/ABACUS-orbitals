@@ -1,0 +1,111 @@
+<STERNHEIMER_GALERKIN_PRIMITIVE_HEADER>
+format_version 1
+representation bessel_primitive_uniform_grid_gamma
+energy_unit Ha
+n_primitive 3
+n_fixed_ao 2
+n_blocks 1
+n_spin 2
+n_auxiliary 1
+n_frequency 2
+</STERNHEIMER_GALERKIN_PRIMITIVE_HEADER>
+<PRIMITIVE_BLOCKS>
+# element atom_index l m n_primitive offset
+H 0 0 0 3 0
+</PRIMITIVE_BLOCKS>
+<AUXILIARY_CHANNELS>
+# channel_index atom_index l radial_index m label
+0 0 1 2 -1 H0_l1_n2_m-1
+</AUXILIARY_CHANNELS>
+<FIXED_AO_OCCUPATIONS>
+# spin_index state_index occupation
+0 0 1.0
+0 1 0.0
+1 0 0.0
+1 1 0.0
+</FIXED_AO_OCCUPATIONS>
+<OVERLAP_S>
+# row-major <p_a|p_b>, real imag
+2.0 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+1.0 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+1.0e-10 0.0
+</OVERLAP_S>
+<HAMILTONIAN_H>
+# row-major primitive H_ab in Ha; matrices follow spin_index order
+# spin_index 0
+-1.0 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+0.5 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+2.0e-10 0.0
+# spin_index 1
+-0.8 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+0.6 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+2.5e-10 0.0
+</HAMILTONIAN_H>
+<PERTURBATION_V>
+# row-major primitive V_ab in Ha; matrices follow channel_index order
+# channel_index 0
+0.4 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+-0.2 0.0
+0.0 0.0
+0.0 0.0
+0.0 0.0
+0.1e-10 0.0
+</PERTURBATION_V>
+<PRIMITIVE_AO_OVERLAP>
+# row-major <p_a|phi_b>, real imag
+1.0 0.0
+0.0 0.0
+0.0 0.0
+1.0 0.0
+0.0 0.0
+0.0 0.0
+</PRIMITIVE_AO_OVERLAP>
+<FIXED_AO_GRID_OVERLAP>
+# row-major uniform-grid <phi_a|phi_b>, real imag
+0.5 0.0
+0.0 0.0
+0.0 0.0
+1.0 0.0
+</FIXED_AO_GRID_OVERLAP>
+<FIXED_AO_GRID_HAMILTONIAN>
+# row-major uniform-grid H_ab in Ha; matrices follow spin_index order
+# spin_index 0
+-0.25 0.0
+0.0 0.0
+0.0 0.0
+0.5 0.0
+# spin_index 1
+-0.2 0.0
+0.0 0.0
+0.0 0.0
+0.6 0.0
+</FIXED_AO_GRID_HAMILTONIAN>
+<FREQUENCY_GRID>
+# frequency_index frequency_ha weight_ha
+0 0.2 0.3
+1 0.8 0.7
+</FREQUENCY_GRID>
+<PROVENANCE_JSON>
+{"abacus_commit":"9a50ad4014815c89287a11b0a5f45363760caaa4","auxiliary_basis_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cell_bohr":[20.0,0.0,0.0,0.0,20.0,0.0,0.0,0.0,20.0],"ecut_ry":25.0,"kernel":"full_coulomb","orbital_sha256":"7e398340398306a6baf1c61ea68944d81ed43667473fbcc290d6541c4a661d1c","pseudopotential_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spin_convention":"occupation_in_metadata"}
+</PROVENANCE_JSON>
