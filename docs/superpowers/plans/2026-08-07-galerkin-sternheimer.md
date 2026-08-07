@@ -79,9 +79,10 @@ Validate the measured overlap condition number before returning transformed
 
 - [ ] **Step 4: Implement the minimal analytic Galerkin solve**
 
-Diagonalize transformed `H`, select positive occupations, build the occupied
-complement using complete QR, solve all perturbation right-hand sides for each
-frequency with `torch.linalg.solve`, and assemble `A + A.mH`.
+Diagonalize transformed `H`, select positive occupations, form
+`P=U_occ@U_occ.mH` and `Q=I-P`, solve
+`Q@(Hbar-eps_i*I+1j*omega*I)@Q+P` against all perturbation right-hand sides,
+and assemble `A + A.mH`.
 
 - [ ] **Step 5: Run focused tests remotely and verify GREEN**
 

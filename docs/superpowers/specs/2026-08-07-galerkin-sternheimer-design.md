@@ -36,15 +36,19 @@ Vbar_mu = X^H V_mu X
 ```
 
 and uses a dense diagonalization in the first implementation to determine the
-energies and occupied subspace. A complete QR of the occupied eigenvectors
-provides an orthonormal complement `Uv`; the Galerkin solve does not use the
-individual virtual eigenvectors returned by the diagonalization:
+energies and occupied subspace. Define the exact projectors `P=Uo Uo^H` and
+`Q=I-P`. The Galerkin solve does not use the individual virtual eigenvectors
+returned by the diagonalization:
 
 ```text
-[Uv^H (Hbar - eps_i I + i omega I) Uv] x_i_mu
-    = -Uv^H Vbar_mu u_i
-delta_u_i_mu = Uv x_i_mu
+[Q (Hbar - eps_i I + i omega I) Q + P] delta_u_i_mu
+    = -Q Vbar_mu u_i
 ```
+
+The `+P` term only completes the otherwise undefined occupied block with an
+identity. The right-hand side is exactly in `Q`, so the occupied response is
+zero and the physical virtual-space equation is unchanged. This formulation
+avoids the nondifferentiable arbitrary complement produced by complete QR.
 
 For each frequency, define
 
