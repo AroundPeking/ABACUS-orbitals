@@ -175,6 +175,116 @@ class GalerkinSternheimerTest(unittest.TestCase):
                 atol=0.0,
             )
 
+    def test_response_is_invariant_under_invertible_ao_coordinates(self):
+        inputs = self.dense_inputs()
+        generator = torch.Generator().manual_seed(811)
+        real = torch.randn(4, 4, generator=generator, dtype=torch.float64)
+        imag = torch.randn(4, 4, generator=generator, dtype=torch.float64)
+        transform = torch.eye(4, dtype=torch.complex128) + 0.08 * torch.complex(
+            real,
+            imag,
+        )
+        overlap, hamiltonian, perturbation, occupation, frequency = inputs
+        transformed = (
+            transform.mH @ overlap @ transform,
+            transform.mH @ hamiltonian @ transform,
+            torch.einsum(
+                "pa,mpq,qb->mab",
+                transform.conj(),
+                perturbation,
+                transform,
+            ),
+            occupation,
+            frequency,
+        )
+
+        reference = evaluate_galerkin_response(*inputs)
+        changed_coordinates = evaluate_galerkin_response(*transformed)
+
+        torch.testing.assert_close(
+            changed_coordinates.response,
+            reference.response,
+            rtol=1.0e-11,
+            atol=1.0e-12,
+        )
+
+    def test_degenerate_occupied_gauge_does_not_change_response(self):
+        generator = torch.Generator().manual_seed(947)
+        overlap = torch.eye(4, dtype=torch.complex128)
+        hamiltonian = torch.diag(
+            torch.tensor([-0.5, -0.5, 0.4, 1.1], dtype=torch.float64)
+        ).to(torch.complex128)
+        real = torch.randn(2, 4, 4, generator=generator, dtype=torch.float64)
+        imag = torch.randn(2, 4, 4, generator=generator, dtype=torch.float64)
+        perturbation = torch.complex(real, imag)
+        perturbation = (perturbation + perturbation.mH) / 2.0
+        occupation = torch.tensor([1.0, 1.0, 0.0, 0.0], dtype=torch.float64)
+        frequency = torch.tensor([0.3, 1.7], dtype=torch.float64)
+        angle = torch.tensor(0.37, dtype=torch.float64)
+        gauge = torch.eye(4, dtype=torch.complex128)
+        gauge[:2, :2] = torch.tensor(
+            [
+                [torch.cos(angle), -torch.sin(angle)],
+                [torch.sin(angle), torch.cos(angle)],
+            ],
+            dtype=torch.complex128,
+        )
+        changed_perturbation = torch.einsum(
+            "pa,mpq,qb->mab",
+            gauge.conj(),
+            perturbation,
+            gauge,
+        )
+
+        reference = evaluate_galerkin_response(
+            overlap,
+            hamiltonian,
+            perturbation,
+            occupation,
+            frequency,
+        )
+        changed_gauge = evaluate_galerkin_response(
+            overlap,
+            gauge.mH @ hamiltonian @ gauge,
+            changed_perturbation,
+            occupation,
+            frequency,
+        )
+
+        torch.testing.assert_close(
+            changed_gauge.response,
+            reference.response,
+            rtol=1.0e-11,
+            atol=1.0e-12,
+        )
+
+    def test_galerkin_response_has_finite_nonzero_gradient(self):
+        overlap, hamiltonian, perturbation, occupation, frequency = (
+            self.dense_inputs()
+        )
+        scale = torch.tensor(1.17, dtype=torch.float64, requires_grad=True)
+        scaled_perturbation = torch.stack(
+            (
+                scale * perturbation[0],
+                perturbation[1],
+                perturbation[2],
+            )
+        )
+
+        result = evaluate_galerkin_response(
+            overlap,
+            hamiltonian,
+            scaled_perturbation,
+            occupation,
+            frequency,
+        )
+        loss = torch.sum(torch.abs(result.response) ** 2)
+        loss.backward()
+
+        self.assertIsNotNone(scale.grad)
+        self.assertTrue(bool(torch.isfinite(scale.grad)))
+        self.assertGreater(abs(float(scale.grad)), 1.0e-10)
+
 
 if __name__ == "__main__":
     unittest.main()
