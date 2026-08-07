@@ -1,0 +1,54 @@
+test_degenerate_occupied_gauge_does_not_change_response (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_dense_complex_galerkin_matches_full_virtual_sos (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_galerkin_response_has_finite_nonzero_gradient (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_basis_without_virtual_state (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_non_complex128_overlap (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_non_hermitian_hamiltonian (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_non_hermitian_perturbation (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_nonpositive_frequency (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_overlap_condition_above_limit (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_rejects_rank_deficient_overlap (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_response_is_invariant_under_invertible_ao_coordinates (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_two_level_analytic_response (test_galerkin_sternheimer.GalerkinSternheimerTest) ... ok
+test_coefficient_gradient_matches_centered_difference (test_projected_pi.ProjectedPiTest) ... ok
+test_common_source_response_phase_is_invariant (test_projected_pi.ProjectedPiTest) ... ok
+test_equal_family_aggregation (test_projected_pi.ProjectedPiTest) ... ok
+test_matches_direct_complex_matrix_formula (test_projected_pi.ProjectedPiTest) ... ok
+test_occupation_is_counted_once (test_projected_pi.ProjectedPiTest) ... ok
+test_pi_is_hermitian_and_uses_a_plus_adjoint (test_projected_pi.ProjectedPiTest) ... ok
+test_rejects_empty_or_duplicate_family_names (test_projected_pi.ProjectedPiTest) ... ok
+test_rejects_incomplete_response_rectangle (test_projected_pi.ProjectedPiTest) ... ok
+test_rejects_inconsistent_frequency_weights (test_projected_pi.ProjectedPiTest) ... ok
+test_rejects_nonpositive_primitive_reference_norm (test_projected_pi.ProjectedPiTest) ... ok
+test_rejects_singular_candidate_overlap (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_common_auxiliary_channel_permutation_is_invariant (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_common_source_response_phase_is_invariant (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_directional_gradients_match_centered_difference (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_helper_rejects_materially_nonhermitian_pi (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_helper_rejects_nonfinite_pi (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_matches_independent_eigendecomposition (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_rejects_nonfinite_pi (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_rejects_nonpositive_candidate_dielectric (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_rejects_nonpositive_reference_dielectric (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitivity_rejects_numerically_zero_reference (test_projected_pi.ProjectedPiTest) ... ok
+test_sensitivity_alpha_accepts_endpoints (test_projected_pi.ProjectedPiTest) ... ok
+test_sensitivity_alpha_defaults_to_legacy_path (test_projected_pi.ProjectedPiTest) ... ok
+test_sensitivity_alpha_rejects_bool_and_string_values (test_projected_pi.ProjectedPiTest) ... ok
+test_sensitivity_alpha_rejects_nonfinite_values (test_projected_pi.ProjectedPiTest) ... ok
+test_sensitivity_alpha_rejects_out_of_range_values (test_projected_pi.ProjectedPiTest) ... ok
+test_rpa_sensitive_writer_uses_independent_scalar_schema (test_projected_pi.ProjectedPiWriterRoutingTest) ... ok
+test_coefficient_gradient_matches_centered_difference (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rejects_nonfinite_loss_and_excessive_condition (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rejects_unequal_frequency_grids_or_weights (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rejects_wrong_duplicate_or_ghost_families (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_returns_equal_family_loss_and_frequency_diagnostics (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rpa_sensitive_adapter_rejects_bool_and_string_alpha (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rpa_sensitive_family_loss_uses_fourth_order_norm (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rpa_sensitive_fourth_order_gradient_matches_centered_difference (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rpa_sensitive_rejects_family_power_other_than_exactly_four (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+test_rpa_sensitive_zero_family_losses_have_zero_finite_gradient (test_projected_pi_optimization.ProjectedPiOptimizationTest) ... ok
+
+----------------------------------------------------------------------
+Ran 49 tests in 0.400s
+
+OK

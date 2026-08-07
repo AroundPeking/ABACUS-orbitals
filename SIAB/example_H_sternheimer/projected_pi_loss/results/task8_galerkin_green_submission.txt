@@ -1,0 +1,14 @@
+job_id=21540007
+partition=normal
+initial_state=PENDING
+initial_reason=Priority
+source_commit=2da67742020788bfc929f0ae74becc4f52216dff
+archive_sha256=e2beb3dd1b428af5a3983780767a4002887155b1e6cfe7a3e3dfa3a2e28f8c19
+controller_sha256=93ac84e5fab921acafc305f5ec3059c21302b4a892592cf9fc42202c90a7e1cb
+requested_nodes=1
+requested_cpus=30
+requested_memory_mib=110610
+requested_time=24:00:00
+login_run1_tests=49
+login_run2_tests=49
+login_normalized_sha256=2d87d9dac7c9338e316edb4200adafa02413ddadc1dbc02a0eb4b57e83be37a0

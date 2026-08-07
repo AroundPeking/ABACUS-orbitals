@@ -1805,6 +1805,76 @@ freeze a production alpha, does not optimize or evaluate a new candidate,
 does not read SOS/CP energies, and does not provide physical validation.
 Task 7 has not started.
 
+### Task 8A finite-AO Galerkin Sternheimer matrix gate (2026-08-07)
+
+Task 7 ended with `stop_galerkin_required`: the historical projected-Pi loss
+could not freeze an alpha and therefore did not authorize a new optimization.
+Task 8A starts a separate method. It does not project a previously solved
+first-order wavefunction into the candidate basis. Instead, it computes the
+response produced by the candidate finite AO Hamiltonian itself.
+
+For finite-AO overlap `S`, Hamiltonian `H`, and Hermitian auxiliary
+perturbations `V_mu`, the implementation applies the symmetric Lowdin
+transformation and defines the occupied projector `P=U_occ U_occ^H` and
+`Q=I-P`. For every occupied state, auxiliary channel, and positive imaginary
+frequency it solves
+
+```text
+[Q (Hbar - epsilon_i I + i omega I) Q + P] delta_u_i_mu
+    = -Q Vbar_mu u_i.
+```
+
+The `+P` term only completes the otherwise undefined occupied block with an
+identity. The right-hand side lies exactly in `Q`, so it does not act as a
+physical level shift. This formulation avoids an arbitrary complete-QR
+virtual complement and does not use individual virtual eigenvectors. The
+response is assembled as `M=A+A^H`, with
+
+```text
+A_nu_mu = sum_i occupation_i <u_i | Vbar_nu | delta_u_i_mu>.
+```
+
+An independent SOS oracle uses every finite-basis virtual eigenstate. Its only
+purpose is the algebra gate `M_Galerkin=M_SOS`; that equality does not show AO
+completeness. Completeness will be tested later against the uniform-grid
+Delta-ST response and held-out raw ABACUS-to-LibRPA RPA binding energy.
+
+Development used strict RED/GREEN ordering. The first remote RED failed only
+because `galerkin_sternheimer` did not exist. Subsequent RED tests exposed
+missing explicit validation for dtype, Hermiticity, positive frequency, and a
+nonempty virtual space. The implementation now rejects those inputs, singular
+or excessive-condition overlap, nonfinite tensors, and illegal occupations.
+
+The server-side matrix suite contains 12 tests: a closed-form two-level sign
+and conjugate-factor check; dense complex Galerkin/SOS equality; Hermiticity;
+invertible AO-coordinate invariance; degenerate occupied-subspace gauge
+invariance; finite nonzero gradient; and all input-failure contracts. Together
+with the existing projected-Pi suites, two independent 30-thread login-node
+runs each completed 49/49 tests. They took 6.51 and 6.39 seconds with peak RSS
+187180 and 185888 KiB. After removing only the measured `Ran ... in ...s`
+line, both logs had SHA256
+`2d87d9dac7c9338e316edb4200adafa02413ddadc1dbc02a0eb4b57e83be37a0`.
+
+For the deterministic dense complex fixture, the measured Galerkin/SOS
+relative Frobenius difference was `5.827394617278881e-16`, the maximum element
+difference was `5.329070518200751e-15`, and both Hermiticity errors were
+exactly zero. Both frequency response matrices were negative definite in this
+fixture. These are matrix-solver results only; no orbital was optimized and no
+H2 energy was calculated.
+
+Formal normal-partition job `21540007` uses exact tracked commit
+`2da67742020788bfc929f0ae74becc4f52216dff`, archive SHA256
+`e2beb3dd1b428af5a3983780767a4002887155b1e6cfe7a3e3dfa3a2e28f8c19`,
+one node, 30 CPUs, 110610 MiB, and 24 hours. At submission it was pending with
+reason `Priority`; the login-node double run is reproducible preview evidence,
+not a substitute for the pending formal certification.
+
+The next code stage belongs to ABACUS branch
+`codex/sternheimer-siab-producer`: extend the versioned SIAB contract with
+primitive `H^p` and `V^(p,mu)`, first for one fixed TZDP case. No candidate
+coefficient may enter optimization until that producer reproduces the same
+finite-basis full-bands SOS matrix and LibRPA correlation energy.
+
 ### Task 7 real historical metric campaign ledger (2026-08-05)
 
 #### Proposal and controller preflight

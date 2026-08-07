@@ -1,0 +1,15 @@
+{
+  "galerkin_hermitian_maximum_absolute": 0.0,
+  "maximum_absolute": 5.329070518200751e-15,
+  "maximum_response_eigenvalue": [
+    -1.3443787920475698,
+    -0.7162571113693331
+  ],
+  "minimum_response_eigenvalue": [
+    -13.559074976426537,
+    -6.647581618159761
+  ],
+  "overlap_condition": 3.928306519022567,
+  "relative_frobenius": 5.827394617278881e-16,
+  "sos_hermitian_maximum_absolute": 0.0
+}
