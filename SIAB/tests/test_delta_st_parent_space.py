@@ -19,6 +19,7 @@ sys.path.insert(0, str(OPT_DIR))
 from delta_st_parent_space import (
     DeltaSTReference,
     FullCoulombMatrix,
+    analyze_frozen_occupied_parent_response,
     analyze_parent_response,
     build_parent_coefficients,
     build_parent_occupation,
@@ -30,7 +31,7 @@ from delta_st_parent_space import (
 )
 from primitive_galerkin import evaluate_primitive_galerkin
 from sternheimer_data import PrimitiveBlock
-from sternheimer_fixed_ao_data import AuxiliaryChannel
+from sternheimer_fixed_ao_data import AuxiliaryChannel, SternheimerFixedAOData
 from sternheimer_primitive_galerkin_data import SternheimerPrimitiveGalerkinData
 
 
@@ -93,6 +94,8 @@ def _primitive_data():
         frequency_ha=torch.tensor([0.2, 0.8], dtype=torch.float64),
         frequency_weight_ha=torch.tensor([0.3, 0.7], dtype=torch.float64),
         provenance=_provenance(),
+        primitive_ao_hamiltonian_ha=hamiltonian[:, :, :2].clone(),
+        primitive_ao_perturbation_ha=perturbation[:, :, :2].clone(),
     )
 
 
@@ -114,6 +117,25 @@ def _reference(data):
         channels=data.channels,
         atom_naux=(2,),
         occupied_occupation_by_spin=((1.0,), ()),
+        provenance=dict(data.provenance),
+    )
+
+
+def _fixed_ao_data(data):
+    return SternheimerFixedAOData(
+        format_version=1,
+        representation="fixed_lcao_gamma",
+        energy_unit="Ha",
+        channels=data.channels,
+        eigenvalue_ha=torch.tensor(
+            [[-0.5, 0.2], [-0.4, 0.3]], dtype=torch.float64
+        ),
+        occupation=data.occupation,
+        overlap=torch.eye(2, dtype=torch.complex128),
+        hamiltonian_ha=data.fixed_ao_grid_hamiltonian_ha,
+        perturbation_ha=data.perturbation_ha[:, :2, :2].clone(),
+        frequency_ha=data.frequency_ha,
+        frequency_weight_ha=data.frequency_weight_ha,
         provenance=dict(data.provenance),
     )
 
@@ -231,6 +253,30 @@ class DeltaSTParentSpaceTest(unittest.TestCase):
         result = analyze_parent_response(
             reference,
             data,
+            coulomb,
+            radial_count=None,
+            lmax=1,
+        )
+
+        self.assertEqual(result.parent_dimension, 4)
+        self.assertLess(result.maximum_pi_relative_frobenius, 1.0e-13)
+        self.assertLess(abs(result.energy_error_ha), 1.0e-14)
+
+    def test_frozen_occupied_parent_matches_full_reference(self):
+        data = _primitive_data()
+        reference = _reference(data)
+        coulomb = FullCoulombMatrix(
+            matrix=torch.diag(
+                torch.tensor([2.0, 4.0], dtype=torch.complex128)
+            ),
+            atom_naux=(2,),
+            provenance=dict(data.provenance),
+        )
+
+        result = analyze_frozen_occupied_parent_response(
+            reference,
+            data,
+            _fixed_ao_data(data),
             coulomb,
             radial_count=None,
             lmax=1,
