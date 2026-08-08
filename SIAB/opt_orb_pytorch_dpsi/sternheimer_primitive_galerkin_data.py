@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import math
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 
@@ -37,6 +37,8 @@ class SternheimerPrimitiveGalerkinData:
     frequency_ha: torch.Tensor
     frequency_weight_ha: torch.Tensor
     provenance: Dict[str, object]
+    primitive_ao_hamiltonian_ha: Optional[torch.Tensor] = None
+    primitive_ao_perturbation_ha: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         if self.format_version != 1:
@@ -135,6 +137,43 @@ class SternheimerPrimitiveGalerkinData:
                 "perturbation_ha shape must be "
                 "(n_auxiliary, n_primitive, n_primitive)"
             )
+        has_cross_hamiltonian = self.primitive_ao_hamiltonian_ha is not None
+        has_cross_perturbation = self.primitive_ao_perturbation_ha is not None
+        if has_cross_hamiltonian != has_cross_perturbation:
+            raise ValueError(
+                "primitive-to-AO Hamiltonian and perturbation data must appear together"
+            )
+        if has_cross_hamiltonian:
+            self._validate_tensor(
+                "primitive_ao_hamiltonian_ha",
+                self.primitive_ao_hamiltonian_ha,
+                torch.complex128,
+                3,
+            )
+            self._validate_tensor(
+                "primitive_ao_perturbation_ha",
+                self.primitive_ao_perturbation_ha,
+                torch.complex128,
+                3,
+            )
+            if self.primitive_ao_hamiltonian_ha.shape != (
+                n_spin,
+                n_primitive,
+                n_fixed_ao,
+            ):
+                raise ValueError(
+                    "primitive_ao_hamiltonian_ha shape must be "
+                    "(n_spin, n_primitive, n_fixed_ao)"
+                )
+            if self.primitive_ao_perturbation_ha.shape != (
+                len(self.channels),
+                n_primitive,
+                n_fixed_ao,
+            ):
+                raise ValueError(
+                    "primitive_ao_perturbation_ha shape must be "
+                    "(n_auxiliary, n_primitive, n_fixed_ao)"
+                )
         self._validate_block_coverage(n_primitive)
 
         if bool(torch.any(self.occupation < 0.0)):

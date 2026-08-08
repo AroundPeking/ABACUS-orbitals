@@ -30,6 +30,10 @@ _REQUIRED_SECTIONS = (
     "FREQUENCY_GRID",
     "PROVENANCE_JSON",
 )
+_OPTIONAL_SECTIONS = (
+    "PRIMITIVE_AO_HAMILTONIAN",
+    "PRIMITIVE_AO_PERTURBATION",
+)
 _HEADER_KEYS = (
     "format_version",
     "representation",
@@ -44,7 +48,7 @@ _HEADER_KEYS = (
 
 
 def read_sternheimer_primitive_galerkin(path):
-    sections = read_sections(path, _REQUIRED_SECTIONS)
+    sections = read_sections(path, _REQUIRED_SECTIONS, _OPTIONAL_SECTIONS)
     header = parse_key_value_header(
         sections["STERNHEIMER_GALERKIN_PRIMITIVE_HEADER"],
         _HEADER_KEYS,
@@ -105,6 +109,22 @@ def read_sternheimer_primitive_galerkin(path):
         n_spin * n_fixed_ao,
         n_fixed_ao,
     ).reshape(n_spin, n_fixed_ao, n_fixed_ao)
+    primitive_ao_hamiltonian_ha = None
+    primitive_ao_perturbation_ha = None
+    if "PRIMITIVE_AO_HAMILTONIAN" in sections:
+        primitive_ao_hamiltonian_ha = parse_complex_matrix(
+            sections["PRIMITIVE_AO_HAMILTONIAN"],
+            "PRIMITIVE_AO_HAMILTONIAN",
+            n_spin * n_primitive,
+            n_fixed_ao,
+        ).reshape(n_spin, n_primitive, n_fixed_ao)
+    if "PRIMITIVE_AO_PERTURBATION" in sections:
+        primitive_ao_perturbation_ha = parse_complex_matrix(
+            sections["PRIMITIVE_AO_PERTURBATION"],
+            "PRIMITIVE_AO_PERTURBATION",
+            n_auxiliary * n_primitive,
+            n_fixed_ao,
+        ).reshape(n_auxiliary, n_primitive, n_fixed_ao)
     frequency_ha, frequency_weight_ha = _parse_frequency_grid(
         sections["FREQUENCY_GRID"], n_frequency
     )
@@ -125,6 +145,8 @@ def read_sternheimer_primitive_galerkin(path):
         frequency_ha=frequency_ha,
         frequency_weight_ha=frequency_weight_ha,
         provenance=parse_provenance(sections["PROVENANCE_JSON"]),
+        primitive_ao_hamiltonian_ha=primitive_ao_hamiltonian_ha,
+        primitive_ao_perturbation_ha=primitive_ao_perturbation_ha,
     )
 
 

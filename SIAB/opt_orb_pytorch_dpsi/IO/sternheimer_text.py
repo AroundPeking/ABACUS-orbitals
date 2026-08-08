@@ -7,8 +7,12 @@ import torch
 from sternheimer_data import PrimitiveBlock
 
 
-def read_sections(path, required_sections):
+def read_sections(path, required_sections, optional_sections=()):
     required_sections = tuple(required_sections)
+    optional_sections = tuple(optional_sections)
+    accepted_sections = required_sections + optional_sections
+    if len(set(accepted_sections)) != len(accepted_sections):
+        raise ValueError("required and optional section names must be unique")
     sections = {}
     opened_sections = set()
     current_name = None
@@ -37,7 +41,7 @@ def read_sections(path, required_sections):
                     raise ValueError(
                         f"malformed section tag on line {line_number}: {line}"
                     )
-                if name not in required_sections:
+                if name not in accepted_sections:
                     raise ValueError(f"unknown section tag: {name}")
 
                 if closing:
