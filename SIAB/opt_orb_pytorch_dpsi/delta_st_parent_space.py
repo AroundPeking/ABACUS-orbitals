@@ -10,6 +10,7 @@ from typing import Dict, Tuple
 import torch
 
 from fixed_ao_librpa_compare import read_coulomb
+from frozen_occupied_delta_st import evaluate_frozen_occupied_delta_st
 from primitive_galerkin import evaluate_primitive_galerkin
 from sternheimer_fixed_ao_data import AuxiliaryChannel
 from sternheimer_primitive_galerkin_data import SternheimerPrimitiveGalerkinData
@@ -304,11 +305,70 @@ def analyze_parent_response(
         relative_rank_tolerance=relative_rank_tolerance,
         condition_limit=condition_limit,
     )
+    return _assemble_parent_analysis(
+        reference,
+        coulomb,
+        parent_response_m=parent.response,
+        parent_dimension=coefficients.shape[1],
+        radial_count=radial_count,
+        lmax=lmax,
+        overlap_condition_by_spin=parent.overlap_condition_by_spin,
+        eigenvalue_threshold=eigenvalue_threshold,
+    )
+
+
+def analyze_frozen_occupied_parent_response(
+    reference,
+    primitive,
+    fixed_ao,
+    coulomb,
+    *,
+    radial_count,
+    lmax,
+    eigenvalue_threshold=0.0,
+    relative_rank_tolerance=1.0e-12,
+    condition_limit=1.0e12,
+    eigenvalue_tolerance_ha=1.0e-8,
+):
+    """Compare a fixed-LCAO-occupied Delta-ST parent response with the grid reference."""
+    validate_parent_space_protocol(reference, primitive, coulomb)
+    coefficients = build_parent_coefficients(primitive, radial_count, lmax)
+    parent = evaluate_frozen_occupied_delta_st(
+        primitive,
+        fixed_ao,
+        coefficients,
+        relative_rank_tolerance=relative_rank_tolerance,
+        condition_limit=condition_limit,
+        eigenvalue_tolerance_ha=eigenvalue_tolerance_ha,
+    )
+    return _assemble_parent_analysis(
+        reference,
+        coulomb,
+        parent_response_m=parent.response,
+        parent_dimension=coefficients.shape[1],
+        radial_count=radial_count,
+        lmax=lmax,
+        overlap_condition_by_spin=parent.projected_overlap_condition_by_spin,
+        eigenvalue_threshold=eigenvalue_threshold,
+    )
+
+
+def _assemble_parent_analysis(
+    reference,
+    coulomb,
+    *,
+    parent_response_m,
+    parent_dimension,
+    radial_count,
+    lmax,
+    overlap_condition_by_spin,
+    eigenvalue_threshold,
+):
     reference_pi, transform = symmetric_response(
         coulomb.matrix, reference.response_m, eigenvalue_threshold
     )
     parent_pi, parent_transform = symmetric_response(
-        coulomb.matrix, parent.response, eigenvalue_threshold
+        coulomb.matrix, parent_response_m, eigenvalue_threshold
     )
     if parent_transform != transform:
         raise RuntimeError("Coulomb transforms differ")
@@ -324,10 +384,10 @@ def analyze_parent_response(
     )
     energy_error = parent_energy - reference_energy
     return ParentSpaceAnalysis(
-        parent_dimension=coefficients.shape[1],
+        parent_dimension=parent_dimension,
         radial_count=radial_count,
         lmax=lmax,
-        parent_response_m=parent.response,
+        parent_response_m=parent_response_m,
         parent_pi=parent_pi,
         reference_pi=reference_pi,
         per_frequency_pi_relative_frobenius=per_frequency,
@@ -339,7 +399,7 @@ def analyze_parent_response(
         reference_energy_ha=reference_energy,
         energy_error_ha=energy_error,
         energy_error_kcal_mol=energy_error * _HARTREE_TO_KCAL_MOL,
-        overlap_condition_by_spin=parent.overlap_condition_by_spin,
+        overlap_condition_by_spin=overlap_condition_by_spin,
         coulomb_transform=transform,
     )
 
