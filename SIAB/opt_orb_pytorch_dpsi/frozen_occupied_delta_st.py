@@ -40,11 +40,18 @@ def evaluate_frozen_occupied_delta_st(
     fixed_ao,
     coefficients,
     *,
+    include_fixed_ao_virtual=False,
     relative_rank_tolerance=1.0e-12,
     condition_limit=1.0e12,
     eigenvalue_tolerance_ha=1.0e-8,
 ):
-    """Solve projected Sternheimer equations without changing LCAO occupied states."""
+    """Solve projected Sternheimer equations without changing LCAO occupied states.
+
+    When requested, the trial space is the union of the Bessel parent and the
+    unoccupied fixed-LCAO eigenstates, matching the Delta-ST decomposition.
+    """
+    if type(include_fixed_ao_virtual) is not bool:
+        raise ValueError("include_fixed_ao_virtual must be a boolean")
     relative_rank_tolerance, condition_limit, eigenvalue_tolerance_ha = (
         _validate_inputs(
             primitive,
@@ -116,9 +123,38 @@ def evaluate_frozen_occupied_delta_st(
 
     for spin in range(primitive.hamiltonian_ha.shape[0]):
         occupied = fixed_ao.occupation[spin] > 0.0
+        trial_overlap = parent_overlap
+        trial_hamiltonian = parent_hamiltonian[spin]
+        trial_ao_overlap = parent_ao_overlap
+        trial_ao_hamiltonian = parent_ao_hamiltonian[spin]
+        trial_ao_perturbation = parent_ao_perturbation
+        if include_fixed_ao_virtual and bool(torch.any(~occupied)):
+            virtual_state = _orthonormalize_columns(
+                ao_coefficient[spin][:, ~occupied],
+                primitive.fixed_ao_grid_overlap,
+                relative_rank_tolerance,
+                condition_limit,
+            )
+            (
+                trial_overlap,
+                trial_hamiltonian,
+                trial_ao_overlap,
+                trial_ao_hamiltonian,
+                trial_ao_perturbation,
+            ) = _augment_with_fixed_ao_virtuals(
+                parent_overlap,
+                parent_hamiltonian[spin],
+                parent_ao_overlap,
+                parent_ao_hamiltonian[spin],
+                parent_ao_perturbation,
+                primitive.fixed_ao_grid_overlap,
+                primitive.fixed_ao_grid_hamiltonian_ha[spin],
+                fixed_ao.perturbation_ha,
+                virtual_state,
+            )
         if not bool(torch.any(occupied)):
             rank, dropped, condition = _positive_metric_rank(
-                parent_overlap,
+                trial_overlap,
                 relative_rank_tolerance,
                 condition_limit,
             )
@@ -140,9 +176,9 @@ def evaluate_frozen_occupied_delta_st(
             condition_limit,
         )
 
-        overlap_parent_projector = parent_ao_overlap @ occupied_projector
+        overlap_parent_projector = trial_ao_overlap @ occupied_projector
         hamiltonian_parent_projector = (
-            parent_ao_hamiltonian[spin] @ occupied_projector
+            trial_ao_hamiltonian @ occupied_projector
         )
         projector_hamiltonian = _hermitize(
             occupied_projector.mH
@@ -150,11 +186,11 @@ def evaluate_frozen_occupied_delta_st(
             @ occupied_projector
         )
         projected_overlap = _hermitize(
-            parent_overlap
+            trial_overlap
             - overlap_parent_projector @ overlap_parent_projector.mH
         )
         projected_hamiltonian = _hermitize(
-            parent_hamiltonian[spin]
+            trial_hamiltonian
             - overlap_parent_projector @ hamiltonian_parent_projector.mH
             - hamiltonian_parent_projector @ overlap_parent_projector.mH
             + overlap_parent_projector
@@ -178,7 +214,7 @@ def evaluate_frozen_occupied_delta_st(
         for local_state, band_index in enumerate(occupied_indices):
             state = occupied_state[:, local_state]
             parent_perturbation_state = torch.stack(
-                tuple(value @ state for value in parent_ao_perturbation)
+                tuple(value @ state for value in trial_ao_perturbation)
             ).mT
             projector_perturbation_state = torch.stack(
                 tuple(
@@ -220,6 +256,76 @@ def evaluate_frozen_occupied_delta_st(
         projected_overlap_condition_by_spin=tuple(projected_condition),
         fixed_ao_overlap_condition=fixed_ao_overlap_condition,
         fixed_ao_eigenvalue_max_abs_error_ha=eigenvalue_error,
+    )
+
+
+def _augment_with_fixed_ao_virtuals(
+    parent_overlap,
+    parent_hamiltonian,
+    parent_ao_overlap,
+    parent_ao_hamiltonian,
+    parent_ao_perturbation,
+    fixed_ao_grid_overlap,
+    fixed_ao_grid_hamiltonian,
+    fixed_ao_perturbation,
+    virtual_state,
+):
+    parent_virtual_overlap = parent_ao_overlap @ virtual_state
+    virtual_overlap = _hermitize(
+        virtual_state.mH @ fixed_ao_grid_overlap @ virtual_state
+    )
+    trial_overlap = _hermitize(
+        torch.cat(
+            (
+                torch.cat((parent_overlap, parent_virtual_overlap), dim=1),
+                torch.cat((parent_virtual_overlap.mH, virtual_overlap), dim=1),
+            ),
+            dim=0,
+        )
+    )
+
+    parent_virtual_hamiltonian = parent_ao_hamiltonian @ virtual_state
+    virtual_hamiltonian = _hermitize(
+        virtual_state.mH @ fixed_ao_grid_hamiltonian @ virtual_state
+    )
+    trial_hamiltonian = _hermitize(
+        torch.cat(
+            (
+                torch.cat(
+                    (parent_hamiltonian, parent_virtual_hamiltonian), dim=1
+                ),
+                torch.cat(
+                    (parent_virtual_hamiltonian.mH, virtual_hamiltonian), dim=1
+                ),
+            ),
+            dim=0,
+        )
+    )
+
+    virtual_ao_overlap = virtual_state.mH @ fixed_ao_grid_overlap
+    virtual_ao_hamiltonian = virtual_state.mH @ fixed_ao_grid_hamiltonian
+    trial_ao_overlap = torch.cat(
+        (parent_ao_overlap, virtual_ao_overlap), dim=0
+    )
+    trial_ao_hamiltonian = torch.cat(
+        (parent_ao_hamiltonian, virtual_ao_hamiltonian), dim=0
+    )
+    trial_ao_perturbation = torch.stack(
+        tuple(
+            torch.cat(
+                (parent_value, virtual_state.mH @ fixed_value), dim=0
+            )
+            for parent_value, fixed_value in zip(
+                parent_ao_perturbation, fixed_ao_perturbation
+            )
+        )
+    )
+    return (
+        trial_overlap,
+        trial_hamiltonian,
+        trial_ao_overlap,
+        trial_ao_hamiltonian,
+        trial_ao_perturbation,
     )
 
 
