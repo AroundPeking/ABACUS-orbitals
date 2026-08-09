@@ -197,10 +197,12 @@ def evaluate_frozen_occupied_delta_st(
             @ projector_hamiltonian
             @ overlap_parent_projector.mH
         )
-        transform, rank, dropped, condition = _positive_metric_transform(
-            projected_overlap,
-            relative_rank_tolerance,
-            condition_limit,
+        transform, rank, dropped, condition = (
+            _positive_metric_coordinate_transform(
+                projected_overlap,
+                relative_rank_tolerance,
+                condition_limit,
+            )
         )
         transformed_hamiltonian = _hermitize(
             transform.mH @ projected_hamiltonian @ transform
@@ -455,6 +457,68 @@ def _positive_metric_transform(
         torch.complex128
     )
     return transform, rank, dropped, condition
+
+
+def _positive_metric_coordinate_transform(
+    metric,
+    relative_rank_tolerance,
+    condition_limit,
+):
+    """Whiten a fixed-rank metric without differentiating eigenvectors."""
+    _, rank, dropped, condition = _positive_metric_transform(
+        metric.detach(),
+        relative_rank_tolerance,
+        condition_limit,
+    )
+    indices = _pivoted_coordinate_indices(metric.detach(), rank)
+    selection = torch.eye(
+        metric.shape[0], dtype=metric.dtype, device=metric.device
+    )[:, indices]
+    coordinate_metric = _hermitize(selection.mH @ metric @ selection)
+    cholesky = torch.linalg.cholesky(coordinate_metric)
+    identity = torch.eye(rank, dtype=metric.dtype, device=metric.device)
+    whitening = torch.linalg.solve_triangular(
+        cholesky.mH,
+        identity,
+        upper=True,
+    )
+    return selection @ whitening, rank, dropped, condition
+
+
+def _pivoted_coordinate_indices(metric, rank):
+    diagonal = torch.real(torch.diagonal(metric)).clone()
+    factor = torch.zeros(
+        (metric.shape[0], rank), dtype=metric.dtype, device=metric.device
+    )
+    selected = []
+    available = torch.ones(metric.shape[0], dtype=torch.bool, device=metric.device)
+    scale = max(float(torch.max(diagonal)), 1.0)
+    minimum_pivot = torch.finfo(torch.float64).eps * scale
+    for column in range(rank):
+        scores = torch.where(
+            available,
+            diagonal,
+            torch.full_like(diagonal, -torch.inf),
+        )
+        pivot = int(torch.argmax(scores).item())
+        pivot_value = float(scores[pivot])
+        if not math.isfinite(pivot_value) or pivot_value <= minimum_pivot:
+            raise RuntimeError("metric has no stable coordinate subset")
+        selected.append(pivot)
+        available[pivot] = False
+        correction = (
+            0.0
+            if column == 0
+            else factor[:, :column] @ factor[pivot, :column].conj()
+        )
+        factor[:, column] = (metric[:, pivot] - correction) / math.sqrt(
+            pivot_value
+        )
+        diagonal = torch.clamp(
+            diagonal - torch.abs(factor[:, column]) ** 2,
+            min=0.0,
+        )
+    return torch.tensor(selected, dtype=torch.long, device=metric.device)
 
 
 def _require_tensor(name, value, dtype, rank):
