@@ -44,6 +44,7 @@ def evaluate_frozen_occupied_delta_st(
     relative_rank_tolerance=1.0e-12,
     condition_limit=1.0e12,
     eigenvalue_tolerance_ha=1.0e-8,
+    active_spin_excluded_columns=(),
 ):
     """Solve projected Sternheimer equations without changing LCAO occupied states.
 
@@ -63,6 +64,10 @@ def evaluate_frozen_occupied_delta_st(
         )
     )
     coefficient_h = coefficients.mH
+    active_spin_excluded_columns = _validate_excluded_columns(
+        active_spin_excluded_columns,
+        coefficients.shape[1],
+    )
     parent_overlap = _hermitize(coefficient_h @ primitive.overlap @ coefficients)
     parent_hamiltonian = torch.stack(
         tuple(
@@ -128,6 +133,28 @@ def evaluate_frozen_occupied_delta_st(
         trial_ao_overlap = parent_ao_overlap
         trial_ao_hamiltonian = parent_ao_hamiltonian[spin]
         trial_ao_perturbation = parent_ao_perturbation
+        excluded_count = 0
+        if bool(torch.any(occupied)) and active_spin_excluded_columns:
+            keep = tuple(
+                index
+                for index in range(parent_overlap.shape[0])
+                if index not in active_spin_excluded_columns
+            )
+            (
+                trial_overlap,
+                trial_hamiltonian,
+                trial_ao_overlap,
+                trial_ao_hamiltonian,
+                trial_ao_perturbation,
+            ) = _select_trial_columns(
+                parent_overlap,
+                parent_hamiltonian[spin],
+                parent_ao_overlap,
+                parent_ao_hamiltonian[spin],
+                parent_ao_perturbation,
+                keep,
+            )
+            excluded_count = len(active_spin_excluded_columns)
         if include_fixed_ao_virtual and bool(torch.any(~occupied)):
             virtual_state = _orthonormalize_columns(
                 ao_coefficient[spin][:, ~occupied],
@@ -142,11 +169,11 @@ def evaluate_frozen_occupied_delta_st(
                 trial_ao_hamiltonian,
                 trial_ao_perturbation,
             ) = _augment_with_fixed_ao_virtuals(
-                parent_overlap,
-                parent_hamiltonian[spin],
-                parent_ao_overlap,
-                parent_ao_hamiltonian[spin],
-                parent_ao_perturbation,
+                trial_overlap,
+                trial_hamiltonian,
+                trial_ao_overlap,
+                trial_ao_hamiltonian,
+                trial_ao_perturbation,
                 primitive.fixed_ao_grid_overlap,
                 primitive.fixed_ao_grid_hamiltonian_ha[spin],
                 fixed_ao.perturbation_ha,
@@ -208,7 +235,7 @@ def evaluate_frozen_occupied_delta_st(
             transform.mH @ projected_hamiltonian @ transform
         )
         retained_rank.append(rank)
-        dropped_rank.append(dropped)
+        dropped_rank.append(dropped + excluded_count)
         projected_condition.append(condition)
         identity = torch.eye(rank, dtype=torch.complex128, device="cpu")
 
@@ -331,6 +358,24 @@ def _augment_with_fixed_ao_virtuals(
     )
 
 
+def _select_trial_columns(
+    overlap,
+    hamiltonian,
+    ao_overlap,
+    ao_hamiltonian,
+    ao_perturbation,
+    keep,
+):
+    index = torch.tensor(keep, dtype=torch.long, device=overlap.device)
+    return (
+        overlap.index_select(0, index).index_select(1, index),
+        hamiltonian.index_select(0, index).index_select(1, index),
+        ao_overlap.index_select(0, index),
+        ao_hamiltonian.index_select(0, index),
+        ao_perturbation.index_select(1, index),
+    )
+
+
 def _validate_inputs(
     primitive,
     fixed_ao,
@@ -380,6 +425,23 @@ def _validate_inputs(
         "eigenvalue_tolerance_ha", eigenvalue_tolerance_ha
     )
     return relative_rank_tolerance, condition_limit, eigenvalue_tolerance_ha
+
+
+def _validate_excluded_columns(value, dimension):
+    if not isinstance(value, (tuple, list)):
+        raise ValueError("active_spin_excluded_columns must be a tuple or list")
+    result = []
+    for index in value:
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("active-spin excluded columns must be integers")
+        if index < 0 or index >= dimension:
+            raise ValueError("active-spin excluded column is outside the basis")
+        if index in result:
+            raise ValueError("active-spin excluded columns must be unique")
+        result.append(index)
+    if len(result) >= dimension:
+        raise ValueError("active-spin exclusions cannot remove the full basis")
+    return tuple(result)
 
 
 def _generalized_eigensystem(overlap, hamiltonian, tolerance, condition_limit):

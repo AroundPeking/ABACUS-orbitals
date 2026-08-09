@@ -70,6 +70,7 @@ class FrozenOccupiedDeltaSTCompression:
         relative_rank_tolerance=1.0e-12,
         condition_limit=1.0e12,
         eigenvalue_tolerance_ha=1.0e-8,
+        active_spin_excluded_columns=(),
     ):
         validate_parent_space_protocol(reference, primitive, coulomb)
         _validate_fixed_ao_protocol(primitive, fixed_ao)
@@ -92,6 +93,7 @@ class FrozenOccupiedDeltaSTCompression:
         self.eigenvalue_tolerance_ha = _finite_positive(
             "eigenvalue_tolerance_ha", eigenvalue_tolerance_ha
         )
+        self.active_spin_excluded_columns = tuple(active_spin_excluded_columns)
 
         self._reference_pi, self._coulomb_transform = symmetric_response(
             coulomb.matrix,
@@ -122,6 +124,7 @@ class FrozenOccupiedDeltaSTCompression:
             relative_rank_tolerance=self.relative_rank_tolerance,
             condition_limit=self.condition_limit,
             eigenvalue_tolerance_ha=self.eigenvalue_tolerance_ha,
+            active_spin_excluded_columns=self.active_spin_excluded_columns,
         )
         candidate_pi, transform = symmetric_response(
             self.coulomb.matrix,

@@ -125,6 +125,7 @@ def main():
         coulomb,
         family_name="H",
         relative_rank_tolerance=args.relative_rank_tolerance,
+        active_spin_excluded_columns=(0,),
     )
     optimization = run_delta_st_response_optimization(
         objective,
@@ -176,6 +177,7 @@ def main():
         ],
         "variable_orbitals": ["H/l0/zeta3", "H/l1/zeta2"],
         "occupied_anchor": _anchor_payload(occupied_anchor),
+        "active_spin_excluded_columns": [0],
         "relative_rank_tolerance": args.relative_rank_tolerance,
         "optimization_parameters": {
             "max_steps": args.max_steps,
