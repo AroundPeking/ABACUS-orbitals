@@ -143,6 +143,31 @@ class FrozenOccupiedDeltaSTTest(unittest.TestCase):
         self.assertEqual(result.dropped_parent_rank_by_spin, (1,))
         self.assertLess(result.fixed_ao_eigenvalue_max_abs_error_ha, 1.0e-14)
 
+    def test_excludes_the_reserved_occupied_anchor_from_the_active_trial_space(self):
+        primitive, fixed, _ = _inputs()
+        coefficients = torch.eye(3, dtype=torch.complex128)
+        changed_anchor = coefficients.clone()
+        changed_anchor[:, 0] = torch.tensor(
+            [1.0, 0.2, -0.1], dtype=torch.complex128
+        )
+
+        baseline = evaluate_frozen_occupied_delta_st(
+            primitive,
+            fixed,
+            coefficients,
+            active_spin_excluded_columns=(0,),
+        )
+        changed = evaluate_frozen_occupied_delta_st(
+            primitive,
+            fixed,
+            changed_anchor,
+            active_spin_excluded_columns=(0,),
+        )
+
+        torch.testing.assert_close(changed.response, baseline.response)
+        self.assertEqual(baseline.retained_parent_rank_by_spin, (2,))
+        self.assertEqual(baseline.dropped_parent_rank_by_spin, (1,))
+
     def test_requires_exact_cross_matrices(self):
         primitive, fixed, _ = _inputs()
         primitive = dataclasses.replace(
