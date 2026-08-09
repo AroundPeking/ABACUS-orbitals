@@ -14,7 +14,10 @@ OPT_DIR = TEST_DIR.parent / "opt_orb_pytorch_dpsi"
 sys.path.insert(0, str(OPT_DIR))
 
 from delta_st_parent_space import DeltaSTReference, FullCoulombMatrix
-from delta_st_response_compression import FrozenOccupiedDeltaSTCompression
+from delta_st_response_compression import (
+    FrozenOccupiedDeltaSTCompression,
+    anchor_atomic_occupied_radial,
+)
 from frozen_occupied_delta_st import evaluate_frozen_occupied_delta_st
 from common import info
 from optimization_loss import normalize_loss_config
@@ -190,6 +193,66 @@ def _converge(objective, max_steps=8):
 
 
 class DeltaSTResponseCompressionTest(unittest.TestCase):
+    def test_atomic_occupied_anchor_preserves_initial_span_and_exact_occupancy(self):
+        primitive, fixed, _, _ = _fixture()
+        inverse_sqrt_two = 2.0 ** -0.5
+        eigenvector = torch.tensor(
+            [
+                [inverse_sqrt_two, inverse_sqrt_two, 0.0],
+                [inverse_sqrt_two, -inverse_sqrt_two, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=torch.complex128,
+        )
+        fixed = SternheimerFixedAOData(
+            format_version=1,
+            representation="fixed_lcao_gamma",
+            energy_unit="Ha",
+            channels=fixed.channels,
+            eigenvalue_ha=torch.tensor([[-0.5, 0.2, 0.8]], dtype=torch.float64),
+            occupation=torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64),
+            overlap=torch.eye(3, dtype=torch.complex128),
+            hamiltonian_ha=(
+                eigenvector
+                @ torch.diag(
+                    torch.tensor([-0.5, 0.2, 0.8], dtype=torch.complex128)
+                )
+                @ eigenvector.mH
+            ).reshape(1, 3, 3),
+            perturbation_ha=torch.zeros((2, 3, 3), dtype=torch.complex128),
+            frequency_ha=fixed.frequency_ha,
+            frequency_weight_ha=fixed.frequency_weight_ha,
+            provenance=fixed.provenance,
+        )
+        coefficients = {
+            "H": [
+                torch.eye(3, dtype=torch.float64, requires_grad=True)
+            ]
+        }
+
+        anchored, metadata = anchor_atomic_occupied_radial(
+            primitive,
+            fixed,
+            coefficients,
+            element="H",
+        )
+
+        expected_occupied = eigenvector[:, 0].real
+        torch.testing.assert_close(
+            anchored["H"][0][:, 0], expected_occupied
+        )
+        anchored_s = anchored["H"][0]
+        projector = (
+            anchored_s
+            @ torch.linalg.inv(anchored_s.mT @ anchored_s)
+            @ anchored_s.mT
+        )
+        torch.testing.assert_close(projector, torch.eye(3, dtype=torch.float64))
+        self.assertEqual(metadata.occupied_band_index, 0)
+        self.assertEqual(metadata.omitted_original_s_zeta, 1)
+        self.assertLess(metadata.maximum_off_s_coefficient, 1.0e-14)
+        self.assertTrue(anchored["H"][0].requires_grad)
+
     def test_variable_lcao_has_descent_gradient_toward_missing_response(self):
         primitive, fixed, reference, coulomb = _fixture()
         objective = FrozenOccupiedDeltaSTCompression(
