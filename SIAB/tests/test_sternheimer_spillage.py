@@ -13,6 +13,8 @@ from sternheimer_spillage import (
     radial_residual_spectrum,
     shell_count_for_capture,
 )
+from sternheimer_fixed_ao_data import AuxiliaryChannel
+from sternheimer_primitive_galerkin_data import SternheimerPrimitiveGalerkinData
 
 
 def make_sternheimer_data(
@@ -83,6 +85,63 @@ def h_s_block(n_primitive):
         m=0,
         n_primitive=n_primitive,
         offset=0,
+    )
+
+
+def make_primitive_galerkin_assembly_data():
+    blocks = tuple(
+        PrimitiveBlock("H", 0, 1, m, 2, 2 * (m + 1))
+        for m in (-1, 0, 1)
+    )
+    channel = AuxiliaryChannel(0, 0, 0, 0, 0, "H0_l0_n0_m0")
+    overlap = torch.eye(6, dtype=torch.complex128)
+    hamiltonian = torch.diag(
+        torch.linspace(0.1, 0.6, 6, dtype=torch.float64).to(torch.complex128)
+    ).reshape(1, 6, 6)
+    perturbation = torch.zeros((1, 6, 6), dtype=torch.complex128)
+    return SternheimerPrimitiveGalerkinData(
+        format_version=1,
+        representation="bessel_primitive_uniform_grid_gamma",
+        energy_unit="Ha",
+        blocks=blocks,
+        channels=(channel,),
+        occupation=torch.tensor([[1.0]], dtype=torch.float64),
+        overlap=overlap,
+        hamiltonian_ha=hamiltonian,
+        perturbation_ha=perturbation,
+        primitive_ao_overlap=torch.zeros((6, 1), dtype=torch.complex128),
+        fixed_ao_grid_overlap=torch.eye(1, dtype=torch.complex128),
+        fixed_ao_grid_hamiltonian_ha=torch.tensor(
+            [[[-0.5]]], dtype=torch.complex128
+        ),
+        frequency_ha=torch.tensor([0.2], dtype=torch.float64),
+        frequency_weight_ha=torch.tensor([1.0], dtype=torch.float64),
+        provenance={
+            "abacus_commit": "1" * 40,
+            "auxiliary_basis_sha256": "a" * 64,
+            "cell_bohr": [
+                20.0,
+                0.0,
+                0.0,
+                0.0,
+                20.0,
+                0.0,
+                0.0,
+                0.0,
+                20.0,
+            ],
+            "ecut_ry": 100.0,
+            "kernel": "full_coulomb",
+            "orbital_sha256": "b" * 64,
+            "pseudopotential_sha256": "c" * 64,
+            "spin_convention": "occupation_in_metadata",
+        },
+        primitive_ao_hamiltonian_ha=torch.zeros(
+            (1, 6, 1), dtype=torch.complex128
+        ),
+        primitive_ao_perturbation_ha=torch.zeros(
+            (1, 6, 1), dtype=torch.complex128
+        ),
     )
 
 
@@ -646,6 +705,31 @@ class SternheimerSpillageTest(unittest.TestCase):
             column = 2 * block_index
             expected[row : row + 2, column : column + 2] = radial
         self.assertEqual(assembled.shape, (6, 6))
+        torch.testing.assert_close(assembled, expected)
+        self.assertEqual(
+            labels,
+            tuple(
+                OrbitalColumn("H", 0, 1, m, zeta)
+                for m in (-1, 0, 1)
+                for zeta in (1, 2)
+            ),
+        )
+
+    def test_primitive_galerkin_assembly_reuses_radial_coefficients(self):
+        data = make_primitive_galerkin_assembly_data()
+        radial = torch.tensor(
+            [[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64
+        )
+
+        assembled, labels = assemble_orbital_coefficients(
+            data, {"H": {1: radial}}
+        )
+
+        expected = torch.zeros((6, 6), dtype=torch.complex128)
+        for block_index in range(3):
+            row = 2 * block_index
+            column = 2 * block_index
+            expected[row : row + 2, column : column + 2] = radial
         torch.testing.assert_close(assembled, expected)
         self.assertEqual(
             labels,
