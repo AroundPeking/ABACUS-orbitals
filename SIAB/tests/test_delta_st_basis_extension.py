@@ -109,6 +109,47 @@ class DeltaSTBasisExtensionTest(unittest.TestCase):
         self.assertEqual(result.initial_loss, 1.0)
         self.assertEqual(result.selected_loss, 0.0)
 
+    def test_averages_the_magnetic_metrics_for_a_shared_radial(self):
+        blocks = tuple(
+            PrimitiveBlock("H", 0, 2, m, 3, 3 * index)
+            for index, m in enumerate((-2, -1, 0, 1, 2))
+        )
+        diagonal_by_m = (
+            (1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.1),
+            (1.0, 1.0, 0.9),
+            (1.0, 1.0, 1.1),
+            (1.0, 1.0, 0.9),
+        )
+        overlap = torch.block_diag(
+            *(
+                torch.diag(torch.tensor(diagonal, dtype=torch.complex128))
+                for diagonal in diagonal_by_m
+            )
+        )
+        primitive = types.SimpleNamespace(blocks=blocks, overlap=overlap)
+        coefficients = {
+            "H": [
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+            ]
+        }
+
+        result = select_metric_complement_shell(
+            primitive,
+            _TargetFirstPrimitiveFromEmpty(),
+            coefficients,
+            element="H",
+            l=2,
+        )
+
+        self.assertEqual(result.selected_mode, 0)
+        self.assertAlmostEqual(
+            result.maximum_magnetic_metric_relative_deviation,
+            0.1,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -121,6 +121,7 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
             selected_loss=0.08,
             candidate_losses=(0.11, 0.10, 0.09, 0.085, 0.08),
             radial_metric_condition=30.0,
+            maximum_magnetic_metric_relative_deviation=4.0e-7,
             maximum_metric_orthogonality=2.0e-15,
             metric_normalization_error=3.0e-15,
         )
@@ -135,6 +136,10 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
             [0.11, 0.10, 0.09, 0.085, 0.08],
         )
         self.assertEqual(payload["selected_loss"], 0.08)
+        self.assertEqual(
+            payload["maximum_magnetic_metric_relative_deviation"],
+            4.0e-7,
+        )
 
     def test_variable_orbitals_follow_the_extended_radial_counts(self):
         self.assertEqual(
