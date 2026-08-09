@@ -286,6 +286,39 @@ class DeltaSTParentSpaceTest(unittest.TestCase):
         self.assertLess(result.maximum_pi_relative_frobenius, 1.0e-13)
         self.assertLess(abs(result.energy_error_ha), 1.0e-14)
 
+    def test_frozen_occupied_analysis_can_retain_fixed_lcao_virtual_space(self):
+        data = _primitive_data()
+        reference = _reference(data)
+        coulomb = FullCoulombMatrix(
+            matrix=torch.diag(
+                torch.tensor([2.0, 4.0], dtype=torch.complex128)
+            ),
+            atom_naux=(2,),
+            provenance=dict(data.provenance),
+        )
+
+        bessel_only = analyze_frozen_occupied_parent_response(
+            reference,
+            data,
+            _fixed_ao_data(data),
+            coulomb,
+            radial_count=1,
+            lmax=1,
+        )
+        augmented = analyze_frozen_occupied_parent_response(
+            reference,
+            data,
+            _fixed_ao_data(data),
+            coulomb,
+            radial_count=1,
+            lmax=1,
+            include_fixed_ao_virtual=True,
+        )
+
+        self.assertGreater(bessel_only.maximum_pi_relative_frobenius, 1.0e-3)
+        self.assertLess(augmented.maximum_pi_relative_frobenius, 1.0e-13)
+        self.assertLess(abs(augmented.energy_error_ha), 1.0e-14)
+
     def test_trace_log_integration_reproduces_existing_fixed_ao_librpa_result(self):
         weight = torch.tensor(
             [
