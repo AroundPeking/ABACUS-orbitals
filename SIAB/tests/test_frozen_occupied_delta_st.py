@@ -133,6 +133,40 @@ class FrozenOccupiedDeltaSTTest(unittest.TestCase):
                 torch.eye(3, dtype=torch.complex128),
             )
 
+    def test_can_retain_fixed_lcao_virtual_states_alongside_bessel_parent(self):
+        primitive, fixed, perturbation = _inputs()
+        coefficients = torch.eye(3, dtype=torch.complex128)[:, [0, 2]]
+
+        bessel_only = evaluate_frozen_occupied_delta_st(
+            primitive,
+            fixed,
+            coefficients,
+        )
+        augmented = evaluate_frozen_occupied_delta_st(
+            primitive,
+            fixed,
+            coefficients,
+            include_fixed_ao_virtual=True,
+        )
+        expected = evaluate_galerkin_response(
+            torch.eye(3, dtype=torch.complex128),
+            torch.diag(
+                torch.tensor([-0.5, 0.2, 0.8], dtype=torch.complex128)
+            ),
+            perturbation,
+            torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64),
+            primitive.frequency_ha,
+        )
+
+        self.assertGreater(
+            float(torch.max(torch.abs(bessel_only.response - expected.response))),
+            1.0e-3,
+        )
+        torch.testing.assert_close(augmented.response_half, expected.response_half)
+        torch.testing.assert_close(augmented.response, expected.response)
+        self.assertEqual(augmented.retained_parent_rank_by_spin, (2,))
+        self.assertEqual(augmented.dropped_parent_rank_by_spin, (1,))
+
 
 if __name__ == "__main__":
     unittest.main()
