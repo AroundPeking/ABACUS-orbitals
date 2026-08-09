@@ -2,6 +2,7 @@
 
 import pathlib
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -11,7 +12,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 OPT_DIR = ROOT / "opt_orb_pytorch_dpsi"
 sys.path.insert(0, str(OPT_DIR))
 
-from delta_st_gradient_gate import run_delta_st_gradient_gate
+from delta_st_gradient_gate import (
+    require_file_sha256,
+    run_delta_st_gradient_gate,
+)
 from projected_pi_optimization import ProjectedPiOptimizationResult
 
 
@@ -32,6 +36,17 @@ class _QuadraticResponse:
 
 
 class DeltaSTGradientGateTest(unittest.TestCase):
+    def test_rejects_an_initial_orbital_from_a_different_protocol(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "H.orb"
+            path.write_bytes(b"matched orbital\n")
+
+            digest = require_file_sha256(path, None)
+            self.assertEqual(len(digest), 64)
+            self.assertEqual(require_file_sha256(path, digest), digest)
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                require_file_sha256(path, "0" * 64)
+
     def test_masks_fixed_gradient_and_accepts_only_a_lower_loss_step(self):
         coefficients = {
             "H": [
