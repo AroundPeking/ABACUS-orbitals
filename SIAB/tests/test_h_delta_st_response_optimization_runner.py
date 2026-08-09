@@ -11,7 +11,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUNNER_DIR = ROOT / "example_H_sternheimer" / "delta_st_response_compression"
 sys.path.insert(0, str(RUNNER_DIR))
 
-from run_h_response_optimization import _history_payload, parse_args
+from run_h_response_optimization import (
+    _anchor_payload,
+    _history_payload,
+    parse_args,
+)
 
 
 class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
@@ -64,6 +68,22 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
         self.assertEqual(payload["retained_rank_by_spin"], [8, 9])
         self.assertEqual(payload["dropped_rank_by_spin"], [1, 0])
         self.assertEqual(payload["masked_fixed_gradient_norm"], 0.0)
+
+    def test_occupied_anchor_payload_records_the_atomic_basis_rotation(self):
+        anchor = types.SimpleNamespace(
+            occupied_band_index=0,
+            omitted_original_s_zeta=1,
+            fixed_ao_coefficients=(0.99, 0.1, 0.01),
+            maximum_off_s_coefficient=2.0e-15,
+            eigenvalue_max_abs_error_ha=3.0e-12,
+        )
+
+        payload = _anchor_payload(anchor)
+
+        self.assertEqual(payload["occupied_band_index"], 0)
+        self.assertEqual(payload["omitted_original_s_zeta"], 1)
+        self.assertEqual(payload["fixed_ao_coefficients"], [0.99, 0.1, 0.01])
+        self.assertEqual(payload["maximum_off_s_coefficient"], 2.0e-15)
 
 
 if __name__ == "__main__":
