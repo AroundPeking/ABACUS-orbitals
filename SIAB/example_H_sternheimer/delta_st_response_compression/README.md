@@ -51,9 +51,14 @@ python run_h_response_optimization.py \
 ```
 
 The optimizer uses a monotone Armijo backtracking line search. Frozen columns
-are restored exactly at every trial. `optimization.json` stores every accepted
-step, including the full-frequency response loss, maximum frequency error,
-gradient norms, retained response ranks, overlap condition number, and the RPA
-correlation energy as a diagnostic. A converged optimization does not by itself
-prove that `3s2p` has enough response capacity; that is decided from the final
-response residual and held-out molecular tests.
+are restored exactly at every trial. Before optimization, the original three
+SG15 s orbitals are rotated within their unchanged span so the first radial
+column is the exact occupied atomic eigenstate. This column remains frozen;
+therefore the active-spin response space always has eight virtual directions
+and cannot gain an unphysical tenth direction by moving the fixed occupied
+state outside the nine-AO basis. `optimization.json` records this rotation and
+every accepted step, including the full-frequency response loss, maximum
+frequency error, gradient norms, retained response ranks, overlap condition
+number, and the RPA correlation energy as a diagnostic. A converged optimization
+does not by itself prove that `3s2p` has enough response capacity; that is
+decided from the final response residual and held-out molecular tests.

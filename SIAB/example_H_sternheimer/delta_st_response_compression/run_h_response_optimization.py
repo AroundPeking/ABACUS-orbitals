@@ -30,7 +30,10 @@ from delta_st_parent_space import (
     load_full_coulomb_matrix,
     rpa_correlation_energy,
 )
-from delta_st_response_compression import FrozenOccupiedDeltaSTCompression
+from delta_st_response_compression import (
+    FrozenOccupiedDeltaSTCompression,
+    anchor_atomic_occupied_radial,
+)
 from run_h_gradient_gate import (
     FREEZE_SPECS,
     HARTREE_TO_KCAL_MOL,
@@ -108,6 +111,12 @@ def main():
     )
     if len(initialization.loaded_indices) != sum(args.nu):
         raise ValueError("initial coefficient file does not define every requested AO")
+    coefficients, occupied_anchor = anchor_atomic_occupied_radial(
+        primitive,
+        fixed_ao,
+        coefficients,
+        element="H",
+    )
 
     objective = FrozenOccupiedDeltaSTCompression(
         reference,
@@ -147,7 +156,7 @@ def main():
     write_C(optimized_output, optimization.coefficients, optimization.final_loss)
     elapsed = time.perf_counter() - started
     diagnostics = {
-        "method": "h_delta_st_response_compression_optimization_v1",
+        "method": "h_delta_st_response_compression_optimization_v2",
         "siab_commit": args.siab_commit,
         "reference_abacus_commit": args.reference_commit,
         "sidecar_abacus_commit": args.sidecar_commit,
@@ -160,7 +169,13 @@ def main():
             sum((2 * l + 1) * count for l, count in enumerate(args.nu))
         ),
         "frozen_orbitals": list(FREEZE_SPECS),
+        "frozen_orbital_roles": [
+            "exact_atomic_occupied_s",
+            "fixed_s_complement",
+            "fixed_first_p",
+        ],
         "variable_orbitals": ["H/l0/zeta3", "H/l1/zeta2"],
+        "occupied_anchor": _anchor_payload(occupied_anchor),
         "relative_rank_tolerance": args.relative_rank_tolerance,
         "optimization_parameters": {
             "max_steps": args.max_steps,
@@ -229,6 +244,20 @@ def _history_payload(record):
         "maximum_condition": float(record.maximum_condition),
         "retained_rank_by_spin": list(record.retained_rank_by_spin),
         "dropped_rank_by_spin": list(record.dropped_rank_by_spin),
+    }
+
+
+def _anchor_payload(anchor):
+    return {
+        "occupied_band_index": int(anchor.occupied_band_index),
+        "omitted_original_s_zeta": int(anchor.omitted_original_s_zeta),
+        "fixed_ao_coefficients": [
+            float(value) for value in anchor.fixed_ao_coefficients
+        ],
+        "maximum_off_s_coefficient": float(anchor.maximum_off_s_coefficient),
+        "eigenvalue_max_abs_error_ha": float(
+            anchor.eigenvalue_max_abs_error_ha
+        ),
     }
 
 
