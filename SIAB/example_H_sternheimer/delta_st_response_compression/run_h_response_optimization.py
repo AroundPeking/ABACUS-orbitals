@@ -59,8 +59,9 @@ def parse_args():
     parser.add_argument(
         "--append-l",
         type=int,
+        nargs="+",
         default=None,
-        help="append one deterministic metric-complement radial in this l channel",
+        help="append deterministic metric-complement radials in this l order",
     )
     parser.add_argument("--relative-rank-tolerance", type=float, default=1.0e-7)
     parser.add_argument("--max-steps", type=int, default=100)
@@ -134,16 +135,17 @@ def main():
         relative_rank_tolerance=args.relative_rank_tolerance,
         active_spin_excluded_columns=(0,),
     )
-    extension = None
-    if args.append_l is not None:
+    extensions = []
+    for l in args.append_l or ():
         extension = select_metric_complement_shell(
             primitive,
             objective,
             coefficients,
             element="H",
-            l=args.append_l,
+            l=l,
         )
         coefficients = extension.coefficients
+        extensions.append(extension)
     optimization = run_delta_st_response_optimization(
         objective,
         coefficients,
@@ -177,7 +179,7 @@ def main():
         int(coefficients["H"][l].shape[1]) for l in range(lmax + 1)
     ]
     diagnostics = {
-        "method": "h_delta_st_response_compression_optimization_v3",
+        "method": "h_delta_st_response_compression_optimization_v4",
         "siab_commit": args.siab_commit,
         "reference_abacus_commit": args.reference_commit,
         "sidecar_abacus_commit": args.sidecar_commit,
@@ -201,8 +203,11 @@ def main():
         "variable_orbitals": _variable_orbitals(radial_orbitals_by_l),
         "occupied_anchor": _anchor_payload(occupied_anchor),
         "basis_extension": (
-            None if extension is None else _extension_payload(extension)
+            _extension_payload(extensions[0]) if len(extensions) == 1 else None
         ),
+        "basis_extensions": [
+            _extension_payload(extension) for extension in extensions
+        ],
         "active_spin_excluded_columns": [0],
         "relative_rank_tolerance": args.relative_rank_tolerance,
         "optimization_parameters": {
