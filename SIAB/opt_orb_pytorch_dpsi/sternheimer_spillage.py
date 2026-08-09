@@ -190,9 +190,9 @@ def assemble_orbital_coefficients(data, c):
         )
 
     assembled = torch.zeros(
-        (data.q.shape[1], n_column),
+        (data.overlap.shape[0], n_column),
         dtype=torch.complex128,
-        device=data.q.device,
+        device=data.overlap.device,
     )
     for block, coefficient, column_offset in block_data:
         row_slice = slice(block.offset, block.offset + block.n_primitive)
