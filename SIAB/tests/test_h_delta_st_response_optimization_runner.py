@@ -49,6 +49,30 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
         self.assertEqual(args.relative_loss_patience, 5)
         self.assertIsNone(args.append_l)
 
+    def test_parser_accepts_an_ordered_sequence_of_shell_extensions(self):
+        argv = [
+            "run_h_response_optimization.py",
+            "reference",
+            "primitive.dat",
+            "fixed_ao.dat",
+            "ORBITAL_RESULTS.txt",
+            "H.orb",
+            "output",
+            "--reference-commit",
+            "reference-commit",
+            "--sidecar-commit",
+            "sidecar-commit",
+            "--siab-commit",
+            "siab-commit",
+            "--append-l",
+            "1",
+            "2",
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            args = parse_args()
+
+        self.assertEqual(args.append_l, [1, 2])
+
     def test_history_payload_keeps_physical_convergence_diagnostics(self):
         record = types.SimpleNamespace(
             iteration=3,
