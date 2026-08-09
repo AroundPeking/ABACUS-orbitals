@@ -15,6 +15,7 @@ sys.path.insert(0, str(OPT_DIR))
 from delta_st_gradient_gate import (
     require_file_sha256,
     run_delta_st_gradient_gate,
+    run_delta_st_response_optimization,
 )
 from projected_pi_optimization import ProjectedPiOptimizationResult
 
@@ -32,6 +33,29 @@ class _QuadraticResponse:
             frequency_ha=torch.tensor([0.2], dtype=torch.float64),
             frequency_loss=loss.reshape(1),
             family_results={"H": object()},
+        )
+
+
+class _QuadraticFamily:
+    def __init__(self, loss):
+        self.frequency_loss = torch.stack((loss, 0.5 * loss))
+        self.retained_rank_by_spin = (1, 2)
+        self.dropped_rank_by_spin = (1, 0)
+
+
+class _DiagnosticQuadraticResponse:
+    def evaluate(self, coefficients):
+        value = coefficients["H"][0]
+        target = torch.tensor(
+            [[0.5, 0.4], [0.0, 0.6]], dtype=torch.float64
+        )
+        loss = torch.sum((value - target) ** 2)
+        return ProjectedPiOptimizationResult(
+            loss=loss,
+            max_condition=3.0,
+            frequency_ha=torch.tensor([0.2, 0.8], dtype=torch.float64),
+            frequency_loss=torch.stack((loss, 0.5 * loss)),
+            family_results={"H": _QuadraticFamily(loss)},
         )
 
 
@@ -78,6 +102,62 @@ class DeltaSTGradientGateTest(unittest.TestCase):
                 result.coefficients["H"][0][:, 1],
                 coefficients["H"][0][:, 1],
             )
+        )
+
+    def test_multistep_optimization_is_monotone_and_keeps_fixed_columns_exact(self):
+        coefficients = {
+            "H": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0]],
+                    dtype=torch.float64,
+                    requires_grad=True,
+                )
+            ]
+        }
+        fixed_before = coefficients["H"][0][:, 0].detach().clone()
+
+        result = run_delta_st_response_optimization(
+            _DiagnosticQuadraticResponse(),
+            coefficients,
+            [{"element": "H", "l": 0, "zeta": 1}],
+            max_steps=12,
+            initial_step=0.2,
+            relative_loss_tolerance=0.0,
+            gradient_tolerance=1.0e-14,
+        )
+
+        losses = [record.loss for record in result.history]
+        self.assertGreaterEqual(len(losses), 3)
+        self.assertTrue(
+            all(after < before for before, after in zip(losses, losses[1:]))
+        )
+        self.assertLess(result.final_loss, 0.45 * result.initial_loss)
+        self.assertTrue(
+            torch.equal(result.coefficients["H"][0][:, 0], fixed_before)
+        )
+        self.assertTrue(
+            all(
+                record.masked_fixed_gradient_norm == 0.0
+                for record in result.history[:-1]
+            )
+        )
+        self.assertTrue(
+            all(record.maximum_condition == 3.0 for record in result.history)
+        )
+        self.assertTrue(
+            all(
+                record.retained_rank_by_spin == (1, 2)
+                for record in result.history
+            )
+        )
+        self.assertTrue(
+            all(
+                record.dropped_rank_by_spin == (1, 0)
+                for record in result.history
+            )
+        )
+        self.assertTrue(
+            all(record.maximum_frequency_loss >= 0.0 for record in result.history)
         )
 
 
