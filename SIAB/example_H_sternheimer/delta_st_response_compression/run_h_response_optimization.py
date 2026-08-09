@@ -310,12 +310,15 @@ def _extension_payload(extension):
 
 
 def _variable_orbitals(radial_orbitals_by_l):
-    frozen = set(FREEZE_SPECS)
+    frozen = {
+        (spec["element"], int(spec["l"]), int(spec["zeta"]))
+        for spec in FREEZE_SPECS
+    }
     return [
         f"H/l{l}/zeta{zeta}"
         for l, count in enumerate(radial_orbitals_by_l)
         for zeta in range(1, count + 1)
-        if ("H", l, zeta - 1) not in frozen
+        if ("H", l, zeta) not in frozen
     ]
 
 
