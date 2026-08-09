@@ -1,8 +1,10 @@
-# H Delta-ST Response Compression Gradient Gate
+# H Delta-ST Response Compression
 
-This gate checks that the original H `3s2p` SIAB basis has a usable descent
-direction toward an immutable uniform-grid Delta-ST response. It does not run a
-long optimization and it does not fit the scalar RPA correlation energy.
+The gradient gate checks that the original H `3s2p` SIAB basis has a usable
+descent direction toward an immutable uniform-grid Delta-ST response. The full
+runner performs bounded optimization and can promote new radial shells from
+the Bessel primitive parent. Neither path fits the scalar RPA correlation
+energy.
 
 The candidate response contains only the compact `3s2p` LCAO space. The
 occupied state is obtained from the fixed ABACUS LCAO generalized eigenproblem.
@@ -49,6 +51,36 @@ python run_h_response_optimization.py \
   --sidecar-commit bc720617aa058ab14823b5104b6657dc549b2d7d \
   --siab-commit COMMIT
 ```
+
+Add deterministic radial shells by listing their angular momenta in order.
+For example, this constructs `3s3p2d` from the original `3s2p` coefficients and
+then optimizes all non-frozen radial columns:
+
+```bash
+python run_h_response_optimization.py \
+  /path/to/grid-reference \
+  /path/to/sternheimer_galerkin_primitive.dat \
+  /path/to/sternheimer_galerkin_fixed_ao.dat \
+  /path/to/SG15/H_TZDP/info/8/ORBITAL_RESULTS.txt \
+  /path/to/SG15/H_TZDP/H_gga_8au_100Ry_3s2p.orb \
+  /path/to/new-output-directory \
+  --reference-commit 142b090e2babbc0d1cf1831c165d19a03ef56526 \
+  --sidecar-commit bc720617aa058ab14823b5104b6657dc549b2d7d \
+  --siab-commit COMMIT \
+  --append-l 1 2 2 \
+  --max-steps 500 \
+  --maximum-step 20
+```
+
+For each requested `l`, the runner forms the metric-orthogonal complement of
+the current radial columns in the Bessel parent. It temporarily appends every
+complement direction, evaluates the full-frequency Pi-matrix loss, and keeps
+the lowest-loss direction. Repeated values append multiple radials in the same
+angular channel. The radial metric is averaged equally over all magnetic
+components because one radial coefficient column is shared by every `m`.
+`optimization.json` records every candidate loss, selected mode, metric
+condition, magnetic-component metric deviation, and orthogonality errors under
+`basis_extensions`.
 
 The optimizer uses a monotone Armijo backtracking line search. Frozen columns
 are restored exactly at every trial. Before optimization, the original three
