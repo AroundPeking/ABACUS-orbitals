@@ -13,6 +13,7 @@ sys.path.insert(0, str(RUNNER_DIR))
 
 from run_h_response_optimization import (
     _anchor_payload,
+    _extension_payload,
     _history_payload,
     parse_args,
 )
@@ -45,6 +46,7 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
         self.assertEqual(args.gradient_tolerance, 1.0e-8)
         self.assertEqual(args.relative_loss_tolerance, 1.0e-9)
         self.assertEqual(args.relative_loss_patience, 5)
+        self.assertIsNone(args.append_l)
 
     def test_history_payload_keeps_physical_convergence_diagnostics(self):
         record = types.SimpleNamespace(
@@ -84,6 +86,30 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
         self.assertEqual(payload["omitted_original_s_zeta"], 1)
         self.assertEqual(payload["fixed_ao_coefficients"], [0.99, 0.1, 0.01])
         self.assertEqual(payload["maximum_off_s_coefficient"], 2.0e-15)
+
+    def test_extension_payload_records_all_deterministic_candidate_losses(self):
+        extension = types.SimpleNamespace(
+            element="H",
+            l=1,
+            selected_mode=4,
+            initial_loss=0.12,
+            selected_loss=0.08,
+            candidate_losses=(0.11, 0.10, 0.09, 0.085, 0.08),
+            radial_metric_condition=30.0,
+            maximum_metric_orthogonality=2.0e-15,
+            metric_normalization_error=3.0e-15,
+        )
+
+        payload = _extension_payload(extension)
+
+        self.assertEqual(payload["element"], "H")
+        self.assertEqual(payload["l"], 1)
+        self.assertEqual(payload["selected_mode"], 4)
+        self.assertEqual(
+            payload["candidate_losses"],
+            [0.11, 0.10, 0.09, 0.085, 0.08],
+        )
+        self.assertEqual(payload["selected_loss"], 0.08)
 
 
 if __name__ == "__main__":
