@@ -15,6 +15,7 @@ from run_h_response_optimization import (
     _anchor_payload,
     _extension_payload,
     _history_payload,
+    _variable_orbitals,
     parse_args,
 )
 
@@ -110,6 +111,12 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
             [0.11, 0.10, 0.09, 0.085, 0.08],
         )
         self.assertEqual(payload["selected_loss"], 0.08)
+
+    def test_variable_orbitals_follow_the_extended_radial_counts(self):
+        self.assertEqual(
+            _variable_orbitals((3, 3, 0)),
+            ["H/l0/zeta3", "H/l1/zeta2", "H/l1/zeta3"],
+        )
 
 
 if __name__ == "__main__":
