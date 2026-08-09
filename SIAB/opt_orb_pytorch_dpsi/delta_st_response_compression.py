@@ -46,6 +46,15 @@ class DeltaSTCompressionFamilyResult:
     dropped_rank_by_spin: Tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class AtomicOccupiedAnchor:
+    occupied_band_index: int
+    omitted_original_s_zeta: int
+    fixed_ao_coefficients: Tuple[float, ...]
+    maximum_off_s_coefficient: float
+    eigenvalue_max_abs_error_ha: float
+
+
 class FrozenOccupiedDeltaSTCompression:
     """Evaluate a compact Bessel-contracted LCAO response."""
 
@@ -164,6 +173,108 @@ class FrozenOccupiedDeltaSTCompression:
         )
 
 
+def anchor_atomic_occupied_radial(
+    primitive,
+    fixed_ao,
+    radial_coefficients,
+    *,
+    element,
+    spin=0,
+    symmetry_tolerance=1.0e-8,
+    eigenvalue_tolerance_ha=1.0e-8,
+):
+    """Rotate an atomic s basis so one frozen radial column is occupied."""
+    _validate_fixed_ao_protocol(primitive, fixed_ao)
+    if not isinstance(element, str) or not element:
+        raise ValueError("element must be nonempty")
+    if isinstance(spin, bool) or not isinstance(spin, int):
+        raise ValueError("spin must be an integer")
+    if spin < 0 or spin >= fixed_ao.hamiltonian_ha.shape[0]:
+        raise ValueError("spin is outside the fixed-AO spin range")
+    symmetry_tolerance = _finite_positive(
+        "symmetry_tolerance", symmetry_tolerance
+    )
+    eigenvalue_tolerance_ha = _finite_positive(
+        "eigenvalue_tolerance_ha", eigenvalue_tolerance_ha
+    )
+
+    coefficient_matrix, labels = assemble_orbital_coefficients(
+        primitive, radial_coefficients
+    )
+    if coefficient_matrix.shape[1] != fixed_ao.overlap.shape[0]:
+        raise ValueError("initial radial basis does not match the fixed-AO dimension")
+    atoms = {(label.element, label.atom_index) for label in labels}
+    if atoms != {(element, 0)}:
+        raise ValueError("atomic occupied anchoring requires one atom at index zero")
+
+    energy, eigenvector = _fixed_ao_eigensystem(
+        fixed_ao.overlap, fixed_ao.hamiltonian_ha[spin]
+    )
+    eigenvalue_error = float(
+        torch.max(torch.abs(energy - fixed_ao.eigenvalue_ha[spin]))
+    )
+    if eigenvalue_error > eigenvalue_tolerance_ha:
+        raise RuntimeError("fixed-AO eigenvalues differ during occupied anchoring")
+    occupied = torch.nonzero(
+        fixed_ao.occupation[spin] > 0.0, as_tuple=False
+    ).flatten()
+    if occupied.numel() != 1:
+        raise ValueError("atomic occupied anchoring requires one occupied state")
+    occupied_band = int(occupied[0].item())
+
+    s_indices = tuple(
+        index
+        for index, label in enumerate(labels)
+        if label.element == element
+        and label.atom_index == 0
+        and label.l == 0
+        and label.m == 0
+    )
+    radial_s = radial_coefficients[element][0]
+    if len(s_indices) != radial_s.shape[1]:
+        raise ValueError("atomic s labels do not match radial s columns")
+    off_s_indices = tuple(
+        index for index in range(len(labels)) if index not in s_indices
+    )
+    off_s_maximum = (
+        0.0
+        if not off_s_indices
+        else float(
+            torch.max(
+                torch.abs(eigenvector[list(off_s_indices), occupied_band])
+            )
+        )
+    )
+    if off_s_maximum > symmetry_tolerance:
+        raise RuntimeError("atomic occupied state is not an s state")
+
+    weights = eigenvector[list(s_indices), occupied_band]
+    omitted = int(torch.argmax(torch.abs(weights)).item())
+    phase = weights[omitted] / torch.abs(weights[omitted])
+    weights = weights / phase
+    imaginary_maximum = float(torch.max(torch.abs(torch.imag(weights))))
+    if imaginary_maximum > symmetry_tolerance:
+        raise RuntimeError("atomic occupied s coefficients are not real up to phase")
+    weights_real = torch.real(weights).to(torch.float64)
+    occupied_radial = radial_s @ weights_real
+    complement = tuple(
+        radial_s[:, index] for index in range(radial_s.shape[1]) if index != omitted
+    )
+
+    anchored = _clone_radial_coefficients(radial_coefficients)
+    anchored[element][0] = torch.stack(
+        (occupied_radial,) + complement,
+        dim=1,
+    )
+    return anchored, AtomicOccupiedAnchor(
+        occupied_band_index=occupied_band,
+        omitted_original_s_zeta=omitted + 1,
+        fixed_ao_coefficients=tuple(float(value) for value in weights_real),
+        maximum_off_s_coefficient=off_s_maximum,
+        eigenvalue_max_abs_error_ha=eigenvalue_error,
+    )
+
+
 def _validate_fixed_ao_protocol(primitive, fixed_ao):
     if not isinstance(primitive, SternheimerPrimitiveGalerkinData):
         raise ValueError("primitive must be SternheimerPrimitiveGalerkinData")
@@ -182,6 +293,36 @@ def _validate_fixed_ao_protocol(primitive, fixed_ao):
     for key in _PROTOCOL_PROVENANCE_KEYS:
         if fixed_ao.provenance[key] != primitive.provenance[key]:
             raise ValueError(f"fixed-AO and primitive provenance differs: {key}")
+
+
+def _fixed_ao_eigensystem(overlap, hamiltonian):
+    cholesky = torch.linalg.cholesky(overlap)
+    identity = torch.eye(
+        overlap.shape[0], dtype=overlap.dtype, device=overlap.device
+    )
+    transform = torch.linalg.solve_triangular(
+        cholesky.mH,
+        identity,
+        upper=True,
+    )
+    transformed_hamiltonian = transform.mH @ hamiltonian @ transform
+    transformed_hamiltonian = 0.5 * (
+        transformed_hamiltonian + transformed_hamiltonian.mH
+    )
+    energy, eigenvector = torch.linalg.eigh(transformed_hamiltonian)
+    return energy, transform @ eigenvector
+
+
+def _clone_radial_coefficients(coefficients):
+    result = {}
+    for element, by_l in coefficients.items():
+        if isinstance(by_l, dict):
+            result[element] = {
+                l: matrix.clone() for l, matrix in by_l.items()
+            }
+        else:
+            result[element] = [matrix.clone() for matrix in by_l]
+    return result
 
 
 def _require_coefficient_matrix(value, nprimitive):

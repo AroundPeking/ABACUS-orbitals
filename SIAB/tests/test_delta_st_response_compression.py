@@ -204,6 +204,23 @@ class DeltaSTResponseCompressionTest(unittest.TestCase):
             ],
             dtype=torch.complex128,
         )
+        fixed_hamiltonian = (
+            eigenvector
+            @ torch.diag(
+                torch.tensor([-0.5, 0.2, 0.8], dtype=torch.complex128)
+            )
+            @ eigenvector.mH
+        ).reshape(1, 3, 3)
+        zero_perturbation = torch.zeros((2, 3, 3), dtype=torch.complex128)
+        primitive = dataclasses.replace(
+            primitive,
+            occupation=torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64),
+            primitive_ao_overlap=torch.eye(3, dtype=torch.complex128),
+            fixed_ao_grid_overlap=torch.eye(3, dtype=torch.complex128),
+            fixed_ao_grid_hamiltonian_ha=fixed_hamiltonian,
+            primitive_ao_hamiltonian_ha=fixed_hamiltonian,
+            primitive_ao_perturbation_ha=zero_perturbation,
+        )
         fixed = SternheimerFixedAOData(
             format_version=1,
             representation="fixed_lcao_gamma",
@@ -212,14 +229,8 @@ class DeltaSTResponseCompressionTest(unittest.TestCase):
             eigenvalue_ha=torch.tensor([[-0.5, 0.2, 0.8]], dtype=torch.float64),
             occupation=torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64),
             overlap=torch.eye(3, dtype=torch.complex128),
-            hamiltonian_ha=(
-                eigenvector
-                @ torch.diag(
-                    torch.tensor([-0.5, 0.2, 0.8], dtype=torch.complex128)
-                )
-                @ eigenvector.mH
-            ).reshape(1, 3, 3),
-            perturbation_ha=torch.zeros((2, 3, 3), dtype=torch.complex128),
+            hamiltonian_ha=fixed_hamiltonian,
+            perturbation_ha=zero_perturbation,
             frequency_ha=fixed.frequency_ha,
             frequency_weight_ha=fixed.frequency_weight_ha,
             provenance=fixed.provenance,
