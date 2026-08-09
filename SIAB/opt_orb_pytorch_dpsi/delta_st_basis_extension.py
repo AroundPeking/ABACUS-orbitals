@@ -17,6 +17,7 @@ class DeltaSTBasisExtensionResult:
     selected_loss: float
     candidate_losses: Tuple[float, ...]
     radial_metric_condition: float
+    maximum_magnetic_metric_relative_deviation: float
     maximum_metric_orthogonality: float
     metric_normalization_error: float
 
@@ -45,7 +46,7 @@ def select_metric_complement_shell(
         raise ValueError("metric_tolerance must be positive and finite")
 
     current = _radial_channel(coefficients, element, l)
-    metric = _common_radial_metric(
+    metric, magnetic_metric_deviation = _common_radial_metric(
         primitive,
         element,
         l,
@@ -97,6 +98,7 @@ def select_metric_complement_shell(
         selected_loss=losses[selected_mode],
         candidate_losses=tuple(losses),
         radial_metric_condition=condition,
+        maximum_magnetic_metric_relative_deviation=magnetic_metric_deviation,
         maximum_metric_orthogonality=(
             0.0 if orthogonality.numel() == 0 else float(torch.max(torch.abs(orthogonality)))
         ),
@@ -123,11 +125,14 @@ def _common_radial_metric(primitive, element, l, tolerance):
         if float(torch.max(torch.abs(torch.imag(value)))) > tolerance * scale:
             raise RuntimeError("atomic radial metric is materially complex")
         metrics.append(torch.real(value).to(torch.float64))
-    reference = metrics[0]
-    for value in metrics[1:]:
-        if not torch.allclose(value, reference, rtol=tolerance, atol=tolerance):
-            raise RuntimeError("atomic magnetic channels have different radial metrics")
-    return reference
+    metric = torch.mean(torch.stack(metrics, dim=0), dim=0)
+    scale = float(torch.max(torch.abs(metric)))
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise RuntimeError("atomic radial metric scale is not positive and finite")
+    maximum_relative_deviation = max(
+        float(torch.max(torch.abs(value - metric))) / scale for value in metrics
+    )
+    return metric, maximum_relative_deviation
 
 
 def _radial_channel(coefficients, element, l):

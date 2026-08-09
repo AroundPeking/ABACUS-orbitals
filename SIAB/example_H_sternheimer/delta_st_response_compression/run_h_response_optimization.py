@@ -305,6 +305,9 @@ def _extension_payload(extension):
             float(value) for value in extension.candidate_losses
         ],
         "radial_metric_condition": float(extension.radial_metric_condition),
+        "maximum_magnetic_metric_relative_deviation": float(
+            extension.maximum_magnetic_metric_relative_deviation
+        ),
         "maximum_metric_orthogonality": float(
             extension.maximum_metric_orthogonality
         ),
