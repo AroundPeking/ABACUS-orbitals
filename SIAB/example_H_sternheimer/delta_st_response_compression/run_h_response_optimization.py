@@ -25,6 +25,7 @@ from delta_st_gradient_gate import (
     require_file_sha256,
     run_delta_st_response_optimization,
 )
+from delta_st_basis_extension import select_metric_complement_shell
 from delta_st_parent_space import (
     load_delta_st_reference,
     load_full_coulomb_matrix,
@@ -55,6 +56,12 @@ def parse_args():
     parser.add_argument("--sidecar-commit", required=True)
     parser.add_argument("--siab-commit", required=True)
     parser.add_argument("--nu", type=int, nargs="+", default=(3, 2, 0))
+    parser.add_argument(
+        "--append-l",
+        type=int,
+        default=None,
+        help="append one deterministic metric-complement radial in this l channel",
+    )
     parser.add_argument("--relative-rank-tolerance", type=float, default=1.0e-7)
     parser.add_argument("--max-steps", type=int, default=100)
     parser.add_argument("--initial-step", type=float, default=0.2)
@@ -127,6 +134,16 @@ def main():
         relative_rank_tolerance=args.relative_rank_tolerance,
         active_spin_excluded_columns=(0,),
     )
+    extension = None
+    if args.append_l is not None:
+        extension = select_metric_complement_shell(
+            primitive,
+            objective,
+            coefficients,
+            element="H",
+            l=args.append_l,
+        )
+        coefficients = extension.coefficients
     optimization = run_delta_st_response_optimization(
         objective,
         coefficients,
@@ -156,8 +173,11 @@ def main():
     write_C(initial_output, coefficients, optimization.initial_loss)
     write_C(optimized_output, optimization.coefficients, optimization.final_loss)
     elapsed = time.perf_counter() - started
+    radial_orbitals_by_l = [
+        int(coefficients["H"][l].shape[1]) for l in range(lmax + 1)
+    ]
     diagnostics = {
-        "method": "h_delta_st_response_compression_optimization_v2",
+        "method": "h_delta_st_response_compression_optimization_v3",
         "siab_commit": args.siab_commit,
         "reference_abacus_commit": args.reference_commit,
         "sidecar_abacus_commit": args.sidecar_commit,
@@ -165,9 +185,12 @@ def main():
         "protocol": dict(reference.provenance),
         "primitive_dimension": int(primitive.overlap.shape[0]),
         "fixed_ao_dimension": int(fixed_ao.overlap.shape[0]),
-        "radial_orbitals_by_l": list(args.nu),
+        "radial_orbitals_by_l": radial_orbitals_by_l,
         "candidate_ao_dimension": int(
-            sum((2 * l + 1) * count for l, count in enumerate(args.nu))
+            sum(
+                (2 * l + 1) * count
+                for l, count in enumerate(radial_orbitals_by_l)
+            )
         ),
         "frozen_orbitals": list(FREEZE_SPECS),
         "frozen_orbital_roles": [
@@ -175,8 +198,11 @@ def main():
             "fixed_s_complement",
             "fixed_first_p",
         ],
-        "variable_orbitals": ["H/l0/zeta3", "H/l1/zeta2"],
+        "variable_orbitals": _variable_orbitals(radial_orbitals_by_l),
         "occupied_anchor": _anchor_payload(occupied_anchor),
+        "basis_extension": (
+            None if extension is None else _extension_payload(extension)
+        ),
         "active_spin_excluded_columns": [0],
         "relative_rank_tolerance": args.relative_rank_tolerance,
         "optimization_parameters": {
@@ -261,6 +287,36 @@ def _anchor_payload(anchor):
             anchor.eigenvalue_max_abs_error_ha
         ),
     }
+
+
+def _extension_payload(extension):
+    return {
+        "element": extension.element,
+        "l": int(extension.l),
+        "selected_mode": int(extension.selected_mode),
+        "initial_loss": float(extension.initial_loss),
+        "selected_loss": float(extension.selected_loss),
+        "candidate_losses": [
+            float(value) for value in extension.candidate_losses
+        ],
+        "radial_metric_condition": float(extension.radial_metric_condition),
+        "maximum_metric_orthogonality": float(
+            extension.maximum_metric_orthogonality
+        ),
+        "metric_normalization_error": float(
+            extension.metric_normalization_error
+        ),
+    }
+
+
+def _variable_orbitals(radial_orbitals_by_l):
+    frozen = set(FREEZE_SPECS)
+    return [
+        f"H/l{l}/zeta{zeta}"
+        for l, count in enumerate(radial_orbitals_by_l)
+        for zeta in range(1, count + 1)
+        if ("H", l, zeta - 1) not in frozen
+    ]
 
 
 if __name__ == "__main__":
