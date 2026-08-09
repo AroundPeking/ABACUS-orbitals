@@ -23,7 +23,9 @@ class _TargetLastPrimitive:
             loss = torch.tensor(1.0, dtype=torch.float64)
         else:
             target = torch.tensor([0.0, 0.0, 0.0, 0.5], dtype=torch.float64)
-            overlap = torch.diag(torch.tensor([1.0, 2.0, 3.0, 4.0]))
+            overlap = torch.diag(
+                torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float64)
+            )
             capture = torch.dot(channel[:, -1], overlap @ target) ** 2
             loss = 1.0 - capture
         return types.SimpleNamespace(loss=loss)
