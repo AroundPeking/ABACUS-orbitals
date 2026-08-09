@@ -1,7 +1,9 @@
 """Bounded one-step gradient gate for Delta-ST response compression."""
 
 from dataclasses import dataclass
+import hashlib
 import math
+import pathlib
 from typing import Mapping, Tuple
 
 import torch
@@ -20,6 +22,31 @@ class DeltaSTGradientGateResult:
     raw_fixed_gradient_norm: float
     masked_fixed_gradient_norm: float
     variable_gradient_norm: float
+
+
+def require_file_sha256(path, expected):
+    """Return a file SHA256 and optionally require an exact expected value."""
+    path = pathlib.Path(path)
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise ValueError(f"cannot read file for SHA256: {path}") from exc
+    actual = digest.hexdigest()
+    if expected is not None:
+        if (
+            not isinstance(expected, str)
+            or len(expected) != 64
+            or any(character not in "0123456789abcdef" for character in expected)
+        ):
+            raise ValueError("expected SHA256 must contain 64 lowercase hex digits")
+        if actual != expected:
+            raise ValueError(
+                f"file SHA256 differs from the physical protocol: {path}"
+            )
+    return actual
 
 
 def run_delta_st_gradient_gate(

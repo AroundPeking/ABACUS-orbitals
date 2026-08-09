@@ -3,7 +3,6 @@
 
 import argparse
 import dataclasses
-import hashlib
 import json
 import pathlib
 import resource
@@ -23,7 +22,10 @@ from IO.read_sternheimer_fixed_ao import read_sternheimer_fixed_ao
 from IO.read_sternheimer_primitive_galerkin import (
     read_sternheimer_primitive_galerkin,
 )
-from delta_st_gradient_gate import run_delta_st_gradient_gate
+from delta_st_gradient_gate import (
+    require_file_sha256,
+    run_delta_st_gradient_gate,
+)
 from delta_st_parent_space import (
     load_delta_st_reference,
     load_full_coulomb_matrix,
@@ -46,11 +48,13 @@ def parse_args():
     parser.add_argument("primitive_file", type=pathlib.Path)
     parser.add_argument("fixed_ao_file", type=pathlib.Path)
     parser.add_argument("initial_coefficients", type=pathlib.Path)
+    parser.add_argument("initial_orbital", type=pathlib.Path)
     parser.add_argument("output_dir", type=pathlib.Path)
     parser.add_argument("--reference-commit", required=True)
     parser.add_argument("--sidecar-commit", required=True)
     parser.add_argument("--siab-commit", required=True)
     parser.add_argument("--nu", type=int, nargs="+", default=(3, 2, 0))
+    parser.add_argument("--relative-rank-tolerance", type=float, default=1.0e-7)
     parser.add_argument(
         "--step-sizes",
         type=float,
@@ -72,9 +76,13 @@ def main():
     primitive_file = args.primitive_file.resolve()
     fixed_ao_file = args.fixed_ao_file.resolve()
     initial_file = args.initial_coefficients.resolve()
+    initial_orbital = args.initial_orbital.resolve()
     reference = load_delta_st_reference(reference_dir)
     if reference.provenance["abacus_commit"] != args.reference_commit:
         raise ValueError("reference ABACUS commit differs from --reference-commit")
+    initial_orbital_hash = require_file_sha256(
+        initial_orbital, reference.provenance["orbital_sha256"]
+    )
     primitive = _align_candidate(
         read_sternheimer_primitive_galerkin(primitive_file),
         args.sidecar_commit,
@@ -107,7 +115,12 @@ def main():
         raise ValueError("initial coefficient file does not define every requested AO")
 
     objective = FrozenOccupiedDeltaSTCompression(
-        reference, primitive, fixed_ao, coulomb, family_name="H"
+        reference,
+        primitive,
+        fixed_ao,
+        coulomb,
+        family_name="H",
+        relative_rank_tolerance=args.relative_rank_tolerance,
     )
     gate = run_delta_st_gradient_gate(
         objective,
@@ -132,7 +145,11 @@ def main():
     write_C(initial_output, coefficients, gate.initial_loss)
     write_C(accepted_output, gate.coefficients, gate.accepted_loss)
     input_hashes = _input_hashes(
-        reference_dir, primitive_file, fixed_ao_file, initial_file
+        reference_dir,
+        primitive_file,
+        fixed_ao_file,
+        initial_file,
+        initial_orbital,
     )
     elapsed = time.perf_counter() - started
     diagnostics = {
@@ -140,6 +157,7 @@ def main():
         "siab_commit": args.siab_commit,
         "reference_abacus_commit": args.reference_commit,
         "sidecar_abacus_commit": args.sidecar_commit,
+        "initial_orbital_sha256": initial_orbital_hash,
         "protocol": dict(reference.provenance),
         "primitive_dimension": int(primitive.overlap.shape[0]),
         "fixed_ao_dimension": int(fixed_ao.overlap.shape[0]),
@@ -149,6 +167,7 @@ def main():
         ),
         "frozen_orbitals": list(FREEZE_SPECS),
         "variable_orbitals": ["H/l0/zeta3", "H/l1/zeta2"],
+        "relative_rank_tolerance": args.relative_rank_tolerance,
         "initial_loss": gate.initial_loss,
         "accepted_loss": gate.accepted_loss,
         "relative_loss_reduction": (
@@ -184,8 +203,8 @@ def main():
         ) * HARTREE_TO_KCAL_MOL,
         "input_sha256": input_hashes,
         "output_sha256": {
-            initial_output.name: _sha256(initial_output),
-            accepted_output.name: _sha256(accepted_output),
+            initial_output.name: require_file_sha256(initial_output, None),
+            accepted_output.name: require_file_sha256(accepted_output, None),
         },
         "elapsed_seconds": elapsed,
         "maximum_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
@@ -221,11 +240,18 @@ def _primitive_layout(primitive):
     return next(iter(elements)), counts.pop(), max(radial_counts)
 
 
-def _input_hashes(reference_dir, primitive_file, fixed_ao_file, initial_file):
+def _input_hashes(
+    reference_dir,
+    primitive_file,
+    fixed_ao_file,
+    initial_file,
+    initial_orbital,
+):
     paths = [
         primitive_file,
         fixed_ao_file,
         initial_file,
+        initial_orbital,
         reference_dir / "reference_protocol.json",
         reference_dir / "STERNHEIMER_ABFS_CHANNELS.dat",
         reference_dir / "v1_coulomb_full_iq_1_rank0.dat",
@@ -233,15 +259,7 @@ def _input_hashes(reference_dir, primitive_file, fixed_ao_file, initial_file):
     paths.extend(
         sorted(reference_dir.glob("v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat"))
     )
-    return {str(path): _sha256(path) for path in paths}
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with pathlib.Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return {str(path): require_file_sha256(path, None) for path in paths}
 
 
 if __name__ == "__main__":

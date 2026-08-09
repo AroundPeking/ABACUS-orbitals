@@ -16,12 +16,18 @@ python run_h_gradient_gate.py \
   /path/to/grid-reference \
   /path/to/sternheimer_galerkin_primitive.dat \
   /path/to/sternheimer_galerkin_fixed_ao.dat \
-  /path/to/H_TZDP/info/8/ORBITAL_RESULTS.txt \
+  /path/to/SG15/H_TZDP/info/8/ORBITAL_RESULTS.txt \
+  /path/to/SG15/H_TZDP/H_gga_8au_100Ry_3s2p.orb \
   /path/to/new-output-directory \
   --reference-commit 142b090e2babbc0d1cf1831c165d19a03ef56526 \
   --sidecar-commit bc720617aa058ab14823b5104b6657dc549b2d7d \
   --siab-commit COMMIT
 ```
+
+The explicit orbital path is a protocol gate: its SHA256 must equal the
+orbital hash stored in the grid-reference and sidecar metadata. This prevents
+coefficients from a different pseudopotential family from being optimized
+against an unrelated fixed-AO reference.
 
 The output directory contains the initial and accepted SIAB coefficient files
 and `gradient_gate.json`. The JSON records protocol hashes, full-frequency
