@@ -12,7 +12,10 @@ TEST_DIR = pathlib.Path(__file__).resolve().parent
 OPT_DIR = TEST_DIR.parent / "opt_orb_pytorch_dpsi"
 sys.path.insert(0, str(OPT_DIR))
 
-from frozen_occupied_delta_st import evaluate_frozen_occupied_delta_st
+from frozen_occupied_delta_st import (
+    _positive_metric_coordinate_transform,
+    evaluate_frozen_occupied_delta_st,
+)
 from galerkin_sternheimer import evaluate_galerkin_response
 from sternheimer_data import PrimitiveBlock
 from sternheimer_fixed_ao_data import AuxiliaryChannel, SternheimerFixedAOData
@@ -92,6 +95,28 @@ def _inputs():
 
 
 class FrozenOccupiedDeltaSTTest(unittest.TestCase):
+    def test_coordinate_metric_transform_has_finite_gradient_at_exact_degeneracy(self):
+        scale = torch.tensor(1.0, dtype=torch.float64, requires_grad=True)
+        metric = scale.to(torch.complex128) * torch.diag(
+            torch.tensor([1.0, 1.0, 0.0], dtype=torch.complex128)
+        )
+
+        transform, rank, dropped, condition = (
+            _positive_metric_coordinate_transform(metric, 1.0e-8, 1.0e8)
+        )
+        transformed_metric = transform.mH @ metric @ transform
+        loss = torch.sum(torch.abs(transform) ** 2)
+        loss.backward()
+
+        self.assertEqual(rank, 2)
+        self.assertEqual(dropped, 1)
+        self.assertEqual(condition, 1.0)
+        torch.testing.assert_close(
+            transformed_metric,
+            torch.eye(2, dtype=torch.complex128),
+        )
+        self.assertTrue(torch.isfinite(scale.grad))
+
     def test_keeps_lcao_occupied_state_and_solves_only_its_orthogonal_complement(self):
         primitive, fixed, perturbation = _inputs()
         coefficients = torch.eye(3, dtype=torch.complex128)
