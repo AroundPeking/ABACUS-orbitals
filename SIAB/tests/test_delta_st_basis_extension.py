@@ -31,6 +31,18 @@ class _TargetLastPrimitive:
         return types.SimpleNamespace(loss=loss)
 
 
+class _TargetFirstPrimitiveFromEmpty:
+    def evaluate(self, coefficients):
+        channel = coefficients["H"][2]
+        if channel.shape[1] == 0:
+            loss = torch.tensor(1.0, dtype=torch.float64)
+        else:
+            target = torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64)
+            capture = torch.dot(channel[:, -1], target) ** 2
+            loss = 1.0 - capture
+        return types.SimpleNamespace(loss=loss)
+
+
 class DeltaSTBasisExtensionTest(unittest.TestCase):
     def test_selects_the_best_metric_orthogonal_radial_complement(self):
         primitive = types.SimpleNamespace(
@@ -70,6 +82,32 @@ class DeltaSTBasisExtensionTest(unittest.TestCase):
         self.assertEqual(result.selected_loss, 0.0)
         self.assertLess(result.maximum_metric_orthogonality, 1.0e-14)
         self.assertLess(result.metric_normalization_error, 1.0e-14)
+
+    def test_selects_the_first_radial_from_an_empty_angular_channel(self):
+        primitive = types.SimpleNamespace(
+            blocks=(PrimitiveBlock("H", 0, 2, 0, 3, 0),),
+            overlap=torch.eye(3, dtype=torch.complex128),
+        )
+        coefficients = {
+            "H": [
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+            ]
+        }
+
+        result = select_metric_complement_shell(
+            primitive,
+            _TargetFirstPrimitiveFromEmpty(),
+            coefficients,
+            element="H",
+            l=2,
+        )
+
+        self.assertEqual(result.selected_mode, 0)
+        self.assertEqual(result.coefficients["H"][2].shape, (3, 1))
+        self.assertEqual(result.initial_loss, 1.0)
+        self.assertEqual(result.selected_loss, 0.0)
 
 
 if __name__ == "__main__":
