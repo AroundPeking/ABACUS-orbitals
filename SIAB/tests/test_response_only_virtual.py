@@ -28,6 +28,11 @@ evaluate_response_only_sos = (
     if response_only_virtual is None
     else getattr(response_only_virtual, "evaluate_response_only_sos", None)
 )
+assemble_response_only_union = (
+    None
+    if response_only_virtual is None
+    else getattr(response_only_virtual, "assemble_response_only_union", None)
+)
 
 
 class ResponseOnlyVirtualTest(unittest.TestCase):
@@ -36,6 +41,56 @@ class ResponseOnlyVirtualTest(unittest.TestCase):
 
     def test_exposes_response_only_spectral_response(self):
         self.assertTrue(callable(evaluate_response_only_sos))
+
+    def test_exposes_fixed_ao_response_union_assembly(self):
+        self.assertTrue(callable(assemble_response_only_union))
+
+    def test_assembles_fixed_block_first_with_exact_cross_conjugation(self):
+        fixed_overlap = torch.tensor([[1.0]], dtype=torch.complex128)
+        fixed_hamiltonian = torch.tensor([[-0.5]], dtype=torch.complex128)
+        fixed_perturbation = torch.tensor([[[0.2]]], dtype=torch.complex128)
+        response_overlap = torch.tensor([[2.0]], dtype=torch.complex128)
+        response_hamiltonian = torch.tensor([[0.3]], dtype=torch.complex128)
+        response_perturbation = torch.tensor([[[0.4]]], dtype=torch.complex128)
+        response_fixed_overlap = torch.tensor([[0.25]], dtype=torch.complex128)
+        response_fixed_hamiltonian = torch.tensor(
+            [[0.1 + 0.2j]], dtype=torch.complex128
+        )
+        response_fixed_perturbation = torch.tensor(
+            [[[0.3 + 0.1j]]], dtype=torch.complex128
+        )
+
+        result = assemble_response_only_union(
+            fixed_overlap,
+            fixed_hamiltonian,
+            fixed_perturbation,
+            response_overlap,
+            response_hamiltonian,
+            response_perturbation,
+            response_fixed_overlap,
+            response_fixed_hamiltonian,
+            response_fixed_perturbation,
+        )
+        self.assertIsNotNone(result)
+
+        torch.testing.assert_close(
+            result.overlap,
+            torch.tensor([[1.0, 0.25], [0.25, 2.0]], dtype=torch.complex128),
+        )
+        torch.testing.assert_close(
+            result.hamiltonian_ha,
+            torch.tensor(
+                [[-0.5, 0.1 - 0.2j], [0.1 + 0.2j, 0.3]],
+                dtype=torch.complex128,
+            ),
+        )
+        torch.testing.assert_close(
+            result.perturbation_ha,
+            torch.tensor(
+                [[[0.2, 0.3 - 0.1j], [0.3 + 0.1j, 0.4]]],
+                dtype=torch.complex128,
+            ),
+        )
 
     def test_keeps_fixed_occupied_state_and_diagonalizes_only_s_complement(self):
         overlap = torch.diag(

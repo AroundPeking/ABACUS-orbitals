@@ -27,6 +27,69 @@ class ResponseOnlyResponse:
     response: torch.Tensor
 
 
+@dataclass(frozen=True)
+class ResponseOnlyUnionMatrices:
+    overlap: torch.Tensor
+    hamiltonian_ha: torch.Tensor
+    perturbation_ha: torch.Tensor
+    fixed_dimension: int
+    response_dimension: int
+
+
+def assemble_response_only_union(
+    fixed_overlap,
+    fixed_hamiltonian_ha,
+    fixed_perturbation_ha,
+    response_overlap,
+    response_hamiltonian_ha,
+    response_perturbation_ha,
+    response_fixed_overlap,
+    response_fixed_hamiltonian_ha,
+    response_fixed_perturbation_ha,
+):
+    """Assemble a same-metric fixed-AO plus response-AO operator union."""
+    fixed_dimension, response_dimension, auxiliary_count = _validate_union_blocks(
+        fixed_overlap,
+        fixed_hamiltonian_ha,
+        fixed_perturbation_ha,
+        response_overlap,
+        response_hamiltonian_ha,
+        response_perturbation_ha,
+        response_fixed_overlap,
+        response_fixed_hamiltonian_ha,
+        response_fixed_perturbation_ha,
+    )
+    overlap = _assemble_hermitian_blocks(
+        fixed_overlap,
+        response_overlap,
+        response_fixed_overlap,
+    )
+    hamiltonian = _assemble_hermitian_blocks(
+        fixed_hamiltonian_ha,
+        response_hamiltonian_ha,
+        response_fixed_hamiltonian_ha,
+    )
+    perturbation = torch.stack(
+        tuple(
+            _assemble_hermitian_blocks(fixed, response, cross)
+            for fixed, response, cross in zip(
+                fixed_perturbation_ha,
+                response_perturbation_ha,
+                response_fixed_perturbation_ha,
+            )
+        )
+    )
+    if perturbation.shape[0] != auxiliary_count:
+        raise RuntimeError("assembled perturbation count changed")
+    return ResponseOnlyUnionMatrices(
+        overlap=overlap,
+        hamiltonian_ha=hamiltonian,
+        perturbation_ha=perturbation,
+        fixed_dimension=fixed_dimension,
+        response_dimension=response_dimension,
+    )
+
+
 def evaluate_response_only_sos(
     eigensystem,
     perturbation_ha,
@@ -168,6 +231,85 @@ def solve_response_only_virtual_eigensystem(
         occupied_orthonormality_max_abs_error=occupied_error,
         occupied_virtual_max_abs_overlap=occupied_virtual_error,
         virtual_orthonormality_max_abs_error=virtual_error,
+    )
+
+
+def _validate_union_blocks(
+    fixed_overlap,
+    fixed_hamiltonian_ha,
+    fixed_perturbation_ha,
+    response_overlap,
+    response_hamiltonian_ha,
+    response_perturbation_ha,
+    response_fixed_overlap,
+    response_fixed_hamiltonian_ha,
+    response_fixed_perturbation_ha,
+):
+    for name, value, rank in (
+        ("fixed_overlap", fixed_overlap, 2),
+        ("fixed_hamiltonian_ha", fixed_hamiltonian_ha, 2),
+        ("fixed_perturbation_ha", fixed_perturbation_ha, 3),
+        ("response_overlap", response_overlap, 2),
+        ("response_hamiltonian_ha", response_hamiltonian_ha, 2),
+        ("response_perturbation_ha", response_perturbation_ha, 3),
+        ("response_fixed_overlap", response_fixed_overlap, 2),
+        ("response_fixed_hamiltonian_ha", response_fixed_hamiltonian_ha, 2),
+        ("response_fixed_perturbation_ha", response_fixed_perturbation_ha, 3),
+    ):
+        _require_tensor(name, value, torch.complex128, rank)
+    fixed_dimension = fixed_overlap.shape[0]
+    response_dimension = response_overlap.shape[0]
+    auxiliary_count = fixed_perturbation_ha.shape[0]
+    if fixed_dimension == 0 or fixed_overlap.shape != (
+        fixed_dimension,
+        fixed_dimension,
+    ):
+        raise ValueError("fixed_overlap must be nonempty and square")
+    if response_dimension == 0 or response_overlap.shape != (
+        response_dimension,
+        response_dimension,
+    ):
+        raise ValueError("response_overlap must be nonempty and square")
+    if fixed_hamiltonian_ha.shape != fixed_overlap.shape:
+        raise ValueError("fixed Hamiltonian shape must match fixed overlap")
+    if response_hamiltonian_ha.shape != response_overlap.shape:
+        raise ValueError("response Hamiltonian shape must match response overlap")
+    if auxiliary_count == 0 or fixed_perturbation_ha.shape[1:] != fixed_overlap.shape:
+        raise ValueError("fixed perturbation shape is invalid")
+    if response_perturbation_ha.shape != (
+        auxiliary_count,
+        response_dimension,
+        response_dimension,
+    ):
+        raise ValueError("response perturbation shape is invalid")
+    cross_shape = (response_dimension, fixed_dimension)
+    if response_fixed_overlap.shape != cross_shape:
+        raise ValueError("response-fixed overlap shape is invalid")
+    if response_fixed_hamiltonian_ha.shape != cross_shape:
+        raise ValueError("response-fixed Hamiltonian shape is invalid")
+    if response_fixed_perturbation_ha.shape != (auxiliary_count,) + cross_shape:
+        raise ValueError("response-fixed perturbation shape is invalid")
+    for name, value in (
+        ("fixed_overlap", fixed_overlap),
+        ("fixed_hamiltonian_ha", fixed_hamiltonian_ha),
+        ("fixed_perturbation_ha", fixed_perturbation_ha),
+        ("response_overlap", response_overlap),
+        ("response_hamiltonian_ha", response_hamiltonian_ha),
+        ("response_perturbation_ha", response_perturbation_ha),
+    ):
+        _require_hermitian(name, value)
+    return fixed_dimension, response_dimension, auxiliary_count
+
+
+def _assemble_hermitian_blocks(fixed, response, response_fixed):
+    return _hermitize(
+        torch.cat(
+            (
+                torch.cat((fixed, response_fixed.mH), dim=1),
+                torch.cat((response_fixed, response), dim=1),
+            ),
+            dim=0,
+        )
     )
 
 
