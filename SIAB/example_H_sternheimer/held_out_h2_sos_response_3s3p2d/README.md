@@ -28,3 +28,6 @@ accelerate the SCF iterations but take longer than the complete 923-second
 one-rank producer because the auxiliary-basis/Coulomb postprocessing does not
 scale in this molecular path.  Concurrent one-rank cases therefore give the
 shortest measured campaign throughput and remain well below the memory limit.
+Intel MPI pinning is disabled for this multi-process campaign.  Otherwise each
+independent one-rank `mpirun` pins its ABACUS process to the same `0,32`
+hyperthread pair, making six concurrent cases contend for one physical core.

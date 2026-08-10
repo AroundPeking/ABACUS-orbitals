@@ -100,6 +100,7 @@ export OMP_DYNAMIC=FALSE
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 export MKL_DYNAMIC=FALSE
+export I_MPI_PIN=0
 
 cd "$case_dir"
 {
