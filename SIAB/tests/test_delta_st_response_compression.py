@@ -1,6 +1,7 @@
 """Tests for compact LCAO compression of a grid Delta-ST response."""
 
 import dataclasses
+import inspect
 import io
 import pathlib
 import sys
@@ -129,6 +130,43 @@ def _compact_coefficients(theta):
     return torch.stack((occupied, variable), dim=1)
 
 
+def _fixture_with_fixed_virtual():
+    primitive, fixed, _, coulomb = _fixture()
+    occupation = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
+    primitive = dataclasses.replace(
+        primitive,
+        occupation=occupation,
+        primitive_ao_overlap=primitive.overlap[:, :2].clone(),
+        fixed_ao_grid_overlap=torch.eye(2, dtype=torch.complex128),
+        fixed_ao_grid_hamiltonian_ha=primitive.hamiltonian_ha[:, :2, :2].clone(),
+        primitive_ao_hamiltonian_ha=primitive.hamiltonian_ha[:, :, :2].clone(),
+        primitive_ao_perturbation_ha=primitive.perturbation_ha[:, :, :2].clone(),
+    )
+    fixed = dataclasses.replace(
+        fixed,
+        eigenvalue_ha=torch.tensor([[-0.5, 0.2]], dtype=torch.float64),
+        occupation=occupation,
+        overlap=torch.eye(2, dtype=torch.complex128),
+        hamiltonian_ha=primitive.hamiltonian_ha[:, :2, :2].clone(),
+        perturbation_ha=primitive.perturbation_ha[:, :2, :2].clone(),
+    )
+    full = evaluate_frozen_occupied_delta_st(
+        primitive,
+        fixed,
+        torch.eye(3, dtype=torch.complex128),
+    )
+    reference = DeltaSTReference(
+        response_m=full.response,
+        frequency_ha=primitive.frequency_ha,
+        frequency_weight_ha=primitive.frequency_weight_ha,
+        channels=primitive.channels,
+        atom_naux=(2,),
+        occupied_occupation_by_spin=((1.0,),),
+        provenance=primitive.provenance,
+    )
+    return primitive, fixed, reference, coulomb
+
+
 def _radial_coefficients(theta=0.2):
     return {
         "H": [
@@ -193,6 +231,33 @@ def _converge(objective, max_steps=8):
 
 
 class DeltaSTResponseCompressionTest(unittest.TestCase):
+    def test_objective_can_include_fixed_ao_virtual_space(self):
+        parameters = inspect.signature(
+            FrozenOccupiedDeltaSTCompression.__init__
+        ).parameters
+        self.assertIn("include_fixed_ao_virtual", parameters)
+
+    def test_fixed_ao_virtual_option_recovers_omitted_reference_direction(self):
+        primitive, fixed, reference, coulomb = _fixture_with_fixed_virtual()
+        coefficients = torch.eye(3, dtype=torch.complex128)[:, [0, 2]]
+        response_only = FrozenOccupiedDeltaSTCompression(
+            reference,
+            primitive,
+            fixed,
+            coulomb,
+            include_fixed_ao_virtual=False,
+        ).evaluate_matrix(coefficients)
+        union = FrozenOccupiedDeltaSTCompression(
+            reference,
+            primitive,
+            fixed,
+            coulomb,
+            include_fixed_ao_virtual=True,
+        ).evaluate_matrix(coefficients)
+
+        self.assertGreater(float(response_only.loss), 1.0e-4)
+        self.assertLess(float(union.loss), 1.0e-20)
+
     def test_atomic_occupied_anchor_preserves_initial_span_and_exact_occupancy(self):
         primitive, fixed, _, _ = _fixture()
         inverse_sqrt_two = 2.0 ** -0.5

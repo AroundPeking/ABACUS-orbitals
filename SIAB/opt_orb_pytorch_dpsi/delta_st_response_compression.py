@@ -71,6 +71,7 @@ class FrozenOccupiedDeltaSTCompression:
         condition_limit=1.0e12,
         eigenvalue_tolerance_ha=1.0e-8,
         active_spin_excluded_columns=(),
+        include_fixed_ao_virtual=False,
     ):
         validate_parent_space_protocol(reference, primitive, coulomb)
         _validate_fixed_ao_protocol(primitive, fixed_ao)
@@ -94,6 +95,9 @@ class FrozenOccupiedDeltaSTCompression:
             "eigenvalue_tolerance_ha", eigenvalue_tolerance_ha
         )
         self.active_spin_excluded_columns = tuple(active_spin_excluded_columns)
+        if type(include_fixed_ao_virtual) is not bool:
+            raise ValueError("include_fixed_ao_virtual must be a boolean")
+        self.include_fixed_ao_virtual = include_fixed_ao_virtual
 
         self._reference_pi, self._coulomb_transform = symmetric_response(
             coulomb.matrix,
@@ -125,6 +129,7 @@ class FrozenOccupiedDeltaSTCompression:
             condition_limit=self.condition_limit,
             eigenvalue_tolerance_ha=self.eigenvalue_tolerance_ha,
             active_spin_excluded_columns=self.active_spin_excluded_columns,
+            include_fixed_ao_virtual=self.include_fixed_ao_virtual,
         )
         candidate_pi, transform = symmetric_response(
             self.coulomb.matrix,

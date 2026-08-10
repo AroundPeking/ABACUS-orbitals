@@ -48,6 +48,8 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
         self.assertEqual(args.relative_loss_tolerance, 1.0e-9)
         self.assertEqual(args.relative_loss_patience, 5)
         self.assertIsNone(args.append_l)
+        self.assertTrue(hasattr(args, "include_fixed_ao_virtual"))
+        self.assertFalse(args.include_fixed_ao_virtual)
 
     def test_parser_accepts_an_ordered_sequence_of_shell_extensions(self):
         argv = [
@@ -67,11 +69,13 @@ class HDeltaSTResponseOptimizationRunnerTest(unittest.TestCase):
             "--append-l",
             "1",
             "2",
+            "--include-fixed-ao-virtual",
         ]
         with mock.patch.object(sys, "argv", argv):
             args = parse_args()
 
         self.assertEqual(args.append_l, [1, 2])
+        self.assertTrue(args.include_fixed_ao_virtual)
 
     def test_history_payload_keeps_physical_convergence_diagnostics(self):
         record = types.SimpleNamespace(

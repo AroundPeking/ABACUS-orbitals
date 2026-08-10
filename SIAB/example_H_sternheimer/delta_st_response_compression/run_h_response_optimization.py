@@ -70,6 +70,7 @@ def parse_args():
     parser.add_argument("--gradient-tolerance", type=float, default=1.0e-8)
     parser.add_argument("--relative-loss-tolerance", type=float, default=1.0e-9)
     parser.add_argument("--relative-loss-patience", type=int, default=5)
+    parser.add_argument("--include-fixed-ao-virtual", action="store_true")
     return parser.parse_args()
 
 
@@ -134,6 +135,7 @@ def main():
         family_name="H",
         relative_rank_tolerance=args.relative_rank_tolerance,
         active_spin_excluded_columns=(0,),
+        include_fixed_ao_virtual=args.include_fixed_ao_virtual,
     )
     extensions = []
     for l in args.append_l or ():
@@ -209,6 +211,7 @@ def main():
             _extension_payload(extension) for extension in extensions
         ],
         "active_spin_excluded_columns": [0],
+        "include_fixed_ao_virtual": args.include_fixed_ao_virtual,
         "relative_rank_tolerance": args.relative_rank_tolerance,
         "optimization_parameters": {
             "max_steps": args.max_steps,
