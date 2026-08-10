@@ -1,7 +1,7 @@
 #!/bin/bash
 
-set -euo pipefail
 source "$HOME/.bashrc" >/dev/null 2>&1 || true
+set -euo pipefail
 
 campaign_root=${1:?campaign root is required}
 lane=${2:?lane is required}
@@ -159,4 +159,3 @@ grep -q 'Total EcRPA:' librpa.stdout
 sha256sum band_out basis_wfc_out basis_aux_out v1_coulomb_full_iq_1_rank0.dat \
   v1_Cs_data_0.txt KS_eigenvector_0.dat > PRODUCTION_OUTPUTS.sha256
 echo "date_end=$(date +%F_%T)" >> RUN_PROVENANCE.txt
-
