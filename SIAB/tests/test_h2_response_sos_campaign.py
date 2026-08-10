@@ -80,6 +80,7 @@ class H2ResponseSOSCampaignTest(unittest.TestCase):
         )
         self.assertIn('mpirun -np "$mpi_ranks" -ppn "$mpi_ranks"', case_runner)
         self.assertIn("OMP_NUM_THREADS=1", case_runner)
+        self.assertIn("I_MPI_PIN=0", case_runner)
         self.assertNotIn("OMP_NUM_THREADS=$threads", case_runner)
         self.assertIn("dcf5e649bd68d31e7a57d150a50c65c05694b91361ba277ebbe9f228242e7d4b", case_runner)
         self.assertIn("00db48f2d90db43828826a4a4bdb6e9f666e7c92ad4f197247283e83cbf94f40", case_runner)
