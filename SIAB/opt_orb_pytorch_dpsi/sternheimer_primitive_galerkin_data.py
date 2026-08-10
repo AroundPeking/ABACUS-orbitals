@@ -43,9 +43,13 @@ class SternheimerPrimitiveGalerkinData:
     def __post_init__(self):
         if self.format_version != 1:
             raise ValueError(f"format_version must be 1, got {self.format_version}")
-        if self.representation != "bessel_primitive_uniform_grid_gamma":
+        if self.representation not in (
+            "bessel_primitive_uniform_grid_gamma",
+            "response_orbital_uniform_grid_gamma",
+        ):
             raise ValueError(
-                "representation must be bessel_primitive_uniform_grid_gamma"
+                "representation must be bessel_primitive_uniform_grid_gamma "
+                "or response_orbital_uniform_grid_gamma"
             )
         if self.energy_unit != "Ha":
             raise ValueError("energy_unit must be Ha")

@@ -95,6 +95,20 @@ class ReadSternheimerPrimitiveGalerkinTest(unittest.TestCase):
         self.assertEqual(data.primitive_ao_hamiltonian_ha[0, 0, 0], -0.5)
         self.assertEqual(data.primitive_ao_perturbation_ha[0, 1, 1], -0.1)
 
+    def test_reads_response_orbital_representation(self):
+        text = FIXTURE.read_text(encoding="ascii").replace(
+            "bessel_primitive_uniform_grid_gamma",
+            "response_orbital_uniform_grid_gamma",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "response.dat"
+            path.write_text(text, encoding="ascii")
+            data = read_sternheimer_primitive_galerkin(path)
+
+        self.assertEqual(
+            data.representation, "response_orbital_uniform_grid_gamma"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

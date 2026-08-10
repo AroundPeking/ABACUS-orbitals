@@ -58,7 +58,10 @@ def read_sternheimer_primitive_galerkin(path):
     if format_version != 1:
         raise ValueError(f"unsupported format_version {format_version}")
     representation = header["representation"]
-    if representation != "bessel_primitive_uniform_grid_gamma":
+    if representation not in (
+        "bessel_primitive_uniform_grid_gamma",
+        "response_orbital_uniform_grid_gamma",
+    ):
         raise ValueError(f"unsupported representation {representation}")
     energy_unit = header["energy_unit"]
     if energy_unit != "Ha":
