@@ -3,8 +3,8 @@
 set -euo pipefail
 
 campaign_root=${1:?campaign root is required}
-mpi_ranks=${2:-8}
-max_parallel=${3:-4}
+mpi_ranks=${2:-1}
+max_parallel=${3:-6}
 script_dir=$(cd "$(dirname "$0")" && pwd)
 runner="$script_dir/run_case_66.sh"
 test -x "$runner"
