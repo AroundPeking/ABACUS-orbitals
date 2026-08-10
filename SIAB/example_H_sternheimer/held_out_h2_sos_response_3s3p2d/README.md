@@ -16,5 +16,12 @@ The primary observable is the uncorrected binding energy
 `D_CP = 2 E(H+ghost) - E(H2)` and `BSSE = D_raw - D_CP`.
 
 `prepare_campaign.py` creates six immutable full-band cases.  On server 66,
-`run_campaign_66.sh CAMPAIGN_ROOT 10` runs all six concurrently using one MPI
-rank and ten OpenMP threads per case, occupying 60 of the 64 logical CPUs.
+`run_campaign_66.sh CAMPAIGN_ROOT 8 4` uses eight MPI ranks per ABACUS case and
+runs at most four cases concurrently.
+
+Each MPI rank is forced to one OpenMP thread.  This is a correctness condition
+for the validated 20 Angstrom, 100 Ry molecular grid: using more than one
+OpenMP thread produced a nonphysical negative integrated density during the
+first SCF density construction, while one-rank and eight-rank calculations at
+one thread per rank give the same converged zero-order energy.  The campaign is
+run in memory-bounded batches rather than launching all six cases at once.

@@ -6,13 +6,12 @@ set -euo pipefail
 campaign_root=${1:?campaign root is required}
 lane=${2:?lane is required}
 case_name=${3:?case name is required}
-threads=${4:?OpenMP thread count is required}
-runtime=${RUNTIME_ROOT:-/home/ghj/sternheimer_abacus/verification/runtime-h2-sos-80a606f5-d70b5571}
+mpi_ranks=${4:?MPI rank count is required}
 python=${PYTHON:-/home/ghj/app/miniconda3/envs/abacus-orbitals/bin/python}
 case_dir="$campaign_root/$lane/$case_name"
 manifest="$campaign_root/campaign.json"
-abacus="$runtime/bin/abacus-80a606f57a26"
-librpa="$runtime/bin/chi0_main.exe"
+abacus=${ABACUS_EXE:-/home/ghj/abacus/260809/sternheimer-batched-h-bc720617/build-intel/abacus_3p}
+librpa=${LIBRPA_EXE:-/home/ghj/abacus/260807/LibRPA-master_ghj-9ce52212/build_intel/chi0_main.exe}
 
 test -d "$case_dir"
 test -s "$manifest"
@@ -20,9 +19,9 @@ test -x "$python"
 test -x "$abacus"
 test -x "$librpa"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = \
-  2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d
+  dcf5e649bd68d31e7a57d150a50c65c05694b91361ba277ebbe9f228242e7d4b
 test "$(sha256sum "$librpa" | awk '{print $1}')" = \
-  defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c
+  00db48f2d90db43828826a4a4bdb6e9f666e7c92ad4f197247283e83cbf94f40
 
 read -r nbands nspin nelec suffix orbital pseudo auxiliary < <(
   "$python" - "$manifest" "$case_dir" "$lane" "$case_name" <<'PY'
@@ -94,14 +93,13 @@ test ! -e "$case_dir/basis_wfc_out"
 test ! -e "$case_dir/basis_aux_out"
 test ! -e "$case_dir/sos_full_nfreq16_dump"
 
-export OMP_NUM_THREADS=$threads
-export MKL_NUM_THREADS=$threads
-export OPENBLAS_NUM_THREADS=$threads
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
 export OMP_DYNAMIC=FALSE
-export OMP_PROC_BIND=spread
+export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 export MKL_DYNAMIC=FALSE
-export LD_LIBRARY_PATH="$runtime/lib:${LD_LIBRARY_PATH:-}"
 
 cd "$case_dir"
 {
@@ -109,26 +107,28 @@ cd "$case_dir"
   echo "host=$(hostname)"
   echo "lane=$lane"
   echo "case=$case_name"
-  echo "omp_threads=$threads"
+  echo "mpi_ranks=$mpi_ranks"
+  echo "omp_threads_per_rank=1"
   echo "nbands=$nbands"
   echo "nspin=$nspin"
   echo "nelec=$nelec"
-  echo "abacus_source_commit=80a606f57a2610bc2532468661b687b01f58074c"
-  echo "librpa_reference_commit=d70b55714515c4c6446a87fa96fd1fd62c7f6fde"
+  echo "abacus_source_commit=bc720617aa058ab14823b5104b6657dc549b2d7d"
+  echo "librpa_source_commit=9ce52212f5504a721e91163249e45822fe51dad5"
   sha256sum INPUT STRU KPT librpa.in "$orbital" "$pseudo" "$auxiliary" \
     "$abacus" "$librpa"
 } > RUN_PROVENANCE.txt
 
 /usr/bin/time -v -o abacus.time \
-  mpirun -np 1 -ppn 1 "$abacus" > abacus.stdout 2> abacus.stderr
+  mpirun -np "$mpi_ranks" -ppn "$mpi_ranks" "$abacus" \
+  > abacus.stdout 2> abacus.stderr
 grep -q '!FINAL_ETOT_IS' "$output_dir/running_scf.log"
 grep -q 'rpa_lcao_exx(Ha):' abacus.stdout
 test -s band_out
 test -s basis_wfc_out
 test -s basis_aux_out
-test -s v1_coulomb_full_iq_1_rank0.dat
-test -s v1_Cs_data_0.txt
-test -s KS_eigenvector_0.dat
+compgen -G 'v1_coulomb_full_iq_1_rank*.dat' >/dev/null
+compgen -G 'v1_Cs_data_*.txt' >/dev/null
+compgen -G 'KS_eigenvector_*.dat' >/dev/null
 
 awk -v expected_bands="$nbands" -v expected_spins="$nspin" \
     -v expected_electrons="$nelec" '
@@ -156,6 +156,9 @@ awk -v expected_bands="$nbands" -v expected_spins="$nspin" \
   mpirun -np 1 -ppn 1 "$librpa" > librpa.stdout 2> librpa.stderr
 grep -q 'libRPA finished successfully' librpa.stdout
 grep -q 'Total EcRPA:' librpa.stdout
-sha256sum band_out basis_wfc_out basis_aux_out v1_coulomb_full_iq_1_rank0.dat \
-  v1_Cs_data_0.txt KS_eigenvector_0.dat > PRODUCTION_OUTPUTS.sha256
+find . -maxdepth 1 -type f \
+  \( -name band_out -o -name basis_wfc_out -o -name basis_aux_out \
+     -o -name 'v1_coulomb_full_iq_1_rank*.dat' \
+     -o -name 'v1_Cs_data_*.txt' -o -name 'KS_eigenvector_*.dat' \) \
+  -print0 | sort -z | xargs -0 sha256sum > PRODUCTION_OUTPUTS.sha256
 echo "date_end=$(date +%F_%T)" >> RUN_PROVENANCE.txt
