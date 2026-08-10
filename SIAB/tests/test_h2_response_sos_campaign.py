@@ -74,6 +74,10 @@ class H2ResponseSOSCampaignTest(unittest.TestCase):
         )
 
         self.assertNotIn("#SBATCH", case_runner)
+        self.assertLess(
+            case_runner.index('source "$HOME/.bashrc"'),
+            case_runner.index("set -euo pipefail"),
+        )
         self.assertIn("mpirun -np 1 -ppn 1", case_runner)
         self.assertIn("OMP_NUM_THREADS=$threads", case_runner)
         self.assertIn("2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d", case_runner)
