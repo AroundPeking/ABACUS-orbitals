@@ -67,7 +67,7 @@ def _minimal_orbital(radial_counts):
 
 
 class H2ResponseSOSCampaignTest(unittest.TestCase):
-    def test_server66_runner_uses_six_single_rank_ten_thread_lanes(self):
+    def test_server66_runner_uses_mpi_with_one_thread_per_rank(self):
         case_runner = (CAMPAIGN_DIR / "run_case_66.sh").read_text(encoding="ascii")
         campaign_runner = (CAMPAIGN_DIR / "run_campaign_66.sh").read_text(
             encoding="ascii"
@@ -78,13 +78,16 @@ class H2ResponseSOSCampaignTest(unittest.TestCase):
             case_runner.index('source "$HOME/.bashrc"'),
             case_runner.index("set -euo pipefail"),
         )
-        self.assertIn("mpirun -np 1 -ppn 1", case_runner)
-        self.assertIn("OMP_NUM_THREADS=$threads", case_runner)
-        self.assertIn("2e6441a67a1ad19c18538bd4134a97ca6f7b028cd5ccbc46fabea946d899728d", case_runner)
-        self.assertIn("defb442582891a0ceeb3618b95f13f863bfacdac28ca01ecdf5f06ba278a6a9c", case_runner)
+        self.assertIn('mpirun -np "$mpi_ranks" -ppn "$mpi_ranks"', case_runner)
+        self.assertIn("OMP_NUM_THREADS=1", case_runner)
+        self.assertNotIn("OMP_NUM_THREADS=$threads", case_runner)
+        self.assertIn("dcf5e649bd68d31e7a57d150a50c65c05694b91361ba277ebbe9f228242e7d4b", case_runner)
+        self.assertIn("00db48f2d90db43828826a4a4bdb6e9f666e7c92ad4f197247283e83cbf94f40", case_runner)
         self.assertIn("libRPA finished successfully", case_runner)
         self.assertIn("Total EcRPA:", case_runner)
-        self.assertIn("threads=${2:-10}", campaign_runner)
+        self.assertIn("mpi_ranks=${2:-8}", campaign_runner)
+        self.assertIn("max_parallel=${3:-4}", campaign_runner)
+        self.assertIn("max_parallel * mpi_ranks", campaign_runner)
         self.assertEqual(campaign_runner.count('run_case_66.sh"'), 1)
         self.assertIn("baseline_tzdp:H", campaign_runner)
         self.assertIn("optimized_3s3p2d:H_ghost", campaign_runner)
