@@ -258,8 +258,23 @@ def random_C_init(info_element):
 	for it in info_element.keys():
 		C[it] = util.ND_list(info_element[it].Nl)
 		for il in range(info_element[it].Nl):
-			C[it][il] = torch.tensor(np.random.uniform(-1,1, (info_element[it].Ne, info_element[it].Nu[il])), dtype=torch.float64, requires_grad=True)
+			ne = _radial_count(info_element[it], il)
+			C[it][il] = torch.tensor(np.random.uniform(-1,1, (ne, info_element[it].Nu[il])), dtype=torch.float64, requires_grad=True)
 	return C
+
+
+
+def _radial_count(info, il):
+	if isinstance(info.Ne, numbers.Integral) and not isinstance(info.Ne, bool):
+		if info.Ne <= 0:
+			raise ValueError("Ne must be positive")
+		return int(info.Ne)
+	if len(info.Ne) != info.Nl:
+		raise ValueError("per-l Ne must contain Nl entries")
+	value = info.Ne[il]
+	if not isinstance(value, numbers.Integral) or isinstance(value, bool) or value <= 0:
+		raise ValueError("per-l Ne entries must be positive integers")
+	return int(value)
 
 
 
@@ -315,8 +330,9 @@ def read_C_init(file_name, info_element, return_metadata=False):
 				if index in C_read_index:
 					raise ValueError(f"duplicate coefficient column {index!r}")
 
+				ne = _radial_count(info_element[it], il)
 				values = []
-				while len(values) < info_element[it].Ne:
+				while len(values) < ne:
 					value_line = file.readline()
 					if not value_line:
 						raise IOError(
@@ -335,10 +351,10 @@ def read_C_init(file_name, info_element, return_metadata=False):
 						raise IOError(
 							f"invalid value in coefficient column {index!r}"
 						) from exc
-				if len(values) != info_element[it].Ne:
+				if len(values) != ne:
 					raise IOError(
 						f"coefficient column {index!r} has {len(values)} values, "
-						f"expected {info_element[it].Ne}"
+						f"expected {ne}"
 					)
 				with torch.no_grad():
 					C[it][il][:, iu] = torch.tensor(

@@ -97,13 +97,13 @@ def main():
         reference_dir, reference.provenance, iq=1
     )
 
-    element, nprimitive, lmax = _primitive_layout(primitive)
+    element, nprimitive_by_l, lmax = _primitive_layout(primitive)
     if element != "H" or len(args.nu) != lmax + 1:
         raise ValueError("the H gate requires one Nu value for every primitive l")
     info_element = {
         "H": types.SimpleNamespace(
             Nl=lmax + 1,
-            Ne=nprimitive,
+            Ne=nprimitive_by_l,
             Nu=list(args.nu),
         )
     }
@@ -234,10 +234,12 @@ def _primitive_layout(primitive):
         radial_counts.setdefault(block.l, set()).add(block.n_primitive)
     if sorted(radial_counts) != list(range(max(radial_counts) + 1)):
         raise ValueError("primitive angular channels must be contiguous from l=0")
-    counts = {next(iter(values)) for values in radial_counts.values() if len(values) == 1}
-    if len(counts) != 1 or any(len(values) != 1 for values in radial_counts.values()):
-        raise ValueError("the H gate requires one radial primitive count")
-    return next(iter(elements)), counts.pop(), max(radial_counts)
+    if any(len(values) != 1 for values in radial_counts.values()):
+        raise ValueError("magnetic blocks within one l must share a radial count")
+    counts_by_l = tuple(
+        next(iter(radial_counts[l])) for l in range(max(radial_counts) + 1)
+    )
+    return next(iter(elements)), counts_by_l, max(radial_counts)
 
 
 def _input_hashes(

@@ -90,13 +90,13 @@ def main():
         iq=1,
     )
 
-    element, nprimitive, lmax = _primitive_layout(primitive)
+    element, nprimitive_by_l, lmax = _primitive_layout(primitive)
     if element != "H" or len(args.nu) != lmax + 1:
         raise ValueError("the H gate requires one Nu value for every primitive l")
     info_element = {
         "H": types.SimpleNamespace(
             Nl=lmax + 1,
-            Ne=nprimitive,
+            Ne=nprimitive_by_l,
             Nu=list(args.nu),
         )
     }
