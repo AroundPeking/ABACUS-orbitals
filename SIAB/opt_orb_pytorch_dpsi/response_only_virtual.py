@@ -20,6 +20,79 @@ class ResponseOnlyVirtualEigensystem:
     virtual_orthonormality_max_abs_error: float
 
 
+@dataclass(frozen=True)
+class ResponseOnlyResponse:
+    frequency_ha: torch.Tensor
+    response_half: torch.Tensor
+    response: torch.Tensor
+
+
+def evaluate_response_only_sos(
+    eigensystem,
+    perturbation_ha,
+    occupied_occupation,
+    frequency_ha,
+):
+    """Evaluate the spectral form of the projected Sternheimer response."""
+    if not isinstance(eigensystem, ResponseOnlyVirtualEigensystem):
+        raise ValueError("eigensystem must be a ResponseOnlyVirtualEigensystem")
+    _require_tensor("perturbation_ha", perturbation_ha, torch.complex128, 3)
+    _require_tensor(
+        "occupied_occupation", occupied_occupation, torch.float64, 1
+    )
+    _require_tensor("frequency_ha", frequency_ha, torch.float64, 1)
+    dimension = eigensystem.coefficient.shape[0]
+    if perturbation_ha.shape[0] == 0 or perturbation_ha.shape[1:] != (
+        dimension,
+        dimension,
+    ):
+        raise ValueError("perturbation_ha shape must be (n_auxiliary, n, n)")
+    occupied_count = (
+        eigensystem.energy_ha.shape[0]
+        - eigensystem.virtual_energy_ha.shape[0]
+    )
+    if occupied_occupation.shape[0] != occupied_count:
+        raise ValueError("occupied occupation count differs from the eigensystem")
+    if bool(torch.any(occupied_occupation < 0.0)) or not bool(
+        torch.any(occupied_occupation > 0.0)
+    ):
+        raise ValueError("occupied occupations must be nonnegative and nonempty")
+    if frequency_ha.shape[0] == 0 or not bool(torch.all(frequency_ha > 0.0)):
+        raise ValueError("frequency_ha must be nonempty and positive")
+    _require_hermitian("perturbation_ha", perturbation_ha)
+
+    occupied_coefficient = eigensystem.coefficient[:, :occupied_count]
+    occupied_energy = eigensystem.energy_ha[:occupied_count]
+    virtual_coefficient = eigensystem.virtual_coefficient
+    virtual_energy = eigensystem.virtual_energy_ha
+    response_half = []
+    for frequency in frequency_ha:
+        half = torch.zeros(
+            (perturbation_ha.shape[0], perturbation_ha.shape[0]),
+            dtype=torch.complex128,
+            device="cpu",
+        )
+        for index in range(occupied_count):
+            state = occupied_coefficient[:, index]
+            perturbation_on_state = torch.matmul(perturbation_ha, state)
+            coupling = virtual_coefficient.mH @ perturbation_on_state.mT
+            denominator = (
+                virtual_energy - occupied_energy[index] + 1.0j * frequency
+            )
+            response_coefficient = -coupling / denominator[:, None]
+            response_state = virtual_coefficient @ response_coefficient
+            half = half + occupied_occupation[index] * (
+                perturbation_on_state.conj() @ response_state
+            )
+        response_half.append(half)
+    response_half = torch.stack(tuple(response_half))
+    return ResponseOnlyResponse(
+        frequency_ha=frequency_ha,
+        response_half=response_half,
+        response=response_half + response_half.mH,
+    )
+
+
 def solve_response_only_virtual_eigensystem(
     overlap,
     hamiltonian_ha,
