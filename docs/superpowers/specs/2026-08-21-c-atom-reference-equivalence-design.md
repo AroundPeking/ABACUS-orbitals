@@ -66,7 +66,16 @@ The PBE equivalence gate uses the same representation for every route:
 - Gamma point only, `symmetry = 0`;
 - PBE, `nspin = 2`, `nelec = 4`, `nupdown = 2`;
 - `smearing_method = fixed`;
+- `out_wfc_lcao = 1` and `out_app_flag = 1`, so the LCAO restart
+  reader receives the text files `wfs1_nao.txt` and `wfs2_nao.txt`;
+- `out_chg = 1`, so `init_chg = file` can read `chgs1.cube` and
+  `chgs2.cube`;
 - identical ABACUS executable and input assets in all branches.
+
+The text wavefunction format is mandatory here: the current ABACUS LCAO
+`init_wfc = file` path reads `.txt` NAO coefficients, not the binary
+`out_wfc_lcao = 2` output.  The runner must also verify the ABACUS log
+messages proving that both wavefunction and charge restart files were read.
 
 The gate is a PBE ground-state test.  No Delta-ST, auxiliary basis, Coulomb
 matrix, or LibRPA calculation is allowed before it passes.

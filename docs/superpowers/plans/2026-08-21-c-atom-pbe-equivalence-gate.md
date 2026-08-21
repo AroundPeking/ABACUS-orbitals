@@ -151,7 +151,12 @@ def render_input(*, mode: str, field_dir: int | None = None,
         ])
     else:
         values.extend([("efield_flag", "0"), ("efield_amp", "0")])
-    values.extend([("out_chg", "1"), ("out_wfc_lcao", "2"), ("out_mul", "1")])
+    values.extend([
+        ("out_chg", "1"),
+        ("out_wfc_lcao", "1"),
+        ("out_app_flag", "1"),
+        ("out_mul", "1"),
+    ])
     if restart:
         values.extend([("init_wfc", "file"), ("init_chg", "file")])
     return "\n".join(key if value is None else f"{key} {value}" for key, value in values) + "\n"

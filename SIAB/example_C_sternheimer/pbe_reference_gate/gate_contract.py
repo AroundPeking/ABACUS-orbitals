@@ -39,7 +39,8 @@ FROZEN_PROTOCOL = (
     ("mixing_beta_mag", "0.3"),
     ("smearing_method", "fixed"),
     ("out_chg", "1"),
-    ("out_wfc_lcao", "2"),
+    ("out_wfc_lcao", "1"),
+    ("out_app_flag", "1"),
     ("out_mul", "1"),
 )
 _INTEGER_PROTOCOL_KEYS = frozenset(
@@ -58,6 +59,7 @@ _INTEGER_PROTOCOL_KEYS = frozenset(
         "scf_nmax",
         "out_chg",
         "out_wfc_lcao",
+        "out_app_flag",
         "out_mul",
     }
 )

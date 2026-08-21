@@ -37,7 +37,8 @@ SHARED_PROTOCOL = {
     "mixing_beta_mag": "0.3",
     "smearing_method": "fixed",
     "out_chg": "1",
-    "out_wfc_lcao": "2",
+    "out_wfc_lcao": "1",
+    "out_app_flag": "1",
     "out_mul": "1",
 }
 
