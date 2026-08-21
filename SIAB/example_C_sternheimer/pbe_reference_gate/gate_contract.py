@@ -1,7 +1,64 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import math
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
+
 
 VALID_MODES = {"fixed", "field", "free"}
+HA_TO_EV = 27.211386245988
+HA_TO_KCAL_MOL = 627.5094740631
+INTEGER_TOL = 1e-10
+DRIFT_TOL_KCAL = 0.001
+ENERGY_TOL_HA = 1e-5
+
+_CONVERGENCE_MARKER = "#SCF IS CONVERGED#"
+_FINAL_ENERGY_RE = re.compile(
+    r"^\s*!FINAL_ETOT_IS\s+(\S+)\s+eV\s*$", re.MULTILINE
+)
+_IONIC_STEP_RE = re.compile(r"^\s*\d+\s+#\s*ionic step\s*$", re.MULTILINE)
+_SPIN_NUMBER_RE = re.compile(r"^\s*Spin number\s+(\d+)\s*$", re.MULTILINE)
+_SPIN_HEADER_RE = re.compile(
+    r"^\s*spin=(\d+)\s+k-point=(\d+)/(\d+)\b.*$", re.MULTILINE
+)
+_OCCUPATION_ROW_RE = re.compile(r"^\s*(\d+)\s+(\S+)\s+(\S+)\s*$")
+
+
+@dataclass(frozen=True)
+class PhaseResult:
+    path: str
+    expected_mode: str
+    energy_ev: float
+    energy_ha: float
+    spin_counts: Mapping[int, float]
+    occupations: Mapping[int, tuple[float, ...]]
+    integer_occupations: bool
+    input_values: Mapping[str, str]
+    file_hashes: Mapping[str, str]
+    stage_hash: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "spin_counts", MappingProxyType(dict(self.spin_counts))
+        )
+        object.__setattr__(
+            self,
+            "occupations",
+            MappingProxyType(
+                {spin: tuple(values) for spin, values in self.occupations.items()}
+            ),
+        )
+        object.__setattr__(
+            self, "input_values", MappingProxyType(dict(self.input_values))
+        )
+        object.__setattr__(
+            self, "file_hashes", MappingProxyType(dict(self.file_hashes))
+        )
 
 
 def render_input(
@@ -74,3 +131,323 @@ def render_input(
     return "\n".join(
         key if value is None else f"{key} {value}" for key, value in values
     ) + "\n"
+
+
+def _parse_input(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text().splitlines()
+    except OSError as exc:
+        raise ValueError(f"cannot read INPUT: {exc}") from exc
+
+    nonempty = [line.strip() for line in lines if line.strip()]
+    if not nonempty or nonempty[0] != "INPUT_PARAMETERS":
+        raise ValueError("INPUT must start with INPUT_PARAMETERS")
+    if nonempty.count("INPUT_PARAMETERS") != 1:
+        raise ValueError("INPUT contains ambiguous INPUT_PARAMETERS headers")
+
+    values: dict[str, str] = {}
+    for line in nonempty[1:]:
+        if line.startswith("#"):
+            continue
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2:
+            raise ValueError(f"ambiguous INPUT line: {line}")
+        key, value = fields
+        if key in values:
+            raise ValueError(f"duplicate INPUT key: {key}")
+        values[key] = value
+    return values
+
+
+def _require_finite_float(value: object, label: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a finite number") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be finite")
+    return number
+
+
+def _require_integer_input(values: Mapping[str, str], key: str) -> int:
+    if key not in values:
+        raise ValueError(f"INPUT is missing {key}")
+    token = values[key]
+    if not re.fullmatch(r"[+-]?\d+", token):
+        raise ValueError(f"INPUT {key} must be an integer")
+    return int(token)
+
+
+def _validate_zero_field_input(
+    values: Mapping[str, str], expected_mode: str
+) -> None:
+    if expected_mode not in {"fixed", "free"}:
+        raise ValueError("expected_mode must be fixed or free")
+
+    efield_flag = _require_integer_input(values, "efield_flag")
+    if "efield_amp" not in values:
+        raise ValueError("INPUT is missing efield_amp")
+    efield_amp = _require_finite_float(values["efield_amp"], "INPUT efield_amp")
+    if efield_flag != 0 or efield_amp != 0.0:
+        raise ValueError(
+            "accepted fixed/free phase violates the zero-field contract"
+        )
+
+    ocp = _require_integer_input(values, "ocp")
+    required_ocp = 1 if expected_mode == "fixed" else 0
+    if ocp != required_ocp:
+        raise ValueError(f"{expected_mode} phase requires ocp={required_ocp}")
+    if expected_mode == "fixed":
+        if values.get("ocp_set") != "3*1 19*0 1*1 21*0":
+            raise ValueError("fixed phase has missing or unexpected ocp_set")
+    elif "ocp_set" in values:
+        raise ValueError("free phase must not contain ocp_set")
+
+
+def _parse_final_energy(path: Path) -> float:
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise ValueError(f"cannot read running_scf.log: {exc}") from exc
+
+    if text.count(_CONVERGENCE_MARKER) != 1:
+        raise ValueError(
+            "running_scf.log must contain exactly one ABACUS SCF convergence marker"
+        )
+    marker_lines = re.findall(
+        r"^\s*!FINAL_ETOT_IS\b.*$", text, flags=re.MULTILINE
+    )
+    matches = _FINAL_ENERGY_RE.findall(text)
+    if len(marker_lines) != 1 or len(matches) != 1:
+        raise ValueError(
+            "running_scf.log must contain exactly one final total energy"
+        )
+    return _require_finite_float(matches[0], "final total energy")
+
+
+def _parse_occupations(path: Path) -> dict[int, tuple[float, ...]]:
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise ValueError(f"cannot read eig_occ.txt: {exc}") from exc
+
+    if len(_IONIC_STEP_RE.findall(text)) != 1:
+        raise ValueError("eig_occ.txt must contain exactly one ionic step")
+    spin_numbers = _SPIN_NUMBER_RE.findall(text)
+    if spin_numbers != ["2"]:
+        raise ValueError("eig_occ.txt must contain exactly one Spin number 2 line")
+
+    headers = list(_SPIN_HEADER_RE.finditer(text))
+    if len(headers) != 2 or {int(match.group(1)) for match in headers} != {1, 2}:
+        raise ValueError(
+            "eig_occ.txt must contain one explicit spin=1 and spin=2 block"
+        )
+    if any((int(match.group(2)), int(match.group(3))) != (1, 1) for match in headers):
+        raise ValueError("eig_occ.txt must contain exactly one k-point per spin")
+
+    occupations: dict[int, tuple[float, ...]] = {}
+    for header_index, header in enumerate(headers):
+        spin = int(header.group(1))
+        end = headers[header_index + 1].start() if header_index + 1 < len(headers) else len(text)
+        block = text[header.end():end]
+        indices: list[int] = []
+        values: list[float] = []
+        for line in block.splitlines():
+            if not line.strip():
+                continue
+            match = _OCCUPATION_ROW_RE.fullmatch(line)
+            if match is None:
+                raise ValueError(f"ambiguous occupation row in spin={spin}: {line.strip()}")
+            index = int(match.group(1))
+            _require_finite_float(match.group(2), f"spin={spin} eigenvalue")
+            occupation = _require_finite_float(
+                match.group(3), f"spin={spin} occupation"
+            )
+            indices.append(index)
+            values.append(occupation)
+        if not values or indices != list(range(1, len(values) + 1)):
+            raise ValueError(f"spin={spin} occupation rows are missing or ambiguous")
+        occupations[spin] = tuple(values)
+
+    if len(occupations[1]) != len(occupations[2]):
+        raise ValueError("spin occupation blocks have inconsistent band counts")
+    return occupations
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ValueError(f"cannot hash {path.name}: {exc}") from exc
+    return digest.hexdigest()
+
+
+def _resolve_output_file(phase: Path, name: str) -> Path:
+    candidates = []
+    direct = phase / name
+    if direct.is_file():
+        candidates.append(direct)
+    candidates.extend(
+        sorted(path for path in phase.glob(f"OUT.*/{name}") if path.is_file())
+    )
+    if not candidates:
+        raise ValueError(f"missing {name} in phase {phase}")
+    if len(candidates) != 1:
+        raise ValueError(f"ambiguous {name} in phase {phase}")
+    return candidates[0]
+
+
+def audit_phase(path: str | Path, expected_mode: str) -> PhaseResult:
+    phase = Path(path).resolve()
+    if not phase.is_dir():
+        raise ValueError(f"phase directory does not exist: {phase}")
+
+    input_path = phase / "INPUT"
+    if not input_path.is_file():
+        raise ValueError(f"missing INPUT in phase {phase}")
+    log_path = _resolve_output_file(phase, "running_scf.log")
+    eig_path = _resolve_output_file(phase, "eig_occ.txt")
+
+    input_values = _parse_input(input_path)
+    _validate_zero_field_input(input_values, expected_mode)
+    energy_ev = _parse_final_energy(log_path)
+    occupations = _parse_occupations(eig_path)
+
+    snapped: dict[int, tuple[int, ...]] = {}
+    for spin, spin_values in occupations.items():
+        snapped_values = []
+        for occupation in spin_values:
+            if abs(occupation) <= INTEGER_TOL:
+                snapped_values.append(0)
+            elif abs(occupation - 1.0) <= INTEGER_TOL:
+                snapped_values.append(1)
+            else:
+                raise ValueError(
+                    f"fractional occupation in spin={spin}: {occupation:.16g}"
+                )
+        snapped[spin] = tuple(snapped_values)
+
+    spin_counts = {spin: float(sum(values)) for spin, values in snapped.items()}
+    if spin_counts != {1: 3.0, 2: 1.0}:
+        raise ValueError(
+            "spin electron counts must be spin1=3 and spin2=1; "
+            f"got spin1={spin_counts.get(1)} spin2={spin_counts.get(2)}"
+        )
+
+    files = {
+        "INPUT": input_path,
+        "running_scf.log": log_path,
+        "eig_occ.txt": eig_path,
+    }
+    file_hashes = {name: _sha256(file_path) for name, file_path in files.items()}
+    manifest = {
+        name: {
+            "relative_path": str(file_path.relative_to(phase)),
+            "sha256": file_hashes[name],
+        }
+        for name, file_path in files.items()
+    }
+    stage_hash = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+    return PhaseResult(
+        path=str(phase),
+        expected_mode=expected_mode,
+        energy_ev=energy_ev,
+        energy_ha=energy_ev / HA_TO_EV,
+        spin_counts=spin_counts,
+        occupations=occupations,
+        integer_occupations=True,
+        input_values=input_values,
+        file_hashes=file_hashes,
+        stage_hash=stage_hash,
+    )
+
+
+def _validate_directions(values: Mapping[int, object], label: str) -> None:
+    if any(type(direction) is not int for direction in values) or set(values) != {
+        0,
+        1,
+        2,
+    }:
+        raise ValueError(f"{label} must contain exactly directions {{0, 1, 2}}")
+
+
+def compare_zero_field_results(
+    *,
+    fixed_energy_ha: float,
+    free_energies_ha: Mapping[int, float],
+    fixed_drift_kcal: float,
+    free_drifts_kcal: Mapping[int, float],
+) -> dict[str, object]:
+    fixed_energy = _require_finite_float(fixed_energy_ha, "fixed energy")
+    fixed_drift = _require_finite_float(fixed_drift_kcal, "fixed drift")
+    _validate_directions(free_energies_ha, "free energies")
+    _validate_directions(free_drifts_kcal, "free drifts")
+
+    free_energies = {
+        direction: _require_finite_float(
+            free_energies_ha[direction], f"free direction {direction} energy"
+        )
+        for direction in range(3)
+    }
+    free_drifts = {
+        direction: _require_finite_float(
+            free_drifts_kcal[direction], f"free direction {direction} drift"
+        )
+        for direction in range(3)
+    }
+
+    if fixed_drift >= DRIFT_TOL_KCAL:
+        raise ValueError(
+            f"fixed cold-to-restart drift {fixed_drift:.16g} kcal/mol is not "
+            f"below {DRIFT_TOL_KCAL}"
+        )
+    for direction, drift in free_drifts.items():
+        if drift >= DRIFT_TOL_KCAL:
+            raise ValueError(
+                f"free direction {direction} drift {drift:.16g} kcal/mol is not "
+                f"below {DRIFT_TOL_KCAL}"
+            )
+
+    fixed_free_differences = {
+        direction: abs(energy - fixed_energy)
+        for direction, energy in free_energies.items()
+    }
+    for direction, difference in fixed_free_differences.items():
+        if difference >= ENERGY_TOL_HA:
+            raise ValueError(
+                f"fixed/free energy difference for direction {direction} is "
+                f"{difference:.16g} Ha, not below {ENERGY_TOL_HA}"
+            )
+
+    free_pair_differences = {
+        f"{left}-{right}": abs(free_energies[left] - free_energies[right])
+        for left in range(3)
+        for right in range(left + 1, 3)
+    }
+    for pair, difference in free_pair_differences.items():
+        if difference >= ENERGY_TOL_HA:
+            raise ValueError(
+                f"free-direction energy difference for {pair} is "
+                f"{difference:.16g} Ha, not below {ENERGY_TOL_HA}"
+            )
+
+    return {
+        "status": "PBE_GATE_PASSED",
+        "thresholds": {
+            "drift_kcal_mol": DRIFT_TOL_KCAL,
+            "energy_ha": ENERGY_TOL_HA,
+            "integer_occupation": INTEGER_TOL,
+        },
+        "fixed_energy_ha": fixed_energy,
+        "free_energies_ha": free_energies,
+        "fixed_drift_kcal": fixed_drift,
+        "free_drifts_kcal": free_drifts,
+        "fixed_free_differences_ha": fixed_free_differences,
+        "free_pair_differences_ha": free_pair_differences,
+    }
