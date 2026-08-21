@@ -610,7 +610,10 @@ for spin in (1, 2):
             for phase in phases:
                 (branch_root / phase / "PHASE_COMPLETE.json").unlink()
                 restart = branch_root / phase / "RESTART_PROVENANCE.json"
-                restart.unlink(missing_ok=True)
+                try:
+                    restart.unlink()
+                except FileNotFoundError:
+                    pass
         (root / "runs/fixed/RUN_FAILED.json").write_text(
             '{"status":"RUN_FAILED"}\n'
         )
