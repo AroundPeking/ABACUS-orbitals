@@ -11,6 +11,59 @@ from typing import Mapping
 
 
 VALID_MODES = {"fixed", "field", "free"}
+FROZEN_PROTOCOL = (
+    ("suffix", "C_PBE_REFERENCE_GATE"),
+    ("calculation", "scf"),
+    ("ntype", "1"),
+    ("nelec", "4"),
+    ("nspin", "2"),
+    ("nupdown", "2"),
+    ("nbands", "22"),
+    ("basis_type", "lcao"),
+    ("ecutwfc", "30"),
+    ("lcao_ecut", "100"),
+    ("nx", "135"),
+    ("ny", "135"),
+    ("nz", "135"),
+    ("ks_solver", "genelpa"),
+    ("dft_functional", "pbe"),
+    ("symmetry", "0"),
+    ("gamma_only", "1"),
+    ("kpar", "1"),
+    ("pseudo_dir", "./"),
+    ("orbital_dir", "./"),
+    ("scf_thr", "1e-10"),
+    ("scf_nmax", "300"),
+    ("mixing_type", "broyden"),
+    ("mixing_beta", "0.3"),
+    ("mixing_beta_mag", "0.3"),
+    ("smearing_method", "fixed"),
+    ("out_chg", "1"),
+    ("out_wfc_lcao", "2"),
+    ("out_mul", "1"),
+)
+_INTEGER_PROTOCOL_KEYS = frozenset(
+    {
+        "ntype",
+        "nelec",
+        "nspin",
+        "nupdown",
+        "nbands",
+        "nx",
+        "ny",
+        "nz",
+        "symmetry",
+        "gamma_only",
+        "kpar",
+        "scf_nmax",
+        "out_chg",
+        "out_wfc_lcao",
+        "out_mul",
+    }
+)
+_FLOAT_PROTOCOL_KEYS = frozenset(
+    {"ecutwfc", "lcao_ecut", "scf_thr", "mixing_beta", "mixing_beta_mag"}
+)
 HA_TO_EV = 27.211386245988
 HA_TO_KCAL_MOL = 627.5094740631
 INTEGER_TOL = 1e-10
@@ -33,6 +86,8 @@ _OCCUPATION_ROW_RE = re.compile(r"^\s*(\d+)\s+(\S+)\s+(\S+)\s*$")
 class PhaseResult:
     path: str
     expected_mode: str
+    expected_restart: bool
+    expected_field_dir: int | None
     energy_ev: float
     energy_ha: float
     spin_counts: Mapping[int, float]
@@ -79,32 +134,7 @@ def render_input(
 
     values = [
         ("INPUT_PARAMETERS", None),
-        ("suffix", "C_PBE_REFERENCE_GATE"),
-        ("calculation", "scf"),
-        ("ntype", "1"),
-        ("nelec", "4"),
-        ("nspin", "2"),
-        ("nupdown", "2"),
-        ("nbands", "22"),
-        ("basis_type", "lcao"),
-        ("ecutwfc", "30"),
-        ("lcao_ecut", "100"),
-        ("nx", "135"),
-        ("ny", "135"),
-        ("nz", "135"),
-        ("ks_solver", "genelpa"),
-        ("dft_functional", "pbe"),
-        ("symmetry", "0"),
-        ("gamma_only", "1"),
-        ("kpar", "1"),
-        ("pseudo_dir", "./"),
-        ("orbital_dir", "./"),
-        ("scf_thr", "1e-10"),
-        ("scf_nmax", "300"),
-        ("mixing_type", "broyden"),
-        ("mixing_beta", "0.3"),
-        ("mixing_beta_mag", "0.3"),
-        ("smearing_method", "fixed"),
+        *FROZEN_PROTOCOL,
         ("ocp", "1" if mode == "fixed" else "0"),
     ]
     if mode == "fixed":
@@ -122,9 +152,6 @@ def render_input(
         )
     else:
         values.extend([("efield_flag", "0"), ("efield_amp", "0")])
-    values.extend(
-        [("out_chg", "1"), ("out_wfc_lcao", "2"), ("out_mul", "1")]
-    )
     if restart:
         values.extend([("init_wfc", "file"), ("init_chg", "file")])
 
@@ -178,30 +205,135 @@ def _require_integer_input(values: Mapping[str, str], key: str) -> int:
     return int(token)
 
 
-def _validate_zero_field_input(
-    values: Mapping[str, str], expected_mode: str
-) -> None:
-    if expected_mode not in {"fixed", "free"}:
-        raise ValueError("expected_mode must be fixed or free")
+def _validate_frozen_protocol(values: Mapping[str, str]) -> None:
+    for key, expected in FROZEN_PROTOCOL:
+        if key not in values:
+            raise ValueError(f"frozen protocol key {key} is missing")
+        actual = values[key]
+        if key in _INTEGER_PROTOCOL_KEYS:
+            if not re.fullmatch(r"[+-]?\d+", actual) or int(actual) != int(expected):
+                raise ValueError(
+                    f"frozen protocol key {key} must equal {expected}; got {actual}"
+                )
+        elif key in _FLOAT_PROTOCOL_KEYS:
+            actual_number = _require_finite_float(
+                actual, f"frozen protocol key {key}"
+            )
+            if actual_number != float(expected):
+                raise ValueError(
+                    f"frozen protocol key {key} must equal {expected}; got {actual}"
+                )
+        elif actual != expected:
+            raise ValueError(
+                f"frozen protocol key {key} must equal {expected}; got {actual}"
+            )
 
-    efield_flag = _require_integer_input(values, "efield_flag")
-    if "efield_amp" not in values:
-        raise ValueError("INPUT is missing efield_amp")
-    efield_amp = _require_finite_float(values["efield_amp"], "INPUT efield_amp")
-    if efield_flag != 0 or efield_amp != 0.0:
+
+def _require_float_input(values: Mapping[str, str], key: str) -> float:
+    if key not in values:
+        raise ValueError(f"INPUT is missing {key}")
+    return _require_finite_float(values[key], f"INPUT {key}")
+
+
+def _validate_restart_input(
+    values: Mapping[str, str], expected_restart: bool
+) -> None:
+    # Task2 checks only the declared INPUT semantics. Task4 must prove that
+    # these files were copied from, and loaded from, the preceding phase.
+    if type(expected_restart) is not bool:
+        raise ValueError("expected_restart must be a boolean")
+    restart_values = (values.get("init_wfc"), values.get("init_chg"))
+    if expected_restart:
+        if restart_values != ("file", "file"):
+            raise ValueError(
+                "restart input requires init_wfc=file and init_chg=file"
+            )
+    elif any(value is not None for value in restart_values):
+        raise ValueError(
+            "cold/field input must not contain init_wfc or init_chg"
+        )
+
+
+def _validate_phase_input(
+    values: Mapping[str, str],
+    expected_mode: str,
+    expected_restart: bool,
+    expected_field_dir: int | None,
+) -> None:
+    if expected_mode not in VALID_MODES:
+        raise ValueError(f"unsupported expected_mode: {expected_mode}")
+    _validate_frozen_protocol(values)
+
+    if expected_mode == "field":
+        if expected_restart:
+            raise ValueError("field phase cannot use restart input")
+        if (
+            type(expected_field_dir) is not int
+            or expected_field_dir not in {0, 1, 2}
+        ):
+            raise ValueError("field phase requires expected_field_dir 0, 1, or 2")
+    else:
+        if expected_field_dir is not None:
+            raise ValueError("expected_field_dir is only valid for field phases")
+        if expected_mode == "free" and not expected_restart:
+            raise ValueError("free phase requires expected_restart=True")
+    _validate_restart_input(values, expected_restart)
+
+    ocp = _require_integer_input(values, "ocp")
+    if expected_mode == "fixed":
+        if ocp != 1:
+            raise ValueError("fixed phase requires ocp=1")
+        if values.get("ocp_set") != "3*1 19*0 1*1 21*0":
+            raise ValueError("fixed phase has missing or unexpected ocp_set")
+    else:
+        if ocp != 0:
+            raise ValueError(f"{expected_mode} phase requires ocp=0")
+        if "ocp_set" in values:
+            raise ValueError(f"{expected_mode} phase must not contain ocp_set")
+
+    if expected_mode == "field":
+        field_contract = {
+            "efield_flag": 1,
+            "dip_cor_flag": 0,
+            "efield_dir": expected_field_dir,
+        }
+        for key, expected in field_contract.items():
+            if _require_integer_input(values, key) != expected:
+                raise ValueError(
+                    f"field phase requires {key}={expected}"
+                )
+        float_contract = {
+            "efield_pos_max": 0.8,
+            "efield_pos_dec": 0.1,
+            "efield_amp": 1e-4,
+        }
+        for key, expected in float_contract.items():
+            if _require_float_input(values, key) != expected:
+                raise ValueError(
+                    f"field phase requires {key}={expected:.16g}"
+                )
+        return
+
+    if _require_integer_input(values, "efield_flag") != 0:
         raise ValueError(
             "accepted fixed/free phase violates the zero-field contract"
         )
-
-    ocp = _require_integer_input(values, "ocp")
-    required_ocp = 1 if expected_mode == "fixed" else 0
-    if ocp != required_ocp:
-        raise ValueError(f"{expected_mode} phase requires ocp={required_ocp}")
-    if expected_mode == "fixed":
-        if values.get("ocp_set") != "3*1 19*0 1*1 21*0":
-            raise ValueError("fixed phase has missing or unexpected ocp_set")
-    elif "ocp_set" in values:
-        raise ValueError("free phase must not contain ocp_set")
+    if _require_float_input(values, "efield_amp") != 0.0:
+        raise ValueError(
+            "accepted fixed/free phase violates the zero-field contract"
+        )
+    forbidden_field_keys = {
+        "dip_cor_flag",
+        "efield_dir",
+        "efield_pos_max",
+        "efield_pos_dec",
+    }
+    present = sorted(forbidden_field_keys.intersection(values))
+    if present:
+        raise ValueError(
+            "fixed/free zero-field input contains field-only keys: "
+            + ", ".join(present)
+        )
 
 
 def _parse_final_energy(path: Path) -> float:
@@ -300,7 +432,12 @@ def _resolve_output_file(phase: Path, name: str) -> Path:
     return candidates[0]
 
 
-def audit_phase(path: str | Path, expected_mode: str) -> PhaseResult:
+def audit_phase(
+    path: str | Path,
+    expected_mode: str,
+    expected_restart: bool,
+    expected_field_dir: int | None = None,
+) -> PhaseResult:
     phase = Path(path).resolve()
     if not phase.is_dir():
         raise ValueError(f"phase directory does not exist: {phase}")
@@ -312,7 +449,12 @@ def audit_phase(path: str | Path, expected_mode: str) -> PhaseResult:
     eig_path = _resolve_output_file(phase, "eig_occ.txt")
 
     input_values = _parse_input(input_path)
-    _validate_zero_field_input(input_values, expected_mode)
+    _validate_phase_input(
+        input_values,
+        expected_mode,
+        expected_restart,
+        expected_field_dir,
+    )
     energy_ev = _parse_final_energy(log_path)
     occupations = _parse_occupations(eig_path)
 
@@ -357,6 +499,8 @@ def audit_phase(path: str | Path, expected_mode: str) -> PhaseResult:
     return PhaseResult(
         path=str(phase),
         expected_mode=expected_mode,
+        expected_restart=expected_restart,
+        expected_field_dir=expected_field_dir,
         energy_ev=energy_ev,
         energy_ha=energy_ev / HA_TO_EV,
         spin_counts=spin_counts,

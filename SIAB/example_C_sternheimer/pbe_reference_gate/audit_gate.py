@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 if __package__:
@@ -24,15 +25,35 @@ else:
     )
 
 
+AUTHORITATIVE_RESULT = "RESULT_SUMMARY.json"
+TEXT_SUMMARY = "RESULT_SUMMARY.txt"
+RESTART_CHAIN_STATUS = "PENDING_TASK4"
+RESTART_CHAIN_NOTE = (
+    "Task2 verifies INPUT restart semantics only; actual WFC/CHG copy and load "
+    "provenance must be verified by the Task4 runner before production use."
+)
+
+
+@dataclass(frozen=True)
+class PhaseSpec:
+    relative: str
+    mode: str
+    restart: bool
+    field_dir: int | None = None
+
+
 PHASES = (
-    ("runs/fixed/fixed_cold", "fixed"),
-    ("runs/fixed/fixed_restart", "fixed"),
-    ("runs/dir0/free_restart1", "free"),
-    ("runs/dir0/free_restart2", "free"),
-    ("runs/dir1/free_restart1", "free"),
-    ("runs/dir1/free_restart2", "free"),
-    ("runs/dir2/free_restart1", "free"),
-    ("runs/dir2/free_restart2", "free"),
+    PhaseSpec("runs/fixed/fixed_cold", "fixed", False),
+    PhaseSpec("runs/fixed/fixed_restart", "fixed", True),
+    PhaseSpec("runs/dir0/field_seed", "field", False, 0),
+    PhaseSpec("runs/dir0/free_restart1", "free", True),
+    PhaseSpec("runs/dir0/free_restart2", "free", True),
+    PhaseSpec("runs/dir1/field_seed", "field", False, 1),
+    PhaseSpec("runs/dir1/free_restart1", "free", True),
+    PhaseSpec("runs/dir1/free_restart2", "free", True),
+    PhaseSpec("runs/dir2/field_seed", "field", False, 2),
+    PhaseSpec("runs/dir2/free_restart1", "free", True),
+    PhaseSpec("runs/dir2/free_restart2", "free", True),
 )
 
 
@@ -40,6 +61,8 @@ def _phase_dict(phase: PhaseResult, root: Path) -> dict[str, object]:
     return {
         "path": str(Path(phase.path).relative_to(root)),
         "expected_mode": phase.expected_mode,
+        "expected_restart": phase.expected_restart,
+        "expected_field_dir": phase.expected_field_dir,
         "energy_ev": phase.energy_ev,
         "energy_ha": phase.energy_ha,
         "spin_counts": {str(key): value for key, value in phase.spin_counts.items()},
@@ -58,8 +81,13 @@ def audit_gate(root: str | Path) -> dict[str, object]:
         raise ValueError(f"gate root does not exist: {root_path}")
 
     phases = {
-        relative: audit_phase(root_path / relative, expected_mode=mode)
-        for relative, mode in PHASES
+        spec.relative: audit_phase(
+            root_path / spec.relative,
+            expected_mode=spec.mode,
+            expected_restart=spec.restart,
+            expected_field_dir=spec.field_dir,
+        )
+        for spec in PHASES
     }
     fixed_cold = phases["runs/fixed/fixed_cold"]
     fixed_restart = phases["runs/fixed/fixed_restart"]
@@ -84,23 +112,33 @@ def audit_gate(root: str | Path) -> dict[str, object]:
     )
     return {
         "status": comparison["status"],
+        "authoritative_result": AUTHORITATIVE_RESULT,
+        "restart_chain_evidence": {
+            "status": RESTART_CHAIN_STATUS,
+            "note": RESTART_CHAIN_NOTE,
+        },
         "phases": {
-            relative: _phase_dict(phases[relative], root_path)
-            for relative, _ in PHASES
+            spec.relative: _phase_dict(phases[spec.relative], root_path)
+            for spec in PHASES
         },
         "comparison": comparison,
     }
 
 
 def _summary_text(summary: dict[str, object]) -> str:
-    lines = [f"status={summary['status']}"]
+    lines = [
+        f"status={summary['status']}",
+        f"authoritative_result={AUTHORITATIVE_RESULT}",
+    ]
     if summary["status"] != "PBE_GATE_PASSED":
         lines.append(f"error={summary.get('error', 'unknown audit failure')}")
         return "\n".join(lines) + "\n"
 
+    lines.append(f"restart_chain_evidence={RESTART_CHAIN_STATUS}")
+    lines.append(f"restart_chain_note={RESTART_CHAIN_NOTE}")
     phases = summary["phases"]
-    for relative, _ in PHASES:
-        phase = phases[relative]
+    for spec in PHASES:
+        phase = phases[spec.relative]
         counts = phase["spin_counts"]
         occupations = phase["occupations"]
         spin1_occupations = ",".join(
@@ -110,7 +148,7 @@ def _summary_text(summary: dict[str, object]) -> str:
             f"{value:.16g}" for value in occupations["2"]
         )
         lines.append(
-            f"phase={relative} energy_ev={phase['energy_ev']:.16g} "
+            f"phase={spec.relative} energy_ev={phase['energy_ev']:.16g} "
             f"energy_ha={phase['energy_ha']:.16g} spin1={counts['1']:.1f} "
             f"spin2={counts['2']:.1f} integer_occupations="
             f"{str(phase['integer_occupations']).lower()} "
@@ -162,30 +200,79 @@ def _atomic_write(path: Path, text: str) -> None:
                 temporary.unlink()
 
 
+def _summary_paths(root: Path) -> tuple[Path, Path]:
+    return root / AUTHORITATIVE_RESULT, root / TEXT_SUMMARY
+
+
+def _best_effort_remove_summaries(root: Path) -> None:
+    for path in _summary_paths(root):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def invalidate_summaries(root: Path) -> None:
+    errors = []
+    for path in _summary_paths(root):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            errors.append(exc)
+    if errors:
+        raise OSError(f"cannot invalidate old audit summaries: {errors[0]}")
+
+
 def write_summaries(root: Path, summary: dict[str, object]) -> None:
-    _atomic_write(
-        root / "RESULT_SUMMARY.json",
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-    )
-    _atomic_write(root / "RESULT_SUMMARY.txt", _summary_text(summary))
+    authoritative_path, text_path = _summary_paths(root)
+    try:
+        json_content = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+        text_content = _summary_text(summary)
+        _atomic_write(text_path, text_content)
+        # JSON is the sole authority and is therefore published last.
+        _atomic_write(authoritative_path, json_content)
+    except Exception:
+        # Cleanup is best-effort; the original exception is always re-raised.
+        _best_effort_remove_summaries(root)
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit the C atom PBE reference gate")
-    parser.add_argument("root", nargs="?", default=".", help="gate root directory")
+    parser.add_argument("root_positional", nargs="?", help="gate root directory")
+    parser.add_argument("--root", dest="root_option", help="gate root directory")
     args = parser.parse_args(argv)
-    root = Path(args.root).resolve()
+    if args.root_positional is not None and args.root_option is not None:
+        parser.error("positional root and --root cannot be used together")
+    root_argument = args.root_option or args.root_positional or "."
+    root = Path(root_argument).resolve()
 
     try:
+        if not root.is_dir():
+            raise ValueError(f"gate root does not exist: {root}")
+        invalidate_summaries(root)
         summary = audit_gate(root)
-    except Exception as exc:
-        failure = {"status": "PBE_GATE_FAILED", "error": str(exc)}
+    except (ValueError, OSError) as exc:
+        failure = {
+            "status": "PBE_GATE_FAILED",
+            "authoritative_result": AUTHORITATIVE_RESULT,
+            "error": str(exc),
+        }
         if root.is_dir():
-            write_summaries(root, failure)
+            _best_effort_remove_summaries(root)
+            try:
+                write_summaries(root, failure)
+            except OSError:
+                _best_effort_remove_summaries(root)
         print(f"PBE gate audit failed: {exc}", file=sys.stderr)
         return 1
 
-    write_summaries(root, summary)
+    try:
+        write_summaries(root, summary)
+    except OSError as exc:
+        _best_effort_remove_summaries(root)
+        print(f"PBE gate summary write failed: {exc}", file=sys.stderr)
+        return 1
     print(f"status={summary['status']}")
     return 0
 
