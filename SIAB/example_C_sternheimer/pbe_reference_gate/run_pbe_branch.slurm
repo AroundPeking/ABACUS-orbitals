@@ -36,6 +36,8 @@ for required in GATE_ROOT ABACUS_ARTIFACT PSEUDO_ASSET ORBITAL_ASSET; do
 done
 
 [[ ${SLURM_JOB_PARTITION:-} == normal ]] || { printf 'partition must be normal\n' >&2; exit 2; }
+[[ ${SLURM_JOB_ID:-} =~ ^[1-9][0-9]*$ ]] || { printf 'job ID must be numeric\n' >&2; exit 2; }
+[[ ${SLURM_ARRAY_JOB_ID:-} =~ ^[1-9][0-9]*$ ]] || { printf 'array job ID must be numeric\n' >&2; exit 2; }
 [[ ${SLURM_ARRAY_TASK_ID:-} =~ ^[0-3]$ ]] || { printf 'array task must be 0-3\n' >&2; exit 2; }
 [[ ${SLURM_ARRAY_TASK_COUNT:-} == 4 ]] || { printf 'array task count must be 4\n' >&2; exit 2; }
 [[ ${SLURM_CPUS_PER_TASK:-} == 32 ]] || { printf 'cpus per task must be 32\n' >&2; exit 2; }
@@ -45,9 +47,7 @@ done
     printf 'tasks per node must be 1\n' >&2
     exit 2
 }
-if [[ -n ${SLURM_MEM_PER_NODE:-} ]]; then
-    [[ $SLURM_MEM_PER_NODE == 126500 ]] || { printf 'memory per node must be 126500 MB\n' >&2; exit 2; }
-fi
+[[ ${SLURM_MEM_PER_NODE:-} == 126500 ]] || { printf 'memory per node must be 126500 MB\n' >&2; exit 2; }
 
 case "$SLURM_ARRAY_TASK_ID" in
     0) BRANCH=fixed ;;
@@ -84,6 +84,7 @@ ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_ASSET" pseudo)
 ORBITAL_REAL=$(resolve_regular "$ORBITAL_ASSET" orbital)
 PYTHON_REAL=$(command -v "$PYTHON_EXE")
+"$PYTHON_REAL" "$AUDIT" check-scheduler --branch "$BRANCH" >/dev/null
 GATE_ROOT=$(
     "$PYTHON_REAL" - "$GATE_ROOT" <<'PY'
 import os
@@ -101,33 +102,35 @@ PY
 )
 mkdir -p "$GATE_ROOT"
 PREPARE_GUARD="$GATE_ROOT/.task4-prepare.guard"
-PREPARE_GUARD_HELD=0
+PREPARE_MUTEX="$PREPARE_GUARD/prepare.lock"
+PREPARE_MUTEX_HELD=0
 
-guard_owner_matches_this_array() {
-    local owner="$PREPARE_GUARD/owner"
+owner_matches_this_array() {
+    local owner=$1
     [[ -f $owner && ! -L $owner ]] || return 1
-    grep -qx "array_job_id=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-UNKNOWN}}" "$owner" \
+    grep -qx "array_job_id=${SLURM_ARRAY_JOB_ID}" "$owner" \
         && grep -Eq '^array_task_id=[0-3]$' "$owner"
 }
 
-acquire_prepare_guard() {
-    local attempt delay temporary_owner
-    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+write_owner() {
+    local directory=$1 temporary_owner
+    temporary_owner="$directory/.owner.$$"
+    {
+        printf 'array_job_id=%s\n' "$SLURM_ARRAY_JOB_ID"
+        printf 'array_task_id=%s\n' "$SLURM_ARRAY_TASK_ID"
+        printf 'hostname=%s\n' "$(hostname)"
+        printf 'pid=%s\n' "$$"
+    } >"$temporary_owner"
+    mv "$temporary_owner" "$directory/owner"
+}
+
+ensure_prepare_guard() {
+    local attempt
+    for attempt in $(seq 1 120); do
         if mkdir "$PREPARE_GUARD" 2>/dev/null; then
-            PREPARE_GUARD_HELD=1
-            temporary_owner="$PREPARE_GUARD/.owner.$$"
-            if ! {
-                {
-                    printf 'array_job_id=%s\n' "${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-UNKNOWN}}"
-                    printf 'array_task_id=%s\n' "$SLURM_ARRAY_TASK_ID"
-                    printf 'hostname=%s\n' "$(hostname)"
-                    printf 'pid=%s\n' "$$"
-                } >"$temporary_owner" \
-                    && mv "$temporary_owner" "$PREPARE_GUARD/owner"
-            }; then
-                rm -f "$temporary_owner"
+            if ! write_owner "$PREPARE_GUARD"; then
+                rm -f "$PREPARE_GUARD/.owner.$$"
                 rmdir "$PREPARE_GUARD"
-                PREPARE_GUARD_HELD=0
                 return 1
             fi
             return 0
@@ -136,28 +139,64 @@ acquire_prepare_guard() {
             printf 'prepare guard is not a local directory: %s\n' "$PREPARE_GUARD" >&2
             return 1
         }
-        if guard_owner_matches_this_array; then
-            delay=$((attempt < 4 ? attempt : 4))
-            sleep "$delay"
+        if [[ ! -e $PREPARE_GUARD/owner && ! -L $PREPARE_GUARD/owner ]]; then
+            sleep 1
             continue
         fi
-        if [[ ! -e $PREPARE_GUARD/owner && ! -L $PREPARE_GUARD/owner ]] \
-            && (( attempt <= 2 )); then
-            sleep "$attempt"
-            continue
+        if owner_matches_this_array "$PREPARE_GUARD/owner"; then
+            return 0
         fi
-        printf 'prepare guard is stale or belongs to another job: %s\n' "$PREPARE_GUARD" >&2
+        printf 'prepare guard belongs to another array job: %s\n' "$PREPARE_GUARD" >&2
         return 1
     done
-    printf 'timed out waiting for active Task4 prepare guard\n' >&2
+    printf 'timed out waiting for Task4 prepare guard identity\n' >&2
     return 1
 }
 
-release_prepare_guard() {
-    if (( PREPARE_GUARD_HELD )); then
-        rm -f "$PREPARE_GUARD/owner"
-        rmdir "$PREPARE_GUARD"
-        PREPARE_GUARD_HELD=0
+acquire_prepare_mutex() {
+    local attempt
+    for attempt in $(seq 1 120); do
+        if mkdir "$PREPARE_MUTEX" 2>/dev/null; then
+            PREPARE_MUTEX_HELD=1
+            if ! write_owner "$PREPARE_MUTEX"; then
+                rm -f "$PREPARE_MUTEX/.owner.$$"
+                rmdir "$PREPARE_MUTEX"
+                PREPARE_MUTEX_HELD=0
+                return 1
+            fi
+            return 0
+        fi
+        if [[ ! -e $PREPARE_MUTEX && ! -L $PREPARE_MUTEX ]]; then
+            sleep 1
+            continue
+        fi
+        [[ -d $PREPARE_MUTEX && ! -L $PREPARE_MUTEX ]] || {
+            printf 'prepare mutex is not a local directory: %s\n' "$PREPARE_MUTEX" >&2
+            return 1
+        }
+        if [[ -e $PREPARE_MUTEX/owner || -L $PREPARE_MUTEX/owner ]]; then
+            if owner_matches_this_array "$PREPARE_MUTEX/owner"; then
+                sleep 1
+                continue
+            fi
+            if [[ ! -e $PREPARE_MUTEX || ( ! -e $PREPARE_MUTEX/owner && ! -L $PREPARE_MUTEX/owner ) ]]; then
+                sleep 1
+                continue
+            fi
+            printf 'prepare mutex belongs to another array job: %s\n' "$PREPARE_MUTEX" >&2
+            return 1
+        fi
+        sleep 1
+    done
+    printf 'timed out waiting for Task4 prepare mutex\n' >&2
+    return 1
+}
+
+release_prepare_mutex() {
+    if (( PREPARE_MUTEX_HELD )); then
+        rm -f "$PREPARE_MUTEX/owner"
+        rmdir "$PREPARE_MUTEX"
+        PREPARE_MUTEX_HELD=0
     fi
 }
 
@@ -203,12 +242,13 @@ prepare_branch_once() {
     return 1
 }
 
-acquire_prepare_guard
+ensure_prepare_guard
+acquire_prepare_mutex
 if prepare_branch_once; then
-    release_prepare_guard
+    release_prepare_mutex
 else
     prepare_status=$?
-    release_prepare_guard
+    release_prepare_mutex
     exit "$prepare_status"
 fi
 BRANCH_ROOT="$GATE_ROOT/runs/$BRANCH"
@@ -234,7 +274,8 @@ value = {
     "line": int(sys.argv[3]),
     "command": sys.argv[4],
     "recorded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "job_id": os.environ.get("SLURM_JOB_ID", "UNKNOWN"),
+    "job_id": os.environ["SLURM_JOB_ID"],
+    "array_job_id": os.environ["SLURM_ARRAY_JOB_ID"],
     "array_task_id": int(os.environ["SLURM_ARRAY_TASK_ID"]),
 }
 path.parent.mkdir(parents=True, exist_ok=True)

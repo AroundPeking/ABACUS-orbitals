@@ -10,14 +10,17 @@ import re
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 if __package__:
     from .gate_contract import (
+        FROZEN_PROTOCOL,
         HA_TO_KCAL_MOL,
         PhaseResult,
         audit_phase,
@@ -27,6 +30,7 @@ if __package__:
     from . import prepare_gate
 else:
     from gate_contract import (
+        FROZEN_PROTOCOL,
         HA_TO_KCAL_MOL,
         PhaseResult,
         audit_phase,
@@ -52,6 +56,7 @@ RESOURCE_CONTRACT = {
     "cpus_per_task": 32,
     "memory_mb": 126500,
     "time_limit": "24:00:00",
+    "exclusive": True,
 }
 BRANCH_PHASES = {
     "fixed": ("fixed_cold", "fixed_restart"),
@@ -117,6 +122,20 @@ def _read_regular(path: Path, label: str, *, nonempty: bool = False) -> bytes:
     if nonempty and not content:
         raise ValueError(f"{label} must be nonempty: {path}")
     return content
+
+
+def _require_local_directory(path: Path, label: str) -> Path:
+    absolute = path.absolute()
+    try:
+        metadata = absolute.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"missing {label}: {absolute}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError(f"{label} must be a non-symlink local directory: {absolute}")
+    resolved = absolute.resolve(strict=True)
+    if resolved != absolute:
+        raise ValueError(f"{label} must be a non-symlink local directory: {absolute}")
+    return resolved
 
 
 def _record(
@@ -213,7 +232,104 @@ def _positive_int_environment(name: str) -> int:
     return int(value)
 
 
+def _positive_job_environment(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None or re.fullmatch(r"[1-9]\d*", value) is None:
+        raise ValueError(f"{name} must be a positive numeric Slurm job ID")
+    return value
+
+
+def _parse_scontrol_fields(output: str) -> dict[str, str]:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise ValueError("scontrol must return exactly one job record")
+    fields = dict(re.findall(r"(?:^|\s)([^=\s]+)=([^\s]+)", lines[0]))
+    required = {
+        "JobId",
+        "ArrayJobId",
+        "ArrayTaskId",
+        "Partition",
+        "NumNodes",
+        "NumCPUs",
+        "NumTasks",
+        "CPUs/Task",
+        "TimeLimit",
+        "OverSubscribe",
+    }
+    missing = sorted(required - set(fields))
+    if missing:
+        raise ValueError("scontrol job record lacks: " + ", ".join(missing))
+    return fields
+
+
+def _scontrol_positive_int(fields: dict[str, str], name: str) -> int:
+    value = fields.get(name, "")
+    if re.fullmatch(r"[1-9]\d*", value) is None:
+        raise ValueError(f"scontrol {name} must be a positive integer")
+    return int(value)
+
+
+def _memory_megabytes(value: str) -> int:
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([KMGT]?)", value)
+    if match is None:
+        raise ValueError(f"unsupported Slurm memory value: {value}")
+    factors = {
+        "": Decimal(1),
+        "K": Decimal(1) / Decimal(1024),
+        "M": Decimal(1),
+        "G": Decimal(1024),
+        "T": Decimal(1024 * 1024),
+    }
+    try:
+        megabytes = Decimal(match.group(1)) * factors[match.group(2)]
+    except InvalidOperation as exc:
+        raise ValueError(f"unsupported Slurm memory value: {value}") from exc
+    if megabytes != megabytes.to_integral_value():
+        raise ValueError(f"Slurm memory is not an integral number of MB: {value}")
+    return int(megabytes)
+
+
+def _scontrol_memory(fields: dict[str, str]) -> tuple[str, int]:
+    raw = fields.get("MinMemoryNode")
+    if raw is None:
+        request = fields.get("ReqTRES", "")
+        match = re.search(r"(?:^|,)mem=([^,]+)", request)
+        if match is None:
+            raise ValueError("scontrol job record lacks per-node memory evidence")
+        raw = match.group(1)
+    return raw, _memory_megabytes(raw)
+
+
+def _slurm_duration_seconds(value: str) -> int:
+    match = re.fullmatch(r"(?:(\d+)-)?(\d+):(\d{2}):(\d{2})", value)
+    if match is None:
+        raise ValueError(f"unsupported Slurm time limit: {value}")
+    days = int(match.group(1) or 0)
+    hours, minutes, seconds = (int(match.group(index)) for index in (2, 3, 4))
+    if minutes >= 60 or seconds >= 60:
+        raise ValueError(f"unsupported Slurm time limit: {value}")
+    return ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+
+
+def _query_scheduler(job_id: str) -> tuple[dict[str, str], str]:
+    try:
+        completed = subprocess.run(
+            ["scontrol", "show", "job", "-o", job_id],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise ValueError(f"cannot query Slurm allocation with scontrol: {exc}") from exc
+    if completed.returncode != 0:
+        error = completed.stderr.strip() or f"exit status {completed.returncode}"
+        raise ValueError(f"scontrol job query failed: {error}")
+    return _parse_scontrol_fields(completed.stdout), completed.stdout
+
+
 def _scheduler_record(branch: str) -> dict[str, object]:
+    job_id = _positive_job_environment("SLURM_JOB_ID")
+    array_job_id = _positive_job_environment("SLURM_ARRAY_JOB_ID")
     partition = os.environ.get("SLURM_JOB_PARTITION")
     if partition != RESOURCE_CONTRACT["partition"]:
         raise ValueError("Slurm partition must be normal")
@@ -237,19 +353,60 @@ def _scheduler_record(branch: str) -> dict[str, object]:
     match = re.fullmatch(r"1(?:\(x1\))?", tasks_per_node)
     if match is None:
         raise ValueError("SLURM_TASKS_PER_NODE must equal 1")
-    if (
-        "SLURM_MEM_PER_NODE" in os.environ
-        and int(os.environ["SLURM_MEM_PER_NODE"]) != 126500
-    ):
+    if _positive_int_environment("SLURM_MEM_PER_NODE") != 126500:
         raise ValueError("SLURM_MEM_PER_NODE must equal 126500")
+    fields, raw_scontrol = _query_scheduler(job_id)
+    observed_job_id = fields["JobId"]
+    if observed_job_id not in {job_id, f"{array_job_id}_{task_id}"}:
+        raise ValueError("scontrol JobId differs from the running Slurm job")
+    if fields["ArrayJobId"] != array_job_id:
+        raise ValueError("scontrol ArrayJobId differs from SLURM_ARRAY_JOB_ID")
+    if fields["ArrayTaskId"] != str(task_id):
+        raise ValueError("scontrol ArrayTaskId differs from SLURM_ARRAY_TASK_ID")
+    observed_partition = fields["Partition"]
+    observed_nodes = _scontrol_positive_int(fields, "NumNodes")
+    observed_cpus = _scontrol_positive_int(fields, "NumCPUs")
+    observed_ntasks = _scontrol_positive_int(fields, "NumTasks")
+    observed_cpus_per_task = _scontrol_positive_int(fields, "CPUs/Task")
+    memory_raw, observed_memory = _scontrol_memory(fields)
+    time_limit_raw = fields["TimeLimit"]
+    observed_time_seconds = _slurm_duration_seconds(time_limit_raw)
+    observed_exclusive = fields["OverSubscribe"] == "EXCLUSIVE"
+    observed_values = {
+        "partition": observed_partition,
+        "nodes": observed_nodes,
+        "ntasks": observed_ntasks,
+        "tasks_per_node": observed_ntasks // observed_nodes,
+        "cpus_per_task": observed_cpus_per_task,
+        "memory_mb": observed_memory,
+        "time_limit": "24:00:00" if observed_time_seconds == 86400 else time_limit_raw,
+        "exclusive": observed_exclusive,
+    }
+    if observed_cpus != 32:
+        raise ValueError("scontrol NumCPUs must equal 32")
+    for key, expected in RESOURCE_CONTRACT.items():
+        if observed_values[key] != expected:
+            raise ValueError(f"observed Slurm {key} must equal {expected}")
     return {
-        **RESOURCE_CONTRACT,
+        **observed_values,
         "array_task_id": task_id,
         "array_task_count": 4,
-        "job_id": os.environ.get("SLURM_JOB_ID", "UNKNOWN"),
-        "array_job_id": os.environ.get(
-            "SLURM_ARRAY_JOB_ID", os.environ.get("SLURM_JOB_ID", "UNKNOWN")
-        ),
+        "job_id": job_id,
+        "array_job_id": array_job_id,
+        "observed": {
+            "job_id": observed_job_id,
+            "array_job_id": fields["ArrayJobId"],
+            "array_task_id": int(fields["ArrayTaskId"]),
+            "partition": observed_partition,
+            "num_nodes": observed_nodes,
+            "num_cpus": observed_cpus,
+            "num_tasks": observed_ntasks,
+            "cpus_per_task": observed_cpus_per_task,
+            "memory_raw": memory_raw,
+            "time_limit_raw": time_limit_raw,
+            "over_subscribe": fields["OverSubscribe"],
+            "scontrol_sha256": _sha256_bytes(raw_scontrol.encode("utf-8")),
+        },
     }
 
 
@@ -264,10 +421,72 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
     for key, expected_value in expected.items():
         if value.get(key) != expected_value:
             raise ValueError(f"{branch} scheduler evidence has invalid {key}")
-    if not isinstance(value.get("job_id"), str) or not value["job_id"]:
-        raise ValueError(f"{branch} scheduler evidence lacks job_id")
-    if not isinstance(value.get("array_job_id"), str) or not value["array_job_id"]:
-        raise ValueError(f"{branch} scheduler evidence lacks array_job_id")
+    for key in ("job_id", "array_job_id"):
+        job_identity = value.get(key)
+        if (
+            not isinstance(job_identity, str)
+            or re.fullmatch(r"[1-9]\d*", job_identity) is None
+        ):
+            raise ValueError(f"{branch} scheduler evidence has invalid {key}")
+    observed = value.get("observed")
+    expected_observed_keys = {
+        "job_id",
+        "array_job_id",
+        "array_task_id",
+        "partition",
+        "num_nodes",
+        "num_cpus",
+        "num_tasks",
+        "cpus_per_task",
+        "memory_raw",
+        "time_limit_raw",
+        "over_subscribe",
+        "scontrol_sha256",
+    }
+    if not isinstance(observed, dict) or set(observed) != expected_observed_keys:
+        raise ValueError(f"{branch} scheduler observed evidence is incomplete")
+    string_fields = {
+        "job_id",
+        "array_job_id",
+        "partition",
+        "memory_raw",
+        "time_limit_raw",
+        "over_subscribe",
+        "scontrol_sha256",
+    }
+    integer_fields = {
+        "array_task_id",
+        "num_nodes",
+        "num_cpus",
+        "num_tasks",
+        "cpus_per_task",
+    }
+    if any(not isinstance(observed[name], str) for name in string_fields) or any(
+        type(observed[name]) is not int for name in integer_fields
+    ):
+        raise ValueError(f"{branch} scheduler observed evidence is invalid")
+    if (
+        observed["array_job_id"] != value["array_job_id"]
+        or observed["array_task_id"] != value["array_task_id"]
+        or observed["partition"] != value["partition"]
+        or observed["num_nodes"] != value["nodes"]
+        or observed["num_cpus"] != value["cpus_per_task"]
+        or observed["num_tasks"] != value["ntasks"]
+        or observed["cpus_per_task"] != value["cpus_per_task"]
+        or _memory_megabytes(observed["memory_raw"]) != value["memory_mb"]
+        or _slurm_duration_seconds(observed["time_limit_raw"]) != 86400
+        or observed["over_subscribe"] != "EXCLUSIVE"
+        or not isinstance(observed["scontrol_sha256"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", observed["scontrol_sha256"]) is None
+    ):
+        raise ValueError(f"{branch} scheduler observed evidence is invalid")
+    observed_job_id = observed["job_id"]
+    valid_observed_job_ids = {
+        value["job_id"],
+        f"{value['array_job_id']}_{value['array_task_id']}",
+    }
+    if observed_job_id not in valid_observed_job_ids:
+        raise ValueError(f"{branch} scheduler observed JobId is invalid")
     return value
 
 
@@ -283,7 +502,115 @@ def _branch_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]
         or provenance.get("schema") != "c-pbe-reference-gate-branch"
     ):
         raise ValueError(f"{branch} preparation provenance identity is invalid")
+    _preparation_signature(provenance, branch)
     return branch_root, provenance
+
+
+def _preparation_signature(
+    provenance: dict[str, object], branch: str
+) -> dict[str, object]:
+    expected_keys = {
+        "schema",
+        "version",
+        "branch",
+        "mode",
+        "field_dir",
+        "box_angstrom",
+        "atom_direct",
+        "sources",
+        "renderer",
+        "frozen_protocol",
+        "phase",
+    }
+    if set(provenance) != expected_keys:
+        raise ValueError(f"{branch} preparation provenance fields are invalid")
+    try:
+        expected_mode, expected_direction = prepare_gate.BRANCHES[branch]
+    except KeyError as exc:
+        raise ValueError(f"unsupported preparation branch: {branch}") from exc
+    expected_identity = (
+        "c-pbe-reference-gate-branch",
+        1,
+        branch,
+        expected_mode,
+        expected_direction,
+        prepare_gate._BOX_ANGSTROM,
+        list(prepare_gate._ATOM_DIRECT),
+    )
+    identity = (
+        provenance.get("schema"),
+        provenance.get("version"),
+        provenance.get("branch"),
+        provenance.get("mode"),
+        provenance.get("field_dir"),
+        provenance.get("box_angstrom"),
+        provenance.get("atom_direct"),
+    )
+    if identity != expected_identity:
+        raise ValueError(f"{branch} preparation provenance identity is invalid")
+    if provenance.get("frozen_protocol") != dict(FROZEN_PROTOCOL):
+        raise ValueError(f"{branch} frozen preparation protocol is invalid")
+    expected_renderer = {
+        "function": "gate_contract.render_input",
+        "mode": expected_mode,
+        "field_dir": expected_direction,
+        "restart": False,
+    }
+    if provenance.get("renderer") != expected_renderer:
+        raise ValueError(f"{branch} preparation renderer identity is invalid")
+    pseudo_name, orbital_name = _asset_names(provenance)
+    sources = provenance.get("sources")
+    if not isinstance(sources, dict) or set(sources) != {"pseudo", "orbital"}:
+        raise ValueError(f"{branch} preparation source records are invalid")
+    source_keys = {
+        "absolute_path",
+        "basename",
+        "sha256",
+        "size",
+        "device",
+        "inode",
+        "mtime_ns",
+    }
+    signatures = {}
+    for label, basename in (("pseudo", pseudo_name), ("orbital", orbital_name)):
+        source = sources[label]
+        if not isinstance(source, dict) or set(source) != source_keys:
+            raise ValueError(f"{branch} {label} source provenance is invalid")
+        if (
+            source.get("basename") != basename
+            or not isinstance(source.get("absolute_path"), str)
+            or not Path(source["absolute_path"]).is_absolute()
+            or not isinstance(source.get("size"), int)
+            or source["size"] < 1
+            or not isinstance(source.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", source["sha256"]) is None
+            or any(
+                not isinstance(source.get(name), int) or source[name] < 0
+                for name in ("device", "inode", "mtime_ns")
+            )
+        ):
+            raise ValueError(f"{branch} {label} source provenance is invalid")
+        signatures[label] = {
+            "basename": basename,
+            "sha256": source["sha256"],
+            "size": source["size"],
+        }
+    phase = provenance.get("phase")
+    initial_phase = BRANCH_PHASES[branch][0]
+    if (
+        not isinstance(phase, dict)
+        or set(phase) != {"relative_path", "files"}
+        or phase.get("relative_path") != f"runs/{branch}/{initial_phase}"
+        or not isinstance(phase.get("files"), dict)
+    ):
+        raise ValueError(f"{branch} preparation phase provenance is invalid")
+    return {
+        "box_angstrom": provenance["box_angstrom"],
+        "atom_direct": provenance["atom_direct"],
+        "frozen_protocol": provenance["frozen_protocol"],
+        "pseudo": signatures["pseudo"],
+        "orbital": signatures["orbital"],
+    }
 
 
 def _phase_spec(branch: str, phase: str) -> PhaseSpec:
@@ -316,6 +643,14 @@ def _asset_names(provenance: dict[str, object]) -> tuple[str, str]:
         raise ValueError("preparation provenance lacks source asset names") from exc
     if not isinstance(pseudo, str) or not isinstance(orbital, str):
         raise ValueError("preparation provenance has invalid source asset names")
+    if Path(pseudo).name != pseudo or Path(orbital).name != orbital:
+        raise ValueError("preparation provenance has unsafe asset basenames")
+    try:
+        prepare_gate._validate_asset_names(Path(pseudo), Path(orbital))
+    except ValueError as exc:
+        raise ValueError(
+            f"preparation provenance has unsafe asset basenames: {exc}"
+        ) from exc
     return pseudo, orbital
 
 
@@ -334,6 +669,19 @@ def _validate_phase_controls(
     initial_phase = BRANCH_PHASES[branch][0]
     initial_root = branch_root / initial_phase
     pseudo_name, orbital_name = _asset_names(provenance)
+    expected_controls = {
+        "STRU": prepare_gate._render_stru(pseudo_name, orbital_name).encode("utf-8"),
+        "KPT": prepare_gate._KPT_TEXT.encode("utf-8"),
+    }
+    for name, expected_content in expected_controls.items():
+        initial_content = _read_regular(
+            initial_root / name, f"prepared {initial_phase} {name}", nonempty=True
+        )
+        if initial_content != expected_content:
+            raise ValueError(
+                f"{branch}/{initial_phase} {name} differs from the frozen "
+                "preparation provenance template"
+            )
     if phase == initial_phase:
         prepared_phase = provenance.get("phase")
         if not isinstance(prepared_phase, dict):
@@ -625,6 +973,20 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
         raise ValueError(
             "running_scf.log must contain exactly two charge-density load messages"
         )
+    out = phase_root / "OUT.C_PBE_REFERENCE_GATE"
+    canonical_out = out.resolve(strict=True)
+    if out.absolute() != canonical_out:
+        raise ValueError("restart OUT directory must be a canonical local directory")
+
+    def require_exact_path(line: str, marker: str, name: str) -> None:
+        loaded_path = line.split(marker, 1)[1].strip()
+        expected_path = (canonical_out / name).resolve(strict=True)
+        if loaded_path != str(expected_path):
+            raise ValueError(
+                f"restart load evidence must use the exact phase-local restart path: "
+                f"{expected_path}"
+            )
+
     for spin in (1, 2):
         wfc_pattern = re.compile(
             rf"^.*Read NAO wave functions from .*wfs{spin}_nao\.txt\s*$", re.MULTILINE
@@ -638,6 +1000,12 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
             raise ValueError(
                 f"restart load evidence for spin {spin} is missing or ambiguous"
             )
+        require_exact_path(
+            wfc_matches[0], "Read NAO wave functions from ", f"wfs{spin}_nao.txt"
+        )
+        require_exact_path(
+            charge_matches[0], "Read in electron density: ", f"chgs{spin}.cube"
+        )
         wfc_lines.extend(wfc_matches)
         charge_lines.extend(charge_matches)
     return {
@@ -657,6 +1025,9 @@ def _verify_restart_provenance(
     check_planned_destination: bool = True,
 ) -> dict[str, object]:
     phase_root = root / "runs" / branch / phase
+    _require_local_directory(
+        phase_root / "restart_input_snapshot", "restart snapshot directory"
+    )
     path = phase_root / "RESTART_PROVENANCE.json"
     value = _load_json(path, "restart provenance")
     expected_status = "VERIFIED" if require_verified else "PLANNED"
@@ -1061,6 +1432,15 @@ def complete_branch(
 def _verify_execution_evidence(
     root: Path, results: dict[str, PhaseResult]
 ) -> dict[str, object] | None:
+    failed_branches = [
+        branch
+        for branch in BRANCH_PHASES
+        if os.path.lexists(root / "runs" / branch / "RUN_FAILED.json")
+    ]
+    if failed_branches:
+        raise ValueError(
+            "RUN_FAILED Task4 evidence exists for: " + ", ".join(failed_branches)
+        )
     evidence_paths = []
     for branch, phases in BRANCH_PHASES.items():
         branch_root = root / "runs" / branch
@@ -1084,10 +1464,11 @@ def _verify_execution_evidence(
     executable_records = []
     runner_records = []
     array_job_ids = []
+    preparation_signatures = []
     for branch, phases in BRANCH_PHASES.items():
+        _, preparation = _branch_provenance(root, branch)
+        preparation_signatures.append(_preparation_signature(preparation, branch))
         branch_root, run = _run_provenance(root, branch)
-        if os.path.lexists(branch_root / "RUN_FAILED.json"):
-            raise ValueError(f"{branch} contains RUN_FAILED evidence")
         executable_records.append(run["executable"])
         runner_records.append(run["runner"])
         array_job_ids.append(run["scheduler"]["array_job_id"])
@@ -1165,11 +1546,19 @@ def _verify_execution_evidence(
         raise ValueError("Task4 runner provenance differs across branches")
     if any(job_id != array_job_ids[0] for job_id in array_job_ids[1:]):
         raise ValueError("branches do not belong to one Slurm array job")
+    if any(
+        signature != preparation_signatures[0]
+        for signature in preparation_signatures[1:]
+    ):
+        raise ValueError(
+            "asset content or frozen preparation identity differs across branches"
+        )
     return {
         "status": "RESTART_CHAIN_VERIFIED",
         "branches": branch_summaries,
         "executable": executable_records[0],
         "runner": runner_records[0],
+        "preparation": preparation_signatures[0],
     }
 
 
@@ -1368,6 +1757,9 @@ def _runner_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="runner_command", required=True)
 
+    scheduler = subparsers.add_parser("check-scheduler")
+    scheduler.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+
     initialize = subparsers.add_parser("runner-init")
     initialize.add_argument("--root", required=True)
     initialize.add_argument("--branch", required=True, choices=BRANCH_PHASES)
@@ -1406,7 +1798,9 @@ def _runner_main(argv: list[str]) -> int:
     parser = _runner_parser()
     arguments = parser.parse_args(argv)
     try:
-        if arguments.runner_command == "runner-init":
+        if arguments.runner_command == "check-scheduler":
+            result = _scheduler_record(arguments.branch)
+        elif arguments.runner_command == "runner-init":
             result = initialize_branch_run(
                 arguments.root, arguments.branch, arguments.abacus, arguments.runner
             )
@@ -1447,6 +1841,7 @@ def _runner_main(argv: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     effective_argv = list(sys.argv[1:] if argv is None else argv)
     if effective_argv and effective_argv[0] in {
+        "check-scheduler",
         "runner-init",
         "preflight-phase",
         "create-restart",

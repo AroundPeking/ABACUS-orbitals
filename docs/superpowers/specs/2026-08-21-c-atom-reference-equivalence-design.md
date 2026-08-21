@@ -85,8 +85,14 @@ matrix, or LibRPA calculation is allowed before it passes.
 The production runner is a four-task Slurm array on `normal`.  Every task uses
 one exclusive node, one MPI rank, 32 OpenMP threads, 126500 MB, and a 24-hour
 limit.  The four array tasks map to `fixed`, `dir0`, `dir1`, and `dir2`.
-Concurrent branch preparation is serialized by a bounded, job-identified
-guard; a pre-existing branch is never reused or overwritten.
+Numeric Slurm job and array identifiers are mandatory.  Before any branch is
+created, the runner reads the live `scontrol show job -o` record and verifies
+the partition, node/rank/thread counts, requested memory, 24-hour limit, and
+exclusive allocation; manifests preserve both normalized values and the raw
+scheduler evidence.  Concurrent branch preparation is serialized by a stable,
+array-owned guard plus a bounded preparation mutex, so removing one mutex
+cannot invalidate another task's guard observation.  A pre-existing branch is
+never reused or overwritten.
 
 Every phase records `abacus.stdout`, `abacus.stderr`, the unique converged
 energy, the complete 22-band occupations for both spins, and the four
@@ -109,22 +115,28 @@ destination copies must still match the source.  After ABACUS finishes, the
 snapshot must still match the preceding phase output, while the new output is
 allowed to differ from its input.
 
-A restart is upgraded to `VERIFIED` only if `abacus.stdout` contains exactly
-the two messages reading `wfs1_nao.txt` and `wfs2_nao.txt`, and
-`running_scf.log` contains exactly the two messages reading `chgs1.cube` and
-`chgs2.cube`.  Only then is `PHASE_COMPLETE.json` published.  A branch obtains
+A restart is upgraded to `VERIFIED` only if `restart_input_snapshot/` is a
+non-symlink phase-local directory, `abacus.stdout` contains exactly the two
+messages reading the canonical phase-local paths of `wfs1_nao.txt` and
+`wfs2_nao.txt`, and `running_scf.log` contains exactly the two messages reading
+the canonical phase-local paths of `chgs1.cube` and `chgs2.cube`.  Filename-only
+or external-path matches are rejected.  Only then is `PHASE_COMPLETE.json`
+published.  A branch obtains
 `BRANCH_COMPLETE.json` only after its complete fixed chain
 `fixed_cold -> fixed_restart` or free chain
 `field_seed -> free_restart1 -> free_restart2` has been rehashed.  Branches do
 not publish a scientific result.
 
 The global audit independently reopens every control, asset, executable,
-output, snapshot, phase manifest, and branch manifest.  Eleven valid phases,
-four valid branch completions, one identical ABACUS hash and resource
-contract, verified restart-load logs, and a passed zero-field energy test are
-all required for `PBE_GATE_PASSED`.  Numerically valid Task 2 fixtures without
-runner evidence remain `DIAGNOSTIC_ONLY`; partial or inconsistent Task 4
-evidence is rejected.
+output, snapshot, phase manifest, and branch manifest.  It also independently
+checks identical pseudopotential/orbital content and the frozen preparation
+identity across all branches.  Eleven valid phases, four valid branch
+completions, one identical ABACUS hash and observed resource contract, verified
+restart-load logs, and a passed zero-field energy test are all required for
+`PBE_GATE_PASSED`.  Any `RUN_FAILED.json` counts as Task 4 evidence and blocks
+the gate, even if no other runtime manifest exists.  Numerically valid Task 2
+fixtures without runner evidence remain `DIAGNOSTIC_ONLY`; partial or
+inconsistent Task 4 evidence is rejected.
 
 ## Calculation branches
 

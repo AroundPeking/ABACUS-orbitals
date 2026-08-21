@@ -388,32 +388,37 @@ Expected: `FileNotFoundError` for the runner.
 
 The implemented runner and auditor must:
 
-1. assert the live Slurm resource contract;
+1. require numeric job/array identifiers and assert the live Slurm resource
+   contract from a testable `scontrol show job -o` query before preparation,
+   including memory, 24-hour time limit, and exclusive allocation;
 2. resolve `ABACUS_ARTIFACT`, verify the executable and record its SHA256;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
 4. call `prepare_gate.py` once successfully for its branch, using a bounded
-   cross-node guard so the four array tasks do not collide on the preparation
-   lock;
+   stable array-owned cross-node guard and bounded preparation mutex so the
+   four array tasks do not collide on the preparation lock or race guard
+   deletion;
 5. run ABACUS through `mpirun -np 1 -ppn 1` with 32 OpenMP threads;
 6. require convergence, final energy, `eig_occ.txt`, both spin wavefunctions,
    and charge restart output after every phase;
 7. create the next restart phase atomically without copying the old output
    directory: copy only `STRU`, `KPT`, both assets and
    `wfs1_nao.txt`, `wfs2_nao.txt`, `chgs1.cube`, `chgs2.cube`;
-8. preserve the four source restart files under `restart_input_snapshot/` and
-   publish `RESTART_PROVENANCE.json` first as `PLANNED`;
+8. preserve the four source restart files under a non-symlink phase-local
+   `restart_input_snapshot/` and publish `RESTART_PROVENANCE.json` first as
+   `PLANNED`;
 9. require exactly two wavefunction-load messages in `abacus.stdout` and two
-   charge-load messages in `running_scf.log`, then upgrade restart provenance
-   to `VERIFIED`;
+   charge-load messages in `running_scf.log`, each naming the exact canonical
+   phase-local restart path, then upgrade restart provenance to `VERIFIED`;
 10. write `PHASE_COMPLETE.json` only after the phase input, 22-band 3/1
     occupations, energy, executable, resources, outputs and restart evidence
     have been rehashed;
 11. write `BRANCH_COMPLETE.json` atomically only after the complete fixed or
     field/free chain finishes;
 12. let the global audit publish `PBE_GATE_PASSED` only after all 11 phases and
-    all four branch manifests close the evidence chain.  With no Task 4
-    evidence, the old Task 2 fixtures remain `DIAGNOSTIC_ONLY`; partial or
-    inconsistent evidence fails.
+    all four branch manifests close the evidence chain with identical staged
+    pseudopotential/orbital content and frozen preparation identity.  Any
+    `RUN_FAILED.json` blocks the gate.  With no Task 4 evidence, the old Task 2
+    fixtures remain `DIAGNOSTIC_ONLY`; partial or inconsistent evidence fails.
 
 Use `set -euo pipefail`, inherited ERR traps, and a branch-local atomic
 `RUN_FAILED.json` that records the failed line and command before exiting.

@@ -110,9 +110,22 @@ class FakeHpcEndToEndTests(unittest.TestCase):
             "shift 4\n"
             'exec "$@"\n'
         )
+        cls.fake_scontrol = cls.bin_dir / "scontrol"
+        cls.fake_scontrol.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "[[ $1 == show && $2 == job ]]\n"
+            "printf '%s\\n' \"JobId=${SLURM_JOB_ID} "
+            "ArrayJobId=${SLURM_ARRAY_JOB_ID} ArrayTaskId=${SLURM_ARRAY_TASK_ID} "
+            "Partition=${FAKE_SCONTROL_PARTITION:-normal} NumNodes=1 NumCPUs=32 "
+            "NumTasks=1 CPUs/Task=32 NtasksPerN:B:S:C=1:0:*:* "
+            "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-126500M} "
+            "TimeLimit=${FAKE_SCONTROL_TIME_LIMIT:-1-00:00:00} "
+            "OverSubscribe=${FAKE_SCONTROL_EXCLUSIVE:-EXCLUSIVE}\"\n"
+        )
         cls.fake_abacus = cls.bin_dir / "abacus"
         cls.fake_abacus.write_text(cls._fake_abacus_text())
-        for path in (cls.fake_mpirun, cls.fake_abacus):
+        for path in (cls.fake_mpirun, cls.fake_scontrol, cls.fake_abacus):
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
         cls.completed_gate = cls.base / "completed-gate"
@@ -177,15 +190,24 @@ for spin in (1, 2):
         )
 
     @classmethod
-    def _run_task(cls, root, task, *, fail_phase=None):
+    def _task_environment(
+        cls,
+        root,
+        task,
+        *,
+        fail_phase=None,
+        pseudo=None,
+        orbital=None,
+        overrides=None,
+    ):
         environment = os.environ.copy()
         environment.update(
             {
                 "PATH": f"{cls.bin_dir}{os.pathsep}{environment['PATH']}",
                 "GATE_ROOT": str(root),
                 "ABACUS_ARTIFACT": str(cls.fake_abacus),
-                "PSEUDO_ASSET": str(cls.pseudo),
-                "ORBITAL_ASSET": str(cls.orbital),
+                "PSEUDO_ASSET": str(pseudo or cls.pseudo),
+                "ORBITAL_ASSET": str(orbital or cls.orbital),
                 "PYTHON_EXE": sys.executable,
                 "SLURM_JOB_PARTITION": "normal",
                 "SLURM_ARRAY_TASK_ID": str(task),
@@ -194,12 +216,36 @@ for spin in (1, 2):
                 "SLURM_NTASKS": "1",
                 "SLURM_JOB_NUM_NODES": "1",
                 "SLURM_TASKS_PER_NODE": "1",
-                "SLURM_JOB_ID": "9001",
+                "SLURM_MEM_PER_NODE": "126500",
+                "SLURM_JOB_ID": str(9100 + task),
                 "SLURM_ARRAY_JOB_ID": "9001",
             }
         )
         if fail_phase is not None:
             environment["FAKE_ABACUS_FAIL_PHASE"] = fail_phase
+        if overrides:
+            environment.update(overrides)
+        return environment
+
+    @classmethod
+    def _run_task(
+        cls,
+        root,
+        task,
+        *,
+        fail_phase=None,
+        pseudo=None,
+        orbital=None,
+        overrides=None,
+    ):
+        environment = cls._task_environment(
+            root,
+            task,
+            fail_phase=fail_phase,
+            pseudo=pseudo,
+            orbital=orbital,
+            overrides=overrides,
+        )
         return subprocess.run(
             ["bash", str(RUNNER)],
             check=False,
@@ -243,6 +289,17 @@ for spin in (1, 2):
         self.assertEqual(phase_manifest["scheduler"]["partition"], "normal")
         self.assertEqual(phase_manifest["scheduler"]["cpus_per_task"], 32)
         self.assertEqual(phase_manifest["scheduler"]["ntasks"], 1)
+        self.assertEqual(
+            phase_manifest["scheduler"]["observed"]["memory_raw"], "126500M"
+        )
+        self.assertEqual(
+            phase_manifest["scheduler"]["observed"]["time_limit_raw"],
+            "1-00:00:00",
+        )
+        self.assertEqual(
+            phase_manifest["scheduler"]["observed"]["over_subscribe"],
+            "EXCLUSIVE",
+        )
         self.assertEqual(
             set(restart_manifest["files"]),
             {"wfs1_nao.txt", "wfs2_nao.txt", "chgs1.cube", "chgs2.cube"},
@@ -307,6 +364,43 @@ for spin in (1, 2):
         with self.assertRaisesRegex(ValueError, "exactly two.*wave-function"):
             audit_gate._restart_load_lines(phase)
 
+    def test_restart_load_evidence_rejects_external_paths(self):
+        root = self.copy_gate()
+        phase = root / "runs/dir0/free_restart1"
+        stdout = phase / "abacus.stdout"
+        stdout.write_text(
+            "Read NAO wave functions from /external/unrelated/wfs1_nao.txt\n"
+            "Read NAO wave functions from /external/unrelated/wfs2_nao.txt\n"
+        )
+        log = phase / "OUT.C_PBE_REFERENCE_GATE/running_scf.log"
+        lines = [
+            line
+            for line in log.read_text().splitlines()
+            if not line.startswith("Read in electron density:")
+        ]
+        log.write_text(
+            "Read in electron density: /external/unrelated/chgs1.cube\n"
+            "Read in electron density: /external/unrelated/chgs2.cube\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+        with self.assertRaisesRegex(ValueError, "phase-local.*restart path"):
+            audit_gate._restart_load_lines(phase)
+
+    def test_restart_snapshot_directory_must_not_be_a_symlink(self):
+        root = self.copy_gate()
+        phase = root / "runs/dir0/free_restart1"
+        snapshot = phase / "restart_input_snapshot"
+        shutil.rmtree(snapshot)
+        snapshot.symlink_to(
+            phase.parent / "field_seed/OUT.C_PBE_REFERENCE_GATE",
+            target_is_directory=True,
+        )
+        with self.assertRaisesRegex(ValueError, "snapshot.*non-symlink.*directory"):
+            audit_gate._verify_restart_provenance(
+                root, "dir0", "free_restart1", require_verified=True
+            )
+
     def test_rejects_manifest_binary_and_resource_tampering(self):
         mutations = {
             "phase manifest": lambda root: (
@@ -322,6 +416,12 @@ for spin in (1, 2):
             "resource": lambda root: self._mutate_json(
                 root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
                 lambda data: data["scheduler"].update({"cpus_per_task": 31}),
+            ),
+            "observed resource": lambda root: self._mutate_json(
+                root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
+                lambda data: data["scheduler"]["observed"].update(
+                    {"memory_raw": None}
+                ),
             ),
             "preparation provenance": lambda root: self._mutate_json(
                 root / "runs/dir1/BRANCH_PROVENANCE.json",
@@ -355,6 +455,108 @@ for spin in (1, 2):
         self.assertFalse((branch / "BRANCH_COMPLETE.json").exists())
         self.assertTrue((branch / "RUN_FAILED.json").is_file())
 
+    def test_run_failed_alone_blocks_global_audit(self):
+        root = self.copy_gate()
+        for branch, phases in audit_gate.BRANCH_PHASES.items():
+            branch_root = root / "runs" / branch
+            for name in ("BRANCH_RUN_PROVENANCE.json", "BRANCH_COMPLETE.json"):
+                (branch_root / name).unlink()
+            for phase in phases:
+                (branch_root / phase / "PHASE_COMPLETE.json").unlink()
+                restart = branch_root / phase / "RESTART_PROVENANCE.json"
+                restart.unlink(missing_ok=True)
+        (root / "runs/fixed/RUN_FAILED.json").write_text(
+            '{"status":"RUN_FAILED"}\n'
+        )
+        with self.assertRaisesRegex(ValueError, "RUN_FAILED"):
+            audit_gate.audit_gate(root)
+
+    def test_four_array_tasks_prepare_concurrently_without_guard_race(self):
+        root = self.base / f"concurrent-{next(tempfile._get_candidate_names())}"
+        processes = [
+            subprocess.Popen(
+                ["bash", str(RUNNER)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=self._task_environment(root, task),
+            )
+            for task in range(4)
+        ]
+        results = [process.communicate(timeout=60) for process in processes]
+        failures = [
+            (process.returncode, stdout, stderr)
+            for process, (stdout, stderr) in zip(processes, results)
+            if process.returncode != 0
+        ]
+        self.assertEqual(failures, [])
+        self.assertEqual(audit_gate.audit_gate(root)["status"], "PBE_GATE_PASSED")
+
+    def test_global_audit_rejects_different_asset_content_across_branches(self):
+        alternate_assets = self.base / f"assets-{next(tempfile._get_candidate_names())}"
+        alternate_assets.mkdir()
+        alternate_pseudo = alternate_assets / self.pseudo.name
+        alternate_pseudo.write_text("different fake pseudo\n")
+        alternate_root = self.base / f"alternate-{next(tempfile._get_candidate_names())}"
+        completed = self._run_task(
+            alternate_root,
+            2,
+            pseudo=alternate_pseudo,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        root = self.copy_gate()
+        shutil.rmtree(root / "runs/dir1")
+        shutil.copytree(alternate_root / "runs/dir1", root / "runs/dir1")
+        self.assert_not_passed(root)
+
+    def test_global_audit_rejects_frozen_preparation_protocol_drift(self):
+        root = self.copy_gate()
+        branch_root = root / "runs/dir1"
+        provenance_path = branch_root / "BRANCH_PROVENANCE.json"
+        self._mutate_json(
+            provenance_path,
+            lambda data: data["frozen_protocol"].update({"ecutwfc": 31.0}),
+        )
+        run_path = branch_root / "BRANCH_RUN_PROVENANCE.json"
+        self._mutate_json(
+            run_path,
+            lambda data: data.update(
+                {
+                    "preparation_provenance_sha256": audit_gate._sha256_bytes(
+                        provenance_path.read_bytes()
+                    )
+                }
+            ),
+        )
+        self._mutate_json(
+            branch_root / "BRANCH_COMPLETE.json",
+            lambda data: data.update(
+                {
+                    "branch_run_provenance_sha256": audit_gate._sha256_bytes(
+                        run_path.read_bytes()
+                    )
+                }
+            ),
+        )
+        self.assert_not_passed(root)
+
+    def test_asset_names_must_be_safe_basenames(self):
+        provenance = {
+            "sources": {
+                "pseudo": {"basename": "../outside.upf"},
+                "orbital": {"basename": "C.orb"},
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "safe.*basename"):
+            audit_gate._asset_names(provenance)
+
+    def test_scheduler_validator_rejects_malformed_observed_values(self):
+        path = self.completed_gate / "runs/fixed/BRANCH_RUN_PROVENANCE.json"
+        scheduler = json.loads(path.read_text())["scheduler"]
+        scheduler["observed"]["memory_raw"] = None
+        with self.assertRaisesRegex(ValueError, "scheduler observed evidence"):
+            audit_gate._validate_scheduler_record(scheduler, "fixed")
+
     def test_wrong_live_resource_contract_stops_before_prepare(self):
         root = self.base / f"wrong-resource-{next(tempfile._get_candidate_names())}"
         environment = os.environ.copy()
@@ -373,6 +575,7 @@ for spin in (1, 2):
                 "SLURM_NTASKS": "1",
                 "SLURM_JOB_NUM_NODES": "1",
                 "SLURM_TASKS_PER_NODE": "1",
+                "SLURM_MEM_PER_NODE": "126500",
                 "SLURM_JOB_ID": "9002",
                 "SLURM_ARRAY_JOB_ID": "9002",
             }
@@ -387,6 +590,32 @@ for spin in (1, 2):
         self.assertNotEqual(completed.returncode, 0)
         self.assertFalse((root / "runs/fixed").exists())
 
+    def test_missing_or_nonnumeric_slurm_job_identity_stops_before_prepare(self):
+        for label, overrides in (
+            ("missing job", {"SLURM_JOB_ID": ""}),
+            ("nonnumeric job", {"SLURM_JOB_ID": "UNKNOWN"}),
+            ("missing array", {"SLURM_ARRAY_JOB_ID": ""}),
+            ("nonnumeric array", {"SLURM_ARRAY_JOB_ID": "UNKNOWN"}),
+        ):
+            with self.subTest(label=label):
+                root = self.base / f"job-id-{next(tempfile._get_candidate_names())}"
+                completed = self._run_task(root, 0, overrides=overrides)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertFalse((root / "runs/fixed").exists())
+
+    def test_observed_scheduler_resource_mismatch_stops_before_prepare(self):
+        cases = (
+            ("memory", {"FAKE_SCONTROL_MEMORY": "120000M"}),
+            ("time", {"FAKE_SCONTROL_TIME_LIMIT": "12:00:00"}),
+            ("exclusive", {"FAKE_SCONTROL_EXCLUSIVE": "OK"}),
+        )
+        for label, overrides in cases:
+            with self.subTest(label=label):
+                root = self.base / f"scontrol-{next(tempfile._get_candidate_names())}"
+                completed = self._run_task(root, 0, overrides=overrides)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertFalse((root / "runs/fixed").exists())
+
     def test_initial_control_files_remain_bound_to_prepare_provenance(self):
         root = self.base / f"initial-control-{next(tempfile._get_candidate_names())}"
         branch = prepare_gate.prepare_branch(
@@ -396,6 +625,7 @@ for spin in (1, 2):
             orbital=self.orbital,
         )
         environment = {
+            "PATH": f"{self.bin_dir}{os.pathsep}{os.environ['PATH']}",
             "SLURM_JOB_PARTITION": "normal",
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_ARRAY_TASK_COUNT": "4",
@@ -403,6 +633,7 @@ for spin in (1, 2):
             "SLURM_NTASKS": "1",
             "SLURM_JOB_NUM_NODES": "1",
             "SLURM_TASKS_PER_NODE": "1",
+            "SLURM_MEM_PER_NODE": "126500",
             "SLURM_JOB_ID": "9003",
             "SLURM_ARRAY_JOB_ID": "9003",
         }
