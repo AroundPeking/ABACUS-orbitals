@@ -205,7 +205,10 @@ def _atomic_write_json(
         _fsync_directory(path.parent)
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _canonical_file(
@@ -1752,7 +1755,9 @@ def _summary_paths(root: Path) -> tuple[Path, Path]:
 def _best_effort_remove_summaries(root: Path) -> None:
     for path in _summary_paths(root):
         try:
-            path.unlink(missing_ok=True)
+            path.unlink()
+        except FileNotFoundError:
+            pass
         except OSError:
             pass
 
@@ -1761,7 +1766,9 @@ def invalidate_summaries(root: Path) -> None:
     errors = []
     for path in _summary_paths(root):
         try:
-            path.unlink(missing_ok=True)
+            path.unlink()
+        except FileNotFoundError:
+            pass
         except OSError as exc:
             errors.append(exc)
     if errors:

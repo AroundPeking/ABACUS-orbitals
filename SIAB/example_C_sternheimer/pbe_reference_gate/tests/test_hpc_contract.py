@@ -22,6 +22,10 @@ import prepare_gate
 
 
 class HpcStaticContractTests(unittest.TestCase):
+    def test_runtime_sources_remain_python37_compatible(self):
+        for path in (ROOT / "audit_gate.py", ROOT / "submit_pbe_gate.sh"):
+            self.assertNotIn("missing_ok=True", path.read_text())
+
     def test_normal_full_node_array_contract(self):
         text = RUNNER.read_text()
         for value in (

@@ -291,7 +291,10 @@ try:
     finally:
         os.close(directory)
 finally:
-    temporary.unlink(missing_ok=True)
+    try:
+        temporary.unlink()
+    except FileNotFoundError:
+        pass
 PY
 }
 
@@ -337,7 +340,10 @@ try:
         os.close(directory)
 except Exception:
     for path in created:
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
     raise
 PY
 write_json_noreplace "$CLAIM/RECEIPT_FILES_PREPARED.json" RECEIPT_FILES_PREPARED \
