@@ -58,6 +58,7 @@ RESOURCE_CONTRACT = {
     "time_limit": "24:00:00",
     "exclusive": True,
 }
+SLURM_22_EXCLUSIVE_TOKEN = "NO"
 BRANCH_PHASES = {
     "fixed": ("fixed_cold", "fixed_restart"),
     "dir0": ("field_seed", "free_restart1", "free_restart2"),
@@ -374,7 +375,7 @@ def _scheduler_record(branch: str) -> dict[str, object]:
     memory_raw, observed_memory = _scontrol_memory(fields)
     time_limit_raw = fields["TimeLimit"]
     observed_time_seconds = _slurm_duration_seconds(time_limit_raw)
-    observed_exclusive = fields["OverSubscribe"] == "EXCLUSIVE"
+    observed_exclusive = fields["OverSubscribe"] == SLURM_22_EXCLUSIVE_TOKEN
     observed_values = {
         "partition": observed_partition,
         "nodes": observed_nodes,
@@ -501,7 +502,7 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
         or observed["cpus_per_task"] != value["cpus_per_task"]
         or _memory_megabytes(observed["memory_raw"]) != value["memory_mb"]
         or _slurm_duration_seconds(observed["time_limit_raw"]) != 86400
-        or observed["over_subscribe"] != "EXCLUSIVE"
+        or observed["over_subscribe"] != SLURM_22_EXCLUSIVE_TOKEN
         or not isinstance(observed["scontrol_sha256"], str)
         or re.fullmatch(r"[0-9a-f]{64}", observed["scontrol_sha256"]) is None
     ):

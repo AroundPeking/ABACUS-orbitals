@@ -28,6 +28,10 @@ and 24 hours.  Array tasks run `fixed`, `dir0`, `dir1`, and `dir2`.  The runner
 sources the pinned Intel MPI/MKL environment before resolving `mpirun`, resets
 all thread counts to 30, and checks the live Slurm allocation before creating
 calculation branches.
+On df_dcu's Slurm 22.05 installation, a job submitted with `--exclusive` is
+reported as `OverSubscribe=NO`; the runtime audit requires that exact live
+token together with the committed `#SBATCH --exclusive` directive and the
+full schedulable CPU allocation.
 
 The submitter uses a stable job name, checks both `squeue` and `sacct`, and
 creates an immutable submission claim before calling `sbatch`.  It submits

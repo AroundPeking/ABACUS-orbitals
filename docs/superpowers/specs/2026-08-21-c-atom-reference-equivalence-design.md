@@ -101,7 +101,10 @@ created, the runner reads the live `scontrol show job -o` record and verifies
 the partition, node/rank/thread counts, requested memory, 24-hour limit, and
 exclusive allocation; manifests preserve both normalized values and the raw
 scheduler record together with its SHA256, and audits reparse the raw record
-and verify its hash and normalized content.  Concurrent branch preparation is
+and verify its hash and normalized content.  On df_dcu's Slurm 22.05 build,
+the job-level display for `--exclusive` is `OverSubscribe=NO`; the auditor
+requires that exact token, the committed `#SBATCH --exclusive` directive, and
+all 30 schedulable CPUs.  Concurrent branch preparation is
 serialized by a stable, array-owned guard plus a bounded preparation mutex, so
 removing one mutex cannot invalidate another task's guard observation.  A
 pre-existing branch is never reused or overwritten.

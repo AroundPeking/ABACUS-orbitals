@@ -119,7 +119,7 @@ class RuntimeFileContractTests(unittest.TestCase):
             "JobId=9100 ArrayJobId=9001 ArrayTaskId=0 Partition=normal "
             "NumNodes=1 NumCPUs=30 NumTasks=1 CPUs/Task=30 "
             "MinMemoryNode=110610M TimeLimit=1-00:00:00 "
-            "OverSubscribe=EXCLUSIVE\n"
+            "OverSubscribe=NO\n"
         )
         environment = {
             "SLURM_JOB_PARTITION": "normal",
@@ -279,7 +279,7 @@ class FakeHpcEndToEndTests(unittest.TestCase):
             "NumTasks=1 CPUs/Task=30 NtasksPerN:B:S:C=1:0:*:* "
             "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-110610M} "
             "TimeLimit=${FAKE_SCONTROL_TIME_LIMIT:-1-00:00:00} "
-            "OverSubscribe=${FAKE_SCONTROL_EXCLUSIVE:-EXCLUSIVE}\"\n"
+            "OverSubscribe=${FAKE_SCONTROL_OVER_SUBSCRIBE:-NO}\"\n"
         )
         cls.fake_abacus = cls.bin_dir / "abacus"
         cls.fake_abacus.write_text(cls._fake_abacus_text())
@@ -494,7 +494,7 @@ for spin in (1, 2):
         )
         self.assertEqual(
             phase_manifest["scheduler"]["observed"]["over_subscribe"],
-            "EXCLUSIVE",
+            "NO",
         )
         self.assertEqual(
             set(restart_manifest["files"]),
@@ -873,7 +873,7 @@ for spin in (1, 2):
         cases = (
             ("memory", {"FAKE_SCONTROL_MEMORY": "120000M"}),
             ("time", {"FAKE_SCONTROL_TIME_LIMIT": "12:00:00"}),
-            ("exclusive", {"FAKE_SCONTROL_EXCLUSIVE": "OK"}),
+            ("exclusive", {"FAKE_SCONTROL_OVER_SUBSCRIBE": "OK"}),
         )
         for label, overrides in cases:
             with self.subTest(label=label):

@@ -390,8 +390,10 @@ The implemented runner and auditor must:
 
 1. require numeric job/array identifiers and assert the live Slurm resource
    contract from a testable `scontrol show job -o` query before preparation,
-   including memory, 24-hour time limit, and exclusive allocation; preserve
-   the exact raw scheduler record and its SHA256 for independent revalidation;
+   including memory, 24-hour time limit, and exclusive allocation; on df_dcu
+   Slurm 22.05 require the job-level raw token `OverSubscribe=NO` together
+   with the committed `--exclusive` directive; preserve the exact raw
+   scheduler record and its SHA256 for independent revalidation;
 2. require and resolve the canonical non-symlink `ABACUS_ENV_SCRIPT`, source
    it before resolving `mpirun`, reset OpenMP/MKL/OpenBLAS threads to 30, then
    resolve `ABACUS_ARTIFACT` and the canonical executable `mpirun`; record the
