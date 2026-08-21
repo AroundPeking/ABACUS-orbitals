@@ -111,12 +111,14 @@ def audit_gate(root: str | Path) -> dict[str, object]:
         free_drifts_kcal=free_drifts,
     )
     return {
-        "status": comparison["status"],
+        "status": "DIAGNOSTIC_ONLY",
+        "zero_field_comparison_status": comparison["status"],
         "authoritative_result": AUTHORITATIVE_RESULT,
         "restart_chain_evidence": {
             "status": RESTART_CHAIN_STATUS,
             "note": RESTART_CHAIN_NOTE,
         },
+        "blocked_on": "restart_chain_evidence",
         "phases": {
             spec.relative: _phase_dict(phases[spec.relative], root_path)
             for spec in PHASES
@@ -130,11 +132,18 @@ def _summary_text(summary: dict[str, object]) -> str:
         f"status={summary['status']}",
         f"authoritative_result={AUTHORITATIVE_RESULT}",
     ]
-    if summary["status"] != "PBE_GATE_PASSED":
+    if summary["status"] == "PBE_GATE_FAILED":
         lines.append(f"error={summary.get('error', 'unknown audit failure')}")
         return "\n".join(lines) + "\n"
+    if summary["status"] != "DIAGNOSTIC_ONLY":
+        raise ValueError(f"unsupported audit status: {summary['status']}")
 
+    lines.append(
+        "zero_field_comparison_status="
+        f"{summary['zero_field_comparison_status']}"
+    )
     lines.append(f"restart_chain_evidence={RESTART_CHAIN_STATUS}")
+    lines.append(f"blocked_on={summary['blocked_on']}")
     lines.append(f"restart_chain_note={RESTART_CHAIN_NOTE}")
     phases = summary["phases"]
     for spec in PHASES:

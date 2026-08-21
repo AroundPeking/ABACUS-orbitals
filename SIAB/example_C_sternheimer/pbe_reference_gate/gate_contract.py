@@ -582,7 +582,7 @@ def compare_zero_field_results(
             )
 
     return {
-        "status": "PBE_GATE_PASSED",
+        "status": "ZERO_FIELD_COMPARISON_PASSED",
         "thresholds": {
             "drift_kcal_mol": DRIFT_TOL_KCAL,
             "energy_ha": ENERGY_TOL_HA,

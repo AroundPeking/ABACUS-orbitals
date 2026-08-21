@@ -26,6 +26,7 @@ from gate_contract import (
 
 
 ENERGY_EV = -192.190008196889
+LEGACY_PREMATURE_PASS = "PBE_GATE_" + "PASSED"
 
 
 def input_text(mode, *, restart=None, field_dir=None):
@@ -396,7 +397,7 @@ class GateComparisonTests(unittest.TestCase):
 
     def test_accepts_equivalent_zero_field_results(self):
         summary = compare_zero_field_results(**self.valid_arguments())
-        self.assertEqual(summary["status"], "PBE_GATE_PASSED")
+        self.assertEqual(summary["status"], "ZERO_FIELD_COMPARISON_PASSED")
         self.assertEqual(set(summary["free_pair_differences_ha"]), {
             "0-1", "0-2", "1-2"
         })
@@ -505,7 +506,12 @@ class AuditCliTests(unittest.TestCase):
             self.assertEqual(module_completed.returncode, 0, module_completed.stderr)
             summary = json.loads((root / "RESULT_SUMMARY.json").read_text())
             text = (root / "RESULT_SUMMARY.txt").read_text()
-            self.assertEqual(summary["status"], "PBE_GATE_PASSED")
+            self.assertEqual(summary["status"], "DIAGNOSTIC_ONLY")
+            self.assertEqual(
+                summary["zero_field_comparison_status"],
+                "ZERO_FIELD_COMPARISON_PASSED",
+            )
+            self.assertEqual(summary["blocked_on"], "restart_chain_evidence")
             self.assertEqual(summary["authoritative_result"], "RESULT_SUMMARY.json")
             self.assertEqual(len(summary["phases"]), 11)
             for direction in range(3):
@@ -532,7 +538,12 @@ class AuditCliTests(unittest.TestCase):
                 )
                 for digest in phase["file_sha256"].values():
                     self.assertRegex(digest, r"^[0-9a-f]{64}$")
-            self.assertIn("status=PBE_GATE_PASSED", text)
+            self.assertIn("status=DIAGNOSTIC_ONLY", text)
+            self.assertIn(
+                "zero_field_comparison_status=ZERO_FIELD_COMPARISON_PASSED",
+                text,
+            )
+            self.assertIn("blocked_on=restart_chain_evidence", text)
             self.assertIn("authoritative_result=RESULT_SUMMARY.json", text)
             self.assertIn("restart_chain_evidence=PENDING_TASK4", text)
             self.assertEqual(
@@ -542,6 +553,11 @@ class AuditCliTests(unittest.TestCase):
                 "actual WFC/CHG copy and load provenance",
                 summary["restart_chain_evidence"]["note"],
             )
+            self.assertNotIn(
+                LEGACY_PREMATURE_PASS,
+                json.dumps(summary, sort_keys=True),
+            )
+            self.assertNotIn(LEGACY_PREMATURE_PASS, text)
             self.assertIn("fixed_drift_kcal=", text)
             self.assertIn("free_direction_2_drift_kcal=", text)
             phase_lines = [line for line in text.splitlines() if line.startswith("phase=")]
@@ -565,9 +581,11 @@ class AuditCliTests(unittest.TestCase):
             self.populate_gate(root)
             bad_input = root / "runs/dir1/free_restart2/INPUT"
             bad_input.write_text(bad_input.read_text().replace("ocp 0", "ocp 1"))
-            (root / "RESULT_SUMMARY.txt").write_text("status=PBE_GATE_PASSED\n")
+            (root / "RESULT_SUMMARY.txt").write_text(
+                f"status={LEGACY_PREMATURE_PASS}\n"
+            )
             (root / "RESULT_SUMMARY.json").write_text(
-                json.dumps({"status": "PBE_GATE_PASSED"}) + "\n"
+                json.dumps({"status": LEGACY_PREMATURE_PASS}) + "\n"
             )
 
             completed = subprocess.run(
@@ -584,7 +602,7 @@ class AuditCliTests(unittest.TestCase):
 
             self.assertNotEqual(completed.returncode, 0)
             self.assertNotIn(
-                "PBE_GATE_PASSED",
+                LEGACY_PREMATURE_PASS,
                 (root / "RESULT_SUMMARY.txt").read_text(),
             )
             failure = json.loads((root / "RESULT_SUMMARY.json").read_text())
@@ -621,16 +639,22 @@ class AuditCliTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             summary = json.loads((root / "RESULT_SUMMARY.json").read_text())
-            self.assertEqual(summary["status"], "PBE_GATE_PASSED")
+            self.assertEqual(summary["status"], "DIAGNOSTIC_ONLY")
+            self.assertEqual(
+                summary["zero_field_comparison_status"],
+                "ZERO_FIELD_COMPARISON_PASSED",
+            )
 
     def test_summary_json_write_failure_removes_all_pass_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.populate_gate(root)
             summary = audit_gate_module.audit_gate(root)
-            (root / "RESULT_SUMMARY.txt").write_text("status=PBE_GATE_PASSED\n")
+            (root / "RESULT_SUMMARY.txt").write_text(
+                f"status={LEGACY_PREMATURE_PASS}\n"
+            )
             (root / "RESULT_SUMMARY.json").write_text(
-                json.dumps({"status": "PBE_GATE_PASSED"}) + "\n"
+                json.dumps({"status": LEGACY_PREMATURE_PASS}) + "\n"
             )
             real_atomic_write = audit_gate_module._atomic_write
 
@@ -653,9 +677,11 @@ class AuditCliTests(unittest.TestCase):
     def test_main_does_not_swallow_programming_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "RESULT_SUMMARY.txt").write_text("status=PBE_GATE_PASSED\n")
+            (root / "RESULT_SUMMARY.txt").write_text(
+                f"status={LEGACY_PREMATURE_PASS}\n"
+            )
             (root / "RESULT_SUMMARY.json").write_text(
-                json.dumps({"status": "PBE_GATE_PASSED"}) + "\n"
+                json.dumps({"status": LEGACY_PREMATURE_PASS}) + "\n"
             )
             with mock.patch.object(
                 audit_gate_module,
