@@ -12,7 +12,7 @@ import secrets
 import stat
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 if __package__:
     from .gate_contract import FROZEN_PROTOCOL, VALID_MODES, render_input
@@ -518,6 +518,25 @@ def _validate_existing_branch_provenance(
                 f"existing branch {existing_branch} phase file provenance is incomplete"
             )
 
+        for label in ("pseudo", "orbital"):
+            source_record = sources[label]
+            basename = source_record["basename"]
+            phase_record = _require_exact_keys(
+                files[basename],
+                {"relative_path", "sha256", "size"},
+                f"{label} phase asset provenance",
+            )
+            relative_path = phase_record["relative_path"]
+            if (
+                not isinstance(relative_path, str)
+                or PurePosixPath(relative_path).name != basename
+                or phase_record["sha256"] != source_record["sha256"]
+                or phase_record["size"] != source_record["size"]
+            ):
+                raise ValueError(
+                    f"existing branch {existing_branch} {label} asset provenance chain does not close"
+                )
+
         phase_fd = _open_directory_at(
             branch_fd,
             phase_name,
@@ -571,7 +590,12 @@ def _make_temporary_directory(runs_fd: int, branch: str) -> tuple[str, int]:
             os.mkdir(name, mode=0o700, dir_fd=runs_fd)
         except FileExistsError:
             continue
-        return name, _open_directory_at(runs_fd, name, "temporary preparation")
+        try:
+            descriptor = _open_directory_at(runs_fd, name, "temporary preparation")
+        except BaseException:
+            os.rmdir(name, dir_fd=runs_fd)
+            raise
+        return name, descriptor
     raise RuntimeError("could not reserve a unique preparation directory")
 
 

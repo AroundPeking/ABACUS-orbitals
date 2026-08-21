@@ -362,6 +362,66 @@ class PrepareGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "frozen_protocol"):
             self.prepare("dir0")
 
+    def test_staged_asset_and_phase_record_cannot_diverge_from_source_record(self):
+        for label, source in (("pseudo", self.pseudo), ("orbital", self.orbital)):
+            with self.subTest(label=label):
+                root = self.base / f"phase-tamper-{label}"
+                prepared = prepare_branch(
+                    root,
+                    branch="fixed",
+                    pseudo=self.pseudo,
+                    orbital=self.orbital,
+                )
+                provenance_path = prepared / "BRANCH_PROVENANCE.json"
+                provenance = json.loads(provenance_path.read_text())
+                staged = prepared / "fixed_cold" / source.name
+                staged.write_bytes(f"tampered-{label}\n".encode())
+                phase_record = provenance["phase"]["files"][source.name]
+                phase_record["sha256"] = sha256(staged)
+                phase_record["size"] = staged.stat().st_size
+                provenance_path.write_text(json.dumps(provenance))
+
+                with self.assertRaisesRegex(ValueError, f"{label}.*provenance chain"):
+                    prepare_branch(
+                        root,
+                        branch="dir0",
+                        pseudo=self.pseudo,
+                        orbital=self.orbital,
+                    )
+                self.assertFalse(os.path.lexists(root / "runs" / "dir0"))
+
+    def test_source_record_cannot_diverge_from_phase_asset_record(self):
+        for label, source in (("pseudo", self.pseudo), ("orbital", self.orbital)):
+            with self.subTest(label=label):
+                root = self.base / f"source-tamper-{label}"
+                prepared = prepare_branch(
+                    root,
+                    branch="fixed",
+                    pseudo=self.pseudo,
+                    orbital=self.orbital,
+                )
+                alternate_dir = self.base / f"alternate-{label}"
+                alternate_dir.mkdir()
+                alternate = alternate_dir / source.name
+                alternate.write_bytes(f"alternate-{label}\n".encode())
+                provenance_path = prepared / "BRANCH_PROVENANCE.json"
+                provenance = json.loads(provenance_path.read_text())
+                source_record = provenance["sources"][label]
+                source_record["sha256"] = sha256(alternate)
+                source_record["size"] = alternate.stat().st_size
+                provenance_path.write_text(json.dumps(provenance))
+
+                pseudo = alternate if label == "pseudo" else self.pseudo
+                orbital = alternate if label == "orbital" else self.orbital
+                with self.assertRaisesRegex(ValueError, f"{label}.*provenance chain"):
+                    prepare_branch(
+                        root,
+                        branch="dir0",
+                        pseudo=pseudo,
+                        orbital=orbital,
+                    )
+                self.assertFalse(os.path.lexists(root / "runs" / "dir0"))
+
     def test_source_replaced_after_read_is_rejected_and_records_no_branch(self):
         replacement = self.assets / "replacement.upf"
         replacement.write_bytes(b"replacement-content\n")
@@ -415,6 +475,26 @@ class PrepareGateTests(unittest.TestCase):
 
         self.assertFalse(os.path.lexists(runs / "dir1"))
         self.assertEqual(list(runs.iterdir()), [])
+
+    def test_temporary_open_failure_removes_new_directory_and_all_locks(self):
+        original_open = prepare_gate._open_directory_at
+
+        def fail_temporary_open(parent_fd, name, label):
+            if label == "temporary preparation":
+                raise OSError("injected temporary open failure")
+            return original_open(parent_fd, name, label)
+
+        with mock.patch.object(
+            prepare_gate,
+            "_open_directory_at",
+            side_effect=fail_temporary_open,
+        ):
+            with self.assertRaisesRegex(OSError, "temporary open failure"):
+                self.prepare("fixed")
+
+        runs = self.root / "runs"
+        self.assertEqual(list(runs.iterdir()), [])
+        self.assertEqual(self.prepare("fixed"), runs / "fixed")
 
     def test_stale_hidden_preparation_is_reported_not_published(self):
         runs = self.root / "runs"
