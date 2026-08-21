@@ -466,7 +466,7 @@ The submitter requires these environment variables:
 
 ```text
 GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
-ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442
+ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442/abacus_3p
 PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
 ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
 PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python

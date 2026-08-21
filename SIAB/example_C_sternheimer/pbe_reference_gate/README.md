@@ -45,7 +45,7 @@ Git commit used to create it and is supplied explicitly by the staging step.
 
 ```bash
 export GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
-export ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442
+export ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442/abacus_3p
 export PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
 export ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
 export PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
