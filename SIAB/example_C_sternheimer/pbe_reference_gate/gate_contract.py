@@ -64,6 +64,12 @@ _INTEGER_PROTOCOL_KEYS = frozenset(
 _FLOAT_PROTOCOL_KEYS = frozenset(
     {"ecutwfc", "lcao_ecut", "scf_thr", "mixing_beta", "mixing_beta_mag"}
 )
+_FROZEN_PROTOCOL_KEYS = frozenset(key for key, _ in FROZEN_PROTOCOL)
+_BASE_MODE_KEYS = frozenset({"ocp", "efield_flag", "efield_amp"})
+_FIELD_ONLY_KEYS = frozenset(
+    {"dip_cor_flag", "efield_dir", "efield_pos_max", "efield_pos_dec"}
+)
+_RESTART_ONLY_KEYS = frozenset({"init_wfc", "init_chg"})
 HA_TO_EV = 27.211386245988
 HA_TO_KCAL_MOL = 627.5094740631
 INTEGER_TOL = 1e-10
@@ -254,6 +260,32 @@ def _validate_restart_input(
         )
 
 
+def _allowed_input_keys(
+    expected_mode: str, expected_restart: bool
+) -> frozenset[str]:
+    allowed = set(_FROZEN_PROTOCOL_KEYS | _BASE_MODE_KEYS)
+    if expected_mode == "fixed":
+        allowed.add("ocp_set")
+    elif expected_mode == "field":
+        allowed.update(_FIELD_ONLY_KEYS)
+    if expected_restart:
+        allowed.update(_RESTART_ONLY_KEYS)
+    return frozenset(allowed)
+
+
+def _validate_input_key_whitelist(
+    values: Mapping[str, str], expected_mode: str, expected_restart: bool
+) -> None:
+    allowed = _allowed_input_keys(expected_mode, expected_restart)
+    actual = set(values)
+    missing = sorted(allowed - actual)
+    unexpected = sorted(actual - allowed)
+    if missing:
+        raise ValueError("missing INPUT keys: " + ", ".join(missing))
+    if unexpected:
+        raise ValueError("unexpected INPUT keys: " + ", ".join(unexpected))
+
+
 def _validate_phase_input(
     values: Mapping[str, str],
     expected_mode: str,
@@ -278,6 +310,7 @@ def _validate_phase_input(
         if expected_mode == "free" and not expected_restart:
             raise ValueError("free phase requires expected_restart=True")
     _validate_restart_input(values, expected_restart)
+    _validate_input_key_whitelist(values, expected_mode, expected_restart)
 
     ocp = _require_integer_input(values, "ocp")
     if expected_mode == "fixed":
@@ -428,6 +461,10 @@ def _resolve_output_files(phase: Path, suffix: str) -> tuple[Path, Path]:
         raise ValueError(f"root-level output files are not accepted: {names}")
 
     expected_directory = phase / f"OUT.{suffix}"
+    if expected_directory.is_symlink():
+        raise ValueError(
+            f"expected output directory {expected_directory.name} is a symlink"
+        )
     if not expected_directory.is_dir():
         raise ValueError(
             f"expected output directory {expected_directory.name} is missing"
@@ -447,6 +484,8 @@ def _resolve_output_files(phase: Path, suffix: str) -> tuple[Path, Path]:
     log_path = expected_directory / "running_scf.log"
     eig_path = expected_directory / "eig_occ.txt"
     for path in (log_path, eig_path):
+        if path.is_symlink():
+            raise ValueError(f"{path.name} is a symlink, not local output evidence")
         if not path.is_file():
             raise ValueError(
                 f"missing {path.name} in expected output directory "
@@ -461,11 +500,16 @@ def audit_phase(
     expected_restart: bool,
     expected_field_dir: int | None = None,
 ) -> PhaseResult:
-    phase = Path(path).resolve()
+    phase_argument = Path(path)
+    if phase_argument.is_symlink():
+        raise ValueError("phase directory must not be a symlink")
+    phase = phase_argument.resolve()
     if not phase.is_dir():
         raise ValueError(f"phase directory does not exist: {phase}")
 
     input_path = phase / "INPUT"
+    if input_path.is_symlink():
+        raise ValueError("INPUT is a symlink, not local input evidence")
     if not input_path.is_file():
         raise ValueError(f"missing INPUT in phase {phase}")
 

@@ -210,6 +210,72 @@ class PhaseAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cold/field input"):
                 audit_phase(restart, expected_mode="fixed", expected_restart=False)
 
+    def test_exact_input_whitelist_accepts_every_legal_stage(self):
+        cases = (
+            ("fixed", False, None),
+            ("fixed", True, None),
+            ("field", False, 1),
+            ("free", True, None),
+        )
+        for mode, restart, expected_field_dir in cases:
+            with self.subTest(mode=mode, restart=restart):
+                with tempfile.TemporaryDirectory() as tmp:
+                    case = Path(tmp) / mode
+                    render_field_dir = (
+                        expected_field_dir
+                        if mode == "field"
+                        else (2 if mode == "free" else None)
+                    )
+                    write_phase(
+                        case,
+                        mode=mode,
+                        restart=restart,
+                        field_dir=render_field_dir,
+                    )
+                    phase = audit_phase(
+                        case,
+                        expected_mode=mode,
+                        expected_restart=restart,
+                        expected_field_dir=expected_field_dir,
+                    )
+                    self.assertEqual(phase.expected_mode, mode)
+
+    def test_exact_input_whitelist_rejects_extra_keys_in_every_stage(self):
+        cases = (
+            ("fixed", False, None),
+            ("fixed", True, None),
+            ("field", False, 1),
+            ("free", True, None),
+        )
+        extras = ("imp_sol 1", "unrelated_gate_key 7")
+        for mode, restart, expected_field_dir in cases:
+            for extra in extras:
+                with self.subTest(mode=mode, restart=restart, extra=extra):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        case = Path(tmp) / mode
+                        render_field_dir = (
+                            expected_field_dir
+                            if mode == "field"
+                            else (2 if mode == "free" else None)
+                        )
+                        write_phase(
+                            case,
+                            mode=mode,
+                            restart=restart,
+                            field_dir=render_field_dir,
+                        )
+                        input_path = case / "INPUT"
+                        input_path.write_text(input_path.read_text() + extra + "\n")
+                        with self.assertRaisesRegex(
+                            ValueError, "unexpected INPUT keys"
+                        ):
+                            audit_phase(
+                                case,
+                                expected_mode=mode,
+                                expected_restart=restart,
+                                expected_field_dir=expected_field_dir,
+                            )
+
     def test_field_seed_contract_and_direction_are_audited(self):
         with tempfile.TemporaryDirectory() as tmp:
             case = Path(tmp) / "field"
@@ -422,6 +488,58 @@ class PhaseAuditTests(unittest.TestCase):
             output.rmdir()
             with self.assertRaisesRegex(ValueError, "root-level output"):
                 audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_symlinked_phase_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real_phase = root / "real_phase"
+            linked_phase = root / "linked_phase"
+            write_phase(real_phase)
+            linked_phase.symlink_to(real_phase, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "phase directory.*symlink"):
+                audit_phase(
+                    linked_phase,
+                    expected_mode="fixed",
+                    expected_restart=False,
+                )
+
+    def test_rejects_symlinked_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case = Path(tmp) / "fixed"
+            write_phase(case)
+            external_input = Path(tmp) / "external_INPUT"
+            (case / "INPUT").rename(external_input)
+            (case / "INPUT").symlink_to(external_input)
+            with self.assertRaisesRegex(ValueError, "INPUT.*symlink"):
+                audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_symlinked_output_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case = Path(tmp) / "fixed"
+            write_phase(case)
+            expected_output = case / "OUT.C_PBE_REFERENCE_GATE"
+            external_output = Path(tmp) / "external_output"
+            expected_output.rename(external_output)
+            expected_output.symlink_to(external_output, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "output directory.*symlink"):
+                audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_symlinked_output_files(self):
+        for name in ("running_scf.log", "eig_occ.txt"):
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    case = Path(tmp) / "fixed"
+                    write_phase(case)
+                    output_file = case / "OUT.C_PBE_REFERENCE_GATE" / name
+                    external_file = Path(tmp) / f"external_{name}"
+                    output_file.rename(external_file)
+                    output_file.symlink_to(external_file)
+                    with self.assertRaisesRegex(ValueError, f"{name}.*symlink"):
+                        audit_phase(
+                            case,
+                            expected_mode="fixed",
+                            expected_restart=False,
+                        )
 
     def test_rejects_truncated_band_blocks(self):
         for band_count in (4, 21):
