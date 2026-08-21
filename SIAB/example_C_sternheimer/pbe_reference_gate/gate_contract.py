@@ -417,19 +417,42 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _resolve_output_file(phase: Path, name: str) -> Path:
-    candidates = []
-    direct = phase / name
-    if direct.is_file():
-        candidates.append(direct)
-    candidates.extend(
-        sorted(path for path in phase.glob(f"OUT.*/{name}") if path.is_file())
+def _resolve_output_files(phase: Path, suffix: str) -> tuple[Path, Path]:
+    root_outputs = [
+        phase / name
+        for name in ("running_scf.log", "eig_occ.txt")
+        if (phase / name).exists()
+    ]
+    if root_outputs:
+        names = ", ".join(path.name for path in root_outputs)
+        raise ValueError(f"root-level output files are not accepted: {names}")
+
+    expected_directory = phase / f"OUT.{suffix}"
+    if not expected_directory.is_dir():
+        raise ValueError(
+            f"expected output directory {expected_directory.name} is missing"
+        )
+
+    stale_directories = sorted(
+        path.name
+        for path in phase.glob("OUT.*")
+        if path.is_dir() and path != expected_directory
     )
-    if not candidates:
-        raise ValueError(f"missing {name} in phase {phase}")
-    if len(candidates) != 1:
-        raise ValueError(f"ambiguous {name} in phase {phase}")
-    return candidates[0]
+    if stale_directories:
+        raise ValueError(
+            "ambiguous/stale output directories are present: "
+            + ", ".join(stale_directories)
+        )
+
+    log_path = expected_directory / "running_scf.log"
+    eig_path = expected_directory / "eig_occ.txt"
+    for path in (log_path, eig_path):
+        if not path.is_file():
+            raise ValueError(
+                f"missing {path.name} in expected output directory "
+                f"{expected_directory.name}"
+            )
+    return log_path, eig_path
 
 
 def audit_phase(
@@ -445,8 +468,6 @@ def audit_phase(
     input_path = phase / "INPUT"
     if not input_path.is_file():
         raise ValueError(f"missing INPUT in phase {phase}")
-    log_path = _resolve_output_file(phase, "running_scf.log")
-    eig_path = _resolve_output_file(phase, "eig_occ.txt")
 
     input_values = _parse_input(input_path)
     _validate_phase_input(
@@ -455,8 +476,19 @@ def audit_phase(
         expected_restart,
         expected_field_dir,
     )
+    log_path, eig_path = _resolve_output_files(
+        phase, input_values["suffix"]
+    )
     energy_ev = _parse_final_energy(log_path)
     occupations = _parse_occupations(eig_path)
+
+    expected_band_count = int(input_values["nbands"])
+    for spin, spin_values in occupations.items():
+        if len(spin_values) != expected_band_count:
+            raise ValueError(
+                f"spin={spin} band count must equal nbands={expected_band_count}; "
+                f"got {len(spin_values)}"
+            )
 
     snapped: dict[int, tuple[int, ...]] = {}
     for spin, spin_values in occupations.items():

@@ -27,6 +27,8 @@ from gate_contract import (
 
 ENERGY_EV = -192.190008196889
 LEGACY_PREMATURE_PASS = "PBE_GATE_" + "PASSED"
+SPIN1_OCCUPATIONS = (1.0, 1.0, 1.0) + (0.0,) * 19
+SPIN2_OCCUPATIONS = (1.0,) + (0.0,) * 21
 
 
 def input_text(mode, *, restart=None, field_dir=None):
@@ -48,8 +50,8 @@ def log_text(energy_ev=ENERGY_EV, *, converged=True, extra_energy=False):
 
 
 def eig_occ_text(
-    spin1=(1.0, 1.0, 1.0, 0.0),
-    spin2=(1.0, 0.0, 0.0, 0.0),
+    spin1=SPIN1_OCCUPATIONS,
+    spin2=SPIN2_OCCUPATIONS,
     *,
     ionic_steps=1,
     spin1_kpoint="1/1",
@@ -92,8 +94,8 @@ def write_phase(
     energy_ev=ENERGY_EV,
     converged=True,
     extra_energy=False,
-    spin1=(1.0, 1.0, 1.0, 0.0),
-    spin2=(1.0, 0.0, 0.0, 0.0),
+    spin1=SPIN1_OCCUPATIONS,
+    spin2=SPIN2_OCCUPATIONS,
     ionic_steps=1,
     spin1_kpoint="1/1",
     restart=None,
@@ -285,7 +287,11 @@ class PhaseAuditTests(unittest.TestCase):
     def test_rejects_fractional_occupation(self):
         with tempfile.TemporaryDirectory() as tmp:
             case = Path(tmp) / "free"
-            write_phase(case, mode="free", spin1=(1.0, 1.0, 0.5, 0.0))
+            write_phase(
+                case,
+                mode="free",
+                spin1=(1.0, 1.0, 0.5) + (0.0,) * 19,
+            )
             with self.assertRaisesRegex(ValueError, "fractional occupation"):
                 audit_phase(case, expected_mode="free", expected_restart=True)
 
@@ -345,7 +351,11 @@ class PhaseAuditTests(unittest.TestCase):
     def test_rejects_wrong_spin_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             case = Path(tmp) / "free"
-            write_phase(case, mode="free", spin1=(1.0, 1.0, 0.0, 0.0))
+            write_phase(
+                case,
+                mode="free",
+                spin1=(1.0, 1.0) + (0.0,) * 20,
+            )
             with self.assertRaisesRegex(ValueError, "spin electron counts"):
                 audit_phase(case, expected_mode="free", expected_restart=True)
 
@@ -366,7 +376,7 @@ class PhaseAuditTests(unittest.TestCase):
                             expected_restart=False,
                         )
 
-    def test_rejects_missing_or_ambiguous_files(self):
+    def test_rejects_missing_expected_output_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             case = Path(tmp) / "fixed"
             write_phase(case)
@@ -374,12 +384,61 @@ class PhaseAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing eig_occ.txt"):
                 audit_phase(case, expected_mode="fixed", expected_restart=False)
 
+    def test_rejects_wrong_suffix_output_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             case = Path(tmp) / "fixed"
             write_phase(case)
-            (case / "running_scf.log").write_text(log_text())
-            with self.assertRaisesRegex(ValueError, "ambiguous running_scf.log"):
+            (case / "OUT.C_PBE_REFERENCE_GATE").rename(case / "OUT.WRONG")
+            with self.assertRaisesRegex(ValueError, "expected output directory"):
                 audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_outputs_split_across_two_out_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case = Path(tmp) / "fixed"
+            write_phase(case)
+            stale = case / "OUT.OLD"
+            stale.mkdir()
+            (case / "OUT.C_PBE_REFERENCE_GATE/eig_occ.txt").rename(
+                stale / "eig_occ.txt"
+            )
+            with self.assertRaisesRegex(ValueError, "ambiguous/stale output"):
+                audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_extra_stale_out_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case = Path(tmp) / "fixed"
+            write_phase(case)
+            (case / "OUT.PREVIOUS_RUN").mkdir()
+            with self.assertRaisesRegex(ValueError, "ambiguous/stale output"):
+                audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_root_level_output_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            case = Path(tmp) / "fixed"
+            write_phase(case)
+            output = case / "OUT.C_PBE_REFERENCE_GATE"
+            (output / "running_scf.log").rename(case / "running_scf.log")
+            (output / "eig_occ.txt").rename(case / "eig_occ.txt")
+            output.rmdir()
+            with self.assertRaisesRegex(ValueError, "root-level output"):
+                audit_phase(case, expected_mode="fixed", expected_restart=False)
+
+    def test_rejects_truncated_band_blocks(self):
+        for band_count in (4, 21):
+            with self.subTest(band_count=band_count):
+                with tempfile.TemporaryDirectory() as tmp:
+                    case = Path(tmp) / "fixed"
+                    write_phase(
+                        case,
+                        spin1=SPIN1_OCCUPATIONS[:band_count],
+                        spin2=SPIN2_OCCUPATIONS[:band_count],
+                    )
+                    with self.assertRaisesRegex(ValueError, "band count"):
+                        audit_phase(
+                            case,
+                            expected_mode="fixed",
+                            expected_restart=False,
+                        )
 
 
 class GateComparisonTests(unittest.TestCase):
@@ -526,8 +585,8 @@ class AuditCliTests(unittest.TestCase):
                 self.assertEqual(
                     phase["occupations"],
                     {
-                        "1": [1.0, 1.0, 1.0, 0.0],
-                        "2": [1.0, 0.0, 0.0, 0.0],
+                        "1": list(SPIN1_OCCUPATIONS),
+                        "2": list(SPIN2_OCCUPATIONS),
                     },
                 )
                 self.assertTrue(phase["integer_occupations"])
@@ -562,9 +621,11 @@ class AuditCliTests(unittest.TestCase):
             self.assertIn("free_direction_2_drift_kcal=", text)
             phase_lines = [line for line in text.splitlines() if line.startswith("phase=")]
             self.assertEqual(len(phase_lines), 11)
+            expected_spin1 = ",".join(f"{value:.16g}" for value in SPIN1_OCCUPATIONS)
+            expected_spin2 = ",".join(f"{value:.16g}" for value in SPIN2_OCCUPATIONS)
             for line in phase_lines:
-                self.assertIn("spin1_occupations=1,1,1,0", line)
-                self.assertIn("spin2_occupations=1,0,0,0", line)
+                self.assertIn(f"spin1_occupations={expected_spin1} ", line)
+                self.assertIn(f"spin2_occupations={expected_spin2} ", line)
                 self.assertRegex(line, r"\bINPUT_sha256=[0-9a-f]{64}\b")
                 self.assertRegex(
                     line, r"\brunning_scf\.log_sha256=[0-9a-f]{64}\b"
