@@ -449,18 +449,18 @@ git commit -m "feat(siab): run C PBE gate on normal nodes"
 - Create: `SIAB/example_C_sternheimer/pbe_reference_gate/README.md`
 - Modify: `SIAB/example_C_sternheimer/pbe_reference_gate/tests/test_hpc_contract.py`
 
-- [ ] **Step 1: Write failing submission tests**
+- [x] **Step 1: Write failing submission tests**
 
 Assert that the submitter checks `SUBMITTED_JOB_ID.txt`, queries both `squeue`
 and `sacct`, rejects existing `PENDING`, `RUNNING`, `COMPLETING`, or
 `COMPLETED` work, and submits exactly one array job.  It must not submit an
 automatic Delta-ST dependency.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Expected: failure because the submitter is absent.
 
-- [ ] **Step 3: Implement submitter and README**
+- [x] **Step 3: Implement submitter and README**
 
 The submitter requires these environment variables:
 
@@ -477,7 +477,7 @@ submits the four-task PBE array.  The README explains that the audit is run on
 the login node after all four tasks finish and that only
 `status=PBE_GATE_PASSED` permits writing the Delta-ST plan.
 
-- [ ] **Step 4: Run tests and shell syntax checks**
+- [x] **Step 4: Run tests and shell syntax checks**
 
 ```bash
 python -m unittest discover -s SIAB/example_C_sternheimer/pbe_reference_gate/tests -v
@@ -487,7 +487,7 @@ bash -n SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch.slurm
 
 Expected: all tests and both syntax checks pass.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add SIAB/example_C_sternheimer/pbe_reference_gate

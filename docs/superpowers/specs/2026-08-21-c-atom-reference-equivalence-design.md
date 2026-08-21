@@ -140,6 +140,34 @@ the gate, even if no other runtime manifest exists.  Numerically valid Task 2
 fixtures without runner evidence remain `DIAGNOSTIC_ONLY`; partial or
 inconsistent Task 4 evidence is rejected.
 
+### Task 5 submission evidence
+
+Formal execution uses one duplicate-safe submission wrapper.  It resolves the
+gate root, ABACUS executable, pseudopotential, orbital, Python interpreter,
+runner, and submitter to canonical absolute paths before submission.  The
+three physical assets must be nonempty non-symlink regular files, and ABACUS
+must be executable.  The runner receives the resolved pseudopotential and
+orbital as `PSEUDO_ASSET` and `ORBITAL_ASSET`.
+
+The Slurm job name is a stable hash of the canonical gate root.  Before and
+after acquiring the claim, the submitter queries both `squeue` and `sacct`;
+failure or malformed output from either command makes scheduler state
+unobservable and stops submission.  Any prior scheduler record, immutable job
+ID, claim, formal branch, result, pass marker, or failure marker blocks reuse
+of that root.  The submitter creates `.submission-claim/` atomically before
+calling `sbatch`, and only its owner can submit the committed four-task array.
+It never adds a Delta-ST dependency.
+
+The shell opens a durable receipt before invoking `sbatch`, so a returned job
+ID survives interruption before final publication.  A nonzero `sbatch` exit or
+malformed success receipt produces `SUBMISSION_AMBIGUOUS.json`; the claim is
+retained and the same root must never be retried.  A unique numeric receipt is
+published without replacement as `SUBMITTED_JOB_ID.txt`, together with atomic
+`SUBMISSION_PROVENANCE.json` containing the job ID, UTC time, exact command,
+source commit, resolved paths, and file sizes and SHA256 hashes.  These records
+authorize observation and audit only; they do not constitute physical
+acceptance.
+
 ## Calculation branches
 
 ### A. Fixed zero-field reference

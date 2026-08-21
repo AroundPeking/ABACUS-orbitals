@@ -13,6 +13,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "run_pbe_branch.slurm"
+SUBMITTER = ROOT / "submit_pbe_gate.sh"
+README = ROOT / "README.md"
 sys.path.insert(0, str(ROOT))
 
 import audit_gate
@@ -785,6 +787,288 @@ for spin in (1, 2):
         )
         with self.assertRaisesRegex(ValueError, "preparation provenance"):
             audit_gate.preflight_phase(root, "fixed", "fixed_cold")
+
+
+class SubmissionContractTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.base = Path(self.temporary.name).resolve()
+        self.bin_dir = self.base / "bin"
+        self.bin_dir.mkdir()
+        self.scheduler_log = self.base / "scheduler.log"
+        self.sbatch_count = self.base / "sbatch.count"
+        self._write_fake_command(
+            "squeue",
+            r'''#!/usr/bin/env bash
+set -euo pipefail
+printf 'squeue %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
+[[ ${FAKE_SQUEUE_FAIL:-0} == 0 ]] || exit 31
+printf '%s' "${FAKE_SQUEUE_OUTPUT:-}"
+''',
+        )
+        self._write_fake_command(
+            "sacct",
+            r'''#!/usr/bin/env bash
+set -euo pipefail
+printf 'sacct %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
+[[ ${FAKE_SACCT_FAIL:-0} == 0 ]] || exit 32
+printf '%s' "${FAKE_SACCT_OUTPUT:-}"
+''',
+        )
+        self._write_fake_command(
+            "sbatch",
+            r'''#!/usr/bin/env bash
+set -euo pipefail
+printf 'sbatch %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
+count=0
+[[ ! -f $FAKE_SBATCH_COUNT ]] || count=$(<"$FAKE_SBATCH_COUNT")
+printf '%s\n' "$((count + 1))" >"$FAKE_SBATCH_COUNT"
+printf '%s\n' "${FAKE_SBATCH_OUTPUT:-4242}"
+exit "${FAKE_SBATCH_EXIT:-0}"
+''',
+        )
+        self.assets = self.base / "assets"
+        self.assets.mkdir()
+        self.abacus = self.assets / "abacus"
+        self.pseudo = self.assets / "C_ONCV_PBE-1.0.upf"
+        self.orbital = self.assets / "C_gga_10au_100Ry_3s3p2d.orb"
+        self.abacus.write_text("#!/usr/bin/env bash\nexit 0\n")
+        self.abacus.chmod(self.abacus.stat().st_mode | stat.S_IXUSR)
+        self.pseudo.write_text("pseudo\n")
+        self.orbital.write_text("orbital\n")
+        self.gate_root = self.base / "gate"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def _write_fake_command(self, name, content):
+        path = self.bin_dir / name
+        path.write_text(textwrap.dedent(content))
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def _environment(self, **overrides):
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "PATH": f"{self.bin_dir}{os.pathsep}{environment['PATH']}",
+                "GATE_ROOT": str(self.gate_root),
+                "ABACUS_ARTIFACT": str(self.abacus),
+                "PSEUDO_SOURCE": str(self.pseudo),
+                "ORBITAL_SOURCE": str(self.orbital),
+                "PYTHON_EXE": sys.executable,
+                "FAKE_SCHEDULER_LOG": str(self.scheduler_log),
+                "FAKE_SBATCH_COUNT": str(self.sbatch_count),
+            }
+        )
+        environment.update({key: str(value) for key, value in overrides.items()})
+        return environment
+
+    def _run_submitter(self, **overrides):
+        return subprocess.run(
+            ["bash", str(SUBMITTER)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=self._environment(**overrides),
+        )
+
+    def _submission_count(self):
+        if not self.sbatch_count.exists():
+            return 0
+        return int(self.sbatch_count.read_text().strip())
+
+    def test_submitter_static_contract(self):
+        text = SUBMITTER.read_text()
+        for value in (
+            "GATE_ROOT",
+            "ABACUS_ARTIFACT",
+            "PSEUDO_SOURCE",
+            "ORBITAL_SOURCE",
+            "PYTHON_EXE",
+            "SUBMITTED_JOB_ID.txt",
+            "SUBMISSION_PROVENANCE.json",
+            "squeue",
+            "sacct",
+            "sbatch",
+            "--array=0-3",
+            "PSEUDO_ASSET",
+            "ORBITAL_ASSET",
+            "run_pbe_branch.slurm",
+        ):
+            self.assertIn(value, text)
+        self.assertNotIn("--dependency", text)
+
+    def test_readme_documents_physical_and_operational_gate(self):
+        text = README.read_text()
+        for value in (
+            "20 Angstrom",
+            "neutral carbon triplet",
+            "fixed integer occupation",
+            "weak-field",
+            "zero-field free restart",
+            "normal",
+            "32 OpenMP threads",
+            "126500 MB",
+            "24 hours",
+            "canonical absolute paths",
+            "login node",
+            "DIAGNOSTIC_ONLY",
+            "PBE_GATE_PASSED",
+            "Delta-ST",
+        ):
+            self.assertIn(value, text)
+
+    def test_submits_one_array_and_records_immutable_provenance(self):
+        completed = self._run_submitter()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._submission_count(), 1)
+        self.assertEqual(
+            (self.gate_root / "SUBMITTED_JOB_ID.txt").read_text(), "4242\n"
+        )
+        provenance = json.loads(
+            (self.gate_root / "SUBMISSION_PROVENANCE.json").read_text()
+        )
+        self.assertEqual(provenance["status"], "SUBMITTED")
+        self.assertEqual(provenance["job_id"], "4242")
+        self.assertEqual(provenance["source_commit"], subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip())
+        self.assertEqual(
+            provenance["resolved_paths"]["gate_root"], str(self.gate_root)
+        )
+        for name in ("abacus", "pseudo", "orbital", "runner", "submitter"):
+            record = provenance["files"][name]
+            self.assertGreater(record["size"], 0)
+            self.assertRegex(record["sha256"], r"^[0-9a-f]{64}$")
+        log = self.scheduler_log.read_text()
+        self.assertEqual(log.count("sbatch "), 1)
+        self.assertIn("--array=0-3", log)
+        self.assertIn(f"GATE_ROOT={self.gate_root}", log)
+        self.assertIn(f"PSEUDO_ASSET={self.pseudo}", log)
+        self.assertIn(f"ORBITAL_ASSET={self.orbital}", log)
+        self.assertNotIn("--dependency", log)
+
+    def test_second_invocation_never_submits_again(self):
+        first = self._run_submitter()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self._run_submitter(
+            FAKE_SQUEUE_OUTPUT="4242|c_pbe_gate|RUNNING\n",
+            FAKE_SACCT_OUTPUT="4242|c_pbe_gate|RUNNING\n",
+        )
+        self.assertNotEqual(second.returncode, 0)
+        self.assertEqual(self._submission_count(), 1)
+        log = self.scheduler_log.read_text()
+        self.assertGreaterEqual(log.count("squeue "), 2)
+        self.assertGreaterEqual(log.count("sacct "), 2)
+
+    def test_existing_scheduler_states_block_submission(self):
+        for state in ("PENDING", "RUNNING", "COMPLETING", "COMPLETED"):
+            with self.subTest(state=state):
+                gate = self.base / f"gate-{state.lower()}"
+                completed = self._run_submitter(
+                    GATE_ROOT=gate,
+                    FAKE_SQUEUE_OUTPUT=f"777|c_pbe_gate|{state}\n",
+                    FAKE_SACCT_OUTPUT=f"777|c_pbe_gate|{state}\n",
+                )
+                self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_scheduler_query_failure_is_unobservable_and_blocks(self):
+        for command in ("FAKE_SQUEUE_FAIL", "FAKE_SACCT_FAIL"):
+            with self.subTest(command=command):
+                gate = self.base / f"gate-{command.lower()}"
+                completed = self._run_submitter(GATE_ROOT=gate, **{command: "1"})
+                self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_existing_formal_evidence_or_markers_block_submission(self):
+        cases = (
+            "RESULT_SUMMARY.json",
+            "PBE_GATE_PASSED",
+            "RUN_FAILED.json",
+            "runs/fixed/BRANCH_PROVENANCE.json",
+        )
+        for index, relative in enumerate(cases):
+            with self.subTest(relative=relative):
+                gate = self.base / f"evidence-{index}"
+                marker = gate / relative
+                marker.parent.mkdir(parents=True)
+                marker.write_text("evidence\n")
+                completed = self._run_submitter(GATE_ROOT=gate)
+                self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_assets_must_be_canonical_nonempty_regular_files(self):
+        empty = self.assets / "empty.upf"
+        empty.touch()
+        symlink = self.assets / "linked.orb"
+        symlink.symlink_to(self.orbital)
+        directory = self.assets / "directory"
+        directory.mkdir()
+        cases = (
+            {"PSEUDO_SOURCE": empty},
+            {"ORBITAL_SOURCE": symlink},
+            {"ABACUS_ARTIFACT": directory},
+        )
+        for index, overrides in enumerate(cases):
+            with self.subTest(index=index):
+                completed = self._run_submitter(
+                    GATE_ROOT=self.base / f"bad-asset-{index}", **overrides
+                )
+                self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_concurrent_claim_allows_exactly_one_sbatch(self):
+        processes = [
+            subprocess.Popen(
+                ["bash", str(SUBMITTER)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=self._environment(),
+            )
+            for _ in range(4)
+        ]
+        results = [process.communicate(timeout=30) for process in processes]
+        self.assertEqual(sum(process.returncode == 0 for process in processes), 1)
+        self.assertEqual(self._submission_count(), 1, results)
+
+    def test_sbatch_failure_after_job_id_retains_receipt_and_blocks_retry(self):
+        first = self._run_submitter(FAKE_SBATCH_EXIT="99")
+        self.assertNotEqual(first.returncode, 0)
+        self.assertEqual(self._submission_count(), 1)
+        receipt = self.gate_root / ".submission-claim/SBATCH_RECEIPT.txt"
+        self.assertEqual(receipt.read_text(), "4242\n")
+        second = self._run_submitter()
+        self.assertNotEqual(second.returncode, 0)
+        self.assertEqual(self._submission_count(), 1)
+        log = self.scheduler_log.read_text()
+        self.assertGreaterEqual(log.count("squeue "), 3)
+        self.assertGreaterEqual(log.count("sacct "), 3)
+
+    def test_malformed_success_receipt_is_ambiguous_and_blocks_retry(self):
+        first = self._run_submitter(FAKE_SBATCH_OUTPUT="submitted maybe")
+        self.assertNotEqual(first.returncode, 0)
+        self.assertTrue(
+            (self.gate_root / ".submission-claim/SUBMISSION_AMBIGUOUS.json").is_file()
+        )
+        second = self._run_submitter()
+        self.assertNotEqual(second.returncode, 0)
+        self.assertEqual(self._submission_count(), 1)
+
+    def test_submitted_job_id_marker_must_be_local_regular_file(self):
+        self.gate_root.mkdir()
+        external = self.base / "external-job-id.txt"
+        external.write_text("4242\n")
+        (self.gate_root / "SUBMITTED_JOB_ID.txt").symlink_to(external)
+        completed = self._run_submitter()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("non-symlink regular file", completed.stderr)
+        self.assertEqual(self._submission_count(), 0)
 
 
 if __name__ == "__main__":
