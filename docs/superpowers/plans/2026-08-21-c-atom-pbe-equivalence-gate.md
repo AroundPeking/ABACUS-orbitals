@@ -363,10 +363,10 @@ class HpcContractTests(unittest.TestCase):
             "#SBATCH --partition=normal",
             "#SBATCH --array=0-3",
             "#SBATCH --ntasks-per-node=1",
-            "#SBATCH --cpus-per-task=32",
-            "#SBATCH --mem=126500M",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
             "#SBATCH --time=24:00:00",
-            "export OMP_NUM_THREADS=32",
+            "export OMP_NUM_THREADS=30",
         ):
             self.assertIn(value, text)
         self.assertNotIn("debug", text.lower())
@@ -393,7 +393,7 @@ The implemented runner and auditor must:
    including memory, 24-hour time limit, and exclusive allocation; preserve
    the exact raw scheduler record and its SHA256 for independent revalidation;
 2. require and resolve the canonical non-symlink `ABACUS_ENV_SCRIPT`, source
-   it before resolving `mpirun`, reset OpenMP/MKL/OpenBLAS threads to 32, then
+   it before resolving `mpirun`, reset OpenMP/MKL/OpenBLAS threads to 30, then
    resolve `ABACUS_ARTIFACT` and the canonical executable `mpirun`; record the
    path, size, and SHA256 of the environment script, ABACUS, and `mpirun`;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
@@ -401,7 +401,7 @@ The implemented runner and auditor must:
    stable array-owned cross-node guard and bounded preparation mutex so the
    four array tasks do not collide on the preparation lock or race guard
    deletion;
-5. run ABACUS through the recorded `mpirun -np 1 -ppn 1` with 32 OpenMP
+5. run ABACUS through the recorded `mpirun -np 1 -ppn 1` with 30 OpenMP
    threads;
 6. require convergence, final energy, `eig_occ.txt`, both spin wavefunctions,
    and charge restart output after every phase;
@@ -528,7 +528,7 @@ git commit -m "docs(siab): package C PBE reference gate"
   `/public/home/ghj/app/src/env_60_245_intel2021.sh` through
   `ABACUS_ENV_SCRIPT`; record its path, size, and SHA256 at submission.
 - [x] Source the script before resolving or using `mpirun`, then reassert the
-  32-thread and full normal-node resource contract.
+  30-thread and full schedulable normal-node resource contract.
 - [x] Record canonical `mpirun` path, size, and SHA256 in run, phase, branch,
   and global evidence; independently revalidate both runtime files and require
   cross-branch identity.
@@ -547,7 +547,9 @@ git commit -m "docs(siab): package C PBE reference gate"
 - [ ] **Step 1: Verify the authenticated df_dcu channel and live resources**
 
 Use the existing OTP ControlMaster.  Query `sinfo` and verify that normal nodes
-still provide the requested 32 CPUs and 126500 MB.  If the live shape differs,
+still provide the requested 30 schedulable CPUs and the account maximum of
+110610 MB.  If the live
+shape differs,
 update the resource constants and their tests before submission.
 
 - [ ] **Step 2: Stage the committed source and immutable assets**
@@ -558,7 +560,7 @@ the ABACUS artifact and verify hashes before writing the submission manifest.
 - [ ] **Step 3: Submit exactly one formal array**
 
 Run `submit_pbe_gate.sh` once.  Record its job ID and immediately verify each
-array task has partition `normal`, one node, one MPI rank, 32 CPUs, 126500 MB,
+array task has partition `normal`, one node, one MPI rank, 30 CPUs, 110610 MB,
 and 24 hours.  Do not resubmit while any formal task exists.
 
 - [ ] **Step 4: Audit completed branches**

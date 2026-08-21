@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=126500M
+#SBATCH --cpus-per-task=30
+#SBATCH --mem=110610M
 #SBATCH --time=24:00:00
 #SBATCH --no-requeue
 #SBATCH --exclusive
@@ -73,23 +73,23 @@ source "$ABACUS_ENV_REAL"
 # The environment script may set its own threading defaults; the gate owns these.
 set -euo pipefail
 set -E
-export OMP_NUM_THREADS=32
-export MKL_NUM_THREADS=32
-export OPENBLAS_NUM_THREADS=32
+export OMP_NUM_THREADS=30
+export MKL_NUM_THREADS=30
+export OPENBLAS_NUM_THREADS=30
 
 [[ ${SLURM_JOB_PARTITION:-} == normal ]] || { printf 'partition must be normal\n' >&2; exit 2; }
 [[ ${SLURM_JOB_ID:-} =~ ^[1-9][0-9]*$ ]] || { printf 'job ID must be numeric\n' >&2; exit 2; }
 [[ ${SLURM_ARRAY_JOB_ID:-} =~ ^[1-9][0-9]*$ ]] || { printf 'array job ID must be numeric\n' >&2; exit 2; }
 [[ ${SLURM_ARRAY_TASK_ID:-} =~ ^[0-3]$ ]] || { printf 'array task must be 0-3\n' >&2; exit 2; }
 [[ ${SLURM_ARRAY_TASK_COUNT:-} == 4 ]] || { printf 'array task count must be 4\n' >&2; exit 2; }
-[[ ${SLURM_CPUS_PER_TASK:-} == 32 ]] || { printf 'cpus per task must be 32\n' >&2; exit 2; }
+[[ ${SLURM_CPUS_PER_TASK:-} == 30 ]] || { printf 'cpus per task must be 30\n' >&2; exit 2; }
 [[ ${SLURM_NTASKS:-} == 1 ]] || { printf 'ntasks must be 1\n' >&2; exit 2; }
 [[ ${SLURM_JOB_NUM_NODES:-} == 1 ]] || { printf 'node count must be 1\n' >&2; exit 2; }
 [[ ${SLURM_TASKS_PER_NODE:-} == 1 || ${SLURM_TASKS_PER_NODE:-} == '1(x1)' ]] || {
     printf 'tasks per node must be 1\n' >&2
     exit 2
 }
-[[ ${SLURM_MEM_PER_NODE:-} == 126500 ]] || { printf 'memory per node must be 126500 MB\n' >&2; exit 2; }
+[[ ${SLURM_MEM_PER_NODE:-} == 110610 ]] || { printf 'memory per node must be 110610 MB\n' >&2; exit 2; }
 
 case "$SLURM_ARRAY_TASK_ID" in
     0) BRANCH=fixed ;;

@@ -53,8 +53,8 @@ RESOURCE_CONTRACT = {
     "nodes": 1,
     "ntasks": 1,
     "tasks_per_node": 1,
-    "cpus_per_task": 32,
-    "memory_mb": 126500,
+    "cpus_per_task": 30,
+    "memory_mb": 110610,
     "time_limit": "24:00:00",
     "exclusive": True,
 }
@@ -346,8 +346,8 @@ def _scheduler_record(branch: str) -> dict[str, object]:
         raise ValueError(f"array task {task_id} does not map to branch {branch}")
     if _positive_int_environment("SLURM_ARRAY_TASK_COUNT") != 4:
         raise ValueError("Slurm array must contain exactly four tasks")
-    if _positive_int_environment("SLURM_CPUS_PER_TASK") != 32:
-        raise ValueError("SLURM_CPUS_PER_TASK must equal 32")
+    if _positive_int_environment("SLURM_CPUS_PER_TASK") != 30:
+        raise ValueError("SLURM_CPUS_PER_TASK must equal 30")
     if _positive_int_environment("SLURM_NTASKS") != 1:
         raise ValueError("SLURM_NTASKS must equal 1")
     if _positive_int_environment("SLURM_JOB_NUM_NODES") != 1:
@@ -356,8 +356,8 @@ def _scheduler_record(branch: str) -> dict[str, object]:
     match = re.fullmatch(r"1(?:\(x1\))?", tasks_per_node)
     if match is None:
         raise ValueError("SLURM_TASKS_PER_NODE must equal 1")
-    if _positive_int_environment("SLURM_MEM_PER_NODE") != 126500:
-        raise ValueError("SLURM_MEM_PER_NODE must equal 126500")
+    if _positive_int_environment("SLURM_MEM_PER_NODE") != 110610:
+        raise ValueError("SLURM_MEM_PER_NODE must equal 110610")
     fields, raw_scontrol = _query_scheduler(job_id)
     observed_job_id = fields["JobId"]
     if observed_job_id not in {job_id, f"{array_job_id}_{task_id}"}:
@@ -385,8 +385,8 @@ def _scheduler_record(branch: str) -> dict[str, object]:
         "time_limit": "24:00:00" if observed_time_seconds == 86400 else time_limit_raw,
         "exclusive": observed_exclusive,
     }
-    if observed_cpus != 32:
-        raise ValueError("scontrol NumCPUs must equal 32")
+    if observed_cpus != 30:
+        raise ValueError("scontrol NumCPUs must equal 30")
     for key, expected in RESOURCE_CONTRACT.items():
         if observed_values[key] != expected:
             raise ValueError(f"observed Slurm {key} must equal {expected}")

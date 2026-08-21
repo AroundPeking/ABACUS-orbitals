@@ -83,14 +83,15 @@ matrix, or LibRPA calculation is allowed before it passes.
 ### Task 4 execution and restart evidence
 
 The production runner is a four-task Slurm array on `normal`.  Every task uses
-one exclusive node, one MPI rank, 32 OpenMP threads, 126500 MB, and a 24-hour
+one exclusive node, one MPI rank, all 30 schedulable OpenMP threads, the
+account maximum of 110610 MB, and a 24-hour
 limit.  The four array tasks map to `fixed`, `dir0`, `dir1`, and `dir2`.
 The submitted ABACUS artifact is linked against the Intel MPI/MKL environment
 provided by the canonical non-symlink file
 `/public/home/ghj/app/src/env_60_245_intel2021.sh`.  The submitter requires this
 path as `ABACUS_ENV_SCRIPT`, records its size and SHA256, and exports it to the
 runner.  The runner sources it before resolving `mpirun`, then resets
-`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and `OPENBLAS_NUM_THREADS` to 32.  The
+`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and `OPENBLAS_NUM_THREADS` to 30.  The
 login-node OpenMPI command is not an admissible fallback.  The selected
 `mpirun` is resolved to a canonical executable and its path, size, and SHA256
 are recorded.

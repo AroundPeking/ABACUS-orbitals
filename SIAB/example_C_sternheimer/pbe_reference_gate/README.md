@@ -22,10 +22,11 @@ optimization.
 ## Scheduler contract
 
 `run_pbe_branch.slurm` is one four-task array on the `normal` partition.  Each
-task receives one exclusive node, one MPI rank, 32 OpenMP threads, 126500 MB,
+task receives one exclusive node, one MPI rank, all 30 OpenMP threads
+schedulable by Slurm, the account maximum of 110610 MB,
 and 24 hours.  Array tasks run `fixed`, `dir0`, `dir1`, and `dir2`.  The runner
 sources the pinned Intel MPI/MKL environment before resolving `mpirun`, resets
-all thread counts to 32, and checks the live Slurm allocation before creating
+all thread counts to 30, and checks the live Slurm allocation before creating
 calculation branches.
 
 The submitter uses a stable job name, checks both `squeue` and `sacct`, and

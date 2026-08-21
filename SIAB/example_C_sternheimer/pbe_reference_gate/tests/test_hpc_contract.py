@@ -34,15 +34,15 @@ class HpcStaticContractTests(unittest.TestCase):
             "#SBATCH --nodes=1",
             "#SBATCH --ntasks=1",
             "#SBATCH --ntasks-per-node=1",
-            "#SBATCH --cpus-per-task=32",
-            "#SBATCH --mem=126500M",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
             "#SBATCH --time=24:00:00",
             "#SBATCH --no-requeue",
             "#SBATCH --exclusive",
             "set -euo pipefail",
-            "export OMP_NUM_THREADS=32",
-            "export MKL_NUM_THREADS=32",
-            "export OPENBLAS_NUM_THREADS=32",
+            "export OMP_NUM_THREADS=30",
+            "export MKL_NUM_THREADS=30",
+            "export OPENBLAS_NUM_THREADS=30",
             '"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"',
         ):
             self.assertIn(value, text)
@@ -57,9 +57,9 @@ class HpcStaticContractTests(unittest.TestCase):
         self.assertLess(mpirun_index, launch_index)
         for value in (
             "ABACUS_ENV_SCRIPT",
-            "export OMP_NUM_THREADS=32",
-            "export MKL_NUM_THREADS=32",
-            "export OPENBLAS_NUM_THREADS=32",
+            "export OMP_NUM_THREADS=30",
+            "export MKL_NUM_THREADS=30",
+            "export OPENBLAS_NUM_THREADS=30",
         ):
             self.assertIn(value, text[source_index:])
 
@@ -117,19 +117,19 @@ class RuntimeFileContractTests(unittest.TestCase):
     def _scheduler_fixture():
         raw = (
             "JobId=9100 ArrayJobId=9001 ArrayTaskId=0 Partition=normal "
-            "NumNodes=1 NumCPUs=32 NumTasks=1 CPUs/Task=32 "
-            "MinMemoryNode=126500M TimeLimit=1-00:00:00 "
+            "NumNodes=1 NumCPUs=30 NumTasks=1 CPUs/Task=30 "
+            "MinMemoryNode=110610M TimeLimit=1-00:00:00 "
             "OverSubscribe=EXCLUSIVE\n"
         )
         environment = {
             "SLURM_JOB_PARTITION": "normal",
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_ARRAY_TASK_COUNT": "4",
-            "SLURM_CPUS_PER_TASK": "32",
+            "SLURM_CPUS_PER_TASK": "30",
             "SLURM_NTASKS": "1",
             "SLURM_JOB_NUM_NODES": "1",
             "SLURM_TASKS_PER_NODE": "1",
-            "SLURM_MEM_PER_NODE": "126500",
+            "SLURM_MEM_PER_NODE": "110610",
             "SLURM_JOB_ID": "9100",
             "SLURM_ARRAY_JOB_ID": "9001",
         }
@@ -261,9 +261,9 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         cls.fake_mpirun.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "[[ ${OMP_NUM_THREADS:-} == 32 ]]\n"
-            "[[ ${MKL_NUM_THREADS:-} == 32 ]]\n"
-            "[[ ${OPENBLAS_NUM_THREADS:-} == 32 ]]\n"
+            "[[ ${OMP_NUM_THREADS:-} == 30 ]]\n"
+            "[[ ${MKL_NUM_THREADS:-} == 30 ]]\n"
+            "[[ ${OPENBLAS_NUM_THREADS:-} == 30 ]]\n"
             "[[ $1 == -np && $2 == 1 && $3 == -ppn && $4 == 1 ]]\n"
             "shift 4\n"
             'exec "$@"\n'
@@ -275,9 +275,9 @@ class FakeHpcEndToEndTests(unittest.TestCase):
             "[[ $1 == show && $2 == job ]]\n"
             "printf '%s\\n' \"JobId=${SLURM_JOB_ID} "
             "ArrayJobId=${SLURM_ARRAY_JOB_ID} ArrayTaskId=${SLURM_ARRAY_TASK_ID} "
-            "Partition=${FAKE_SCONTROL_PARTITION:-normal} NumNodes=1 NumCPUs=32 "
-            "NumTasks=1 CPUs/Task=32 NtasksPerN:B:S:C=1:0:*:* "
-            "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-126500M} "
+            "Partition=${FAKE_SCONTROL_PARTITION:-normal} NumNodes=1 NumCPUs=30 "
+            "NumTasks=1 CPUs/Task=30 NtasksPerN:B:S:C=1:0:*:* "
+            "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-110610M} "
             "TimeLimit=${FAKE_SCONTROL_TIME_LIMIT:-1-00:00:00} "
             "OverSubscribe=${FAKE_SCONTROL_EXCLUSIVE:-EXCLUSIVE}\"\n"
         )
@@ -386,11 +386,11 @@ for spin in (1, 2):
                 "SLURM_JOB_PARTITION": "normal",
                 "SLURM_ARRAY_TASK_ID": str(task),
                 "SLURM_ARRAY_TASK_COUNT": "4",
-                "SLURM_CPUS_PER_TASK": "32",
+                "SLURM_CPUS_PER_TASK": "30",
                 "SLURM_NTASKS": "1",
                 "SLURM_JOB_NUM_NODES": "1",
                 "SLURM_TASKS_PER_NODE": "1",
-                "SLURM_MEM_PER_NODE": "126500",
+                "SLURM_MEM_PER_NODE": "110610",
                 "SLURM_JOB_ID": str(9100 + task),
                 "SLURM_ARRAY_JOB_ID": "9001",
             }
@@ -483,10 +483,10 @@ for spin in (1, 2):
                 manifest["mpirun"]["absolute_path"], str(self.fake_mpirun)
             )
         self.assertEqual(phase_manifest["scheduler"]["partition"], "normal")
-        self.assertEqual(phase_manifest["scheduler"]["cpus_per_task"], 32)
+        self.assertEqual(phase_manifest["scheduler"]["cpus_per_task"], 30)
         self.assertEqual(phase_manifest["scheduler"]["ntasks"], 1)
         self.assertEqual(
-            phase_manifest["scheduler"]["observed"]["memory_raw"], "126500M"
+            phase_manifest["scheduler"]["observed"]["memory_raw"], "110610M"
         )
         self.assertEqual(
             phase_manifest["scheduler"]["observed"]["time_limit_raw"],
@@ -898,11 +898,11 @@ for spin in (1, 2):
             "SLURM_JOB_PARTITION": "normal",
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_ARRAY_TASK_COUNT": "4",
-            "SLURM_CPUS_PER_TASK": "32",
+            "SLURM_CPUS_PER_TASK": "30",
             "SLURM_NTASKS": "1",
             "SLURM_JOB_NUM_NODES": "1",
             "SLURM_TASKS_PER_NODE": "1",
-            "SLURM_MEM_PER_NODE": "126500",
+            "SLURM_MEM_PER_NODE": "110610",
             "SLURM_JOB_ID": "9003",
             "SLURM_ARRAY_JOB_ID": "9003",
         }
@@ -1065,8 +1065,8 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "weak-field",
             "zero-field free restart",
             "normal",
-            "32 OpenMP threads",
-            "126500 MB",
+            "30 OpenMP threads",
+            "110610 MB",
             "24 hours",
             "canonical absolute paths",
             "SOURCE_COMMIT",
