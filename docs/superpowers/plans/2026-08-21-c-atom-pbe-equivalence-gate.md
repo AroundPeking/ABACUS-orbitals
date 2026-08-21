@@ -355,8 +355,8 @@ class HpcContractTests(unittest.TestCase):
             "#SBATCH --partition=normal",
             "#SBATCH --array=0-3",
             "#SBATCH --ntasks-per-node=1",
-            "#SBATCH --cpus-per-task=30",
-            "#SBATCH --mem=110610M",
+            "#SBATCH --cpus-per-task=32",
+            "#SBATCH --mem=126500M",
             "#SBATCH --time=24:00:00",
             "export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK",
         ):
@@ -384,7 +384,7 @@ The runner must:
 2. resolve `ABACUS_ARTIFACT`, verify the executable and record its SHA256;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
 4. call `prepare_gate.py` once for its branch;
-5. run ABACUS through `mpirun -np 1 -ppn 1` with 30 OpenMP threads;
+5. run ABACUS through `mpirun -np 1 -ppn 1` with 32 OpenMP threads;
 6. require convergence, final energy, `eig_occ.txt`, both spin wavefunctions,
    and charge restart output after every phase;
 7. copy the completed phase into the next restart directory, rewrite only
@@ -473,7 +473,7 @@ git commit -m "docs(siab): package C PBE reference gate"
 - [ ] **Step 1: Verify the authenticated df_dcu channel and live resources**
 
 Use the existing OTP ControlMaster.  Query `sinfo` and verify that normal nodes
-still provide the requested 30 CPUs and 110610 MB.  If the live shape differs,
+still provide the requested 32 CPUs and 126500 MB.  If the live shape differs,
 update the resource constants and their tests before submission.
 
 - [ ] **Step 2: Stage the committed source and immutable assets**
@@ -484,7 +484,7 @@ the ABACUS artifact and verify hashes before writing the submission manifest.
 - [ ] **Step 3: Submit exactly one formal array**
 
 Run `submit_pbe_gate.sh` once.  Record its job ID and immediately verify each
-array task has partition `normal`, one node, one MPI rank, 30 CPUs, 110610 MB,
+array task has partition `normal`, one node, one MPI rank, 32 CPUs, 126500 MB,
 and 24 hours.  Do not resubmit while any formal task exists.
 
 - [ ] **Step 4: Audit completed branches**
