@@ -812,6 +812,11 @@ printf '%s' "${FAKE_SQUEUE_OUTPUT:-}"
 set -euo pipefail
 printf 'sacct %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
 [[ ${FAKE_SACCT_FAIL:-0} == 0 ]] || exit 32
+if [[ ${FAKE_CREATE_BRANCH_AFTER_CLAIM:-0} == 1 \
+      && -d $GATE_ROOT/.submission-claim ]]; then
+    mkdir -p "$GATE_ROOT/runs/fixed"
+    printf 'injected after claim\n' >"$GATE_ROOT/runs/fixed/BRANCH_PROVENANCE.json"
+fi
 printf '%s' "${FAKE_SACCT_OUTPUT:-}"
 ''',
         )
@@ -820,6 +825,17 @@ printf '%s' "${FAKE_SACCT_OUTPUT:-}"
             r'''#!/usr/bin/env bash
 set -euo pipefail
 printf 'sbatch %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
+if [[ ${FAKE_REQUIRE_DURABLE_RECEIPT:-0} == 1 ]]; then
+    claim="$GATE_ROOT/.submission-claim"
+    if [[ ! -f $claim/SBATCH_RECEIPT.txt || -L $claim/SBATCH_RECEIPT.txt \
+          || -s $claim/SBATCH_RECEIPT.txt \
+          || ! -f $claim/SBATCH_STDERR.txt || -L $claim/SBATCH_STDERR.txt \
+          || -s $claim/SBATCH_STDERR.txt \
+          || ! -f $claim/RECEIPT_FILES_PREPARED.json \
+          || -L $claim/RECEIPT_FILES_PREPARED.json ]]; then
+        exit 41
+    fi
+fi
 count=0
 [[ ! -f $FAKE_SBATCH_COUNT ]] || count=$(<"$FAKE_SBATCH_COUNT")
 printf '%s\n' "$((count + 1))" >"$FAKE_SBATCH_COUNT"
@@ -837,6 +853,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.pseudo.write_text("pseudo\n")
         self.orbital.write_text("orbital\n")
         self.gate_root = self.base / "gate"
+        self.source_commit = "0123456789abcdef0123456789abcdef01234567"
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -856,6 +873,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
                 "PSEUDO_SOURCE": str(self.pseudo),
                 "ORBITAL_SOURCE": str(self.orbital),
                 "PYTHON_EXE": sys.executable,
+                "SOURCE_COMMIT": self.source_commit,
                 "FAKE_SCHEDULER_LOG": str(self.scheduler_log),
                 "FAKE_SBATCH_COUNT": str(self.sbatch_count),
             }
@@ -863,9 +881,9 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         environment.update({key: str(value) for key, value in overrides.items()})
         return environment
 
-    def _run_submitter(self, **overrides):
+    def _run_submitter(self, script=SUBMITTER, **overrides):
         return subprocess.run(
-            ["bash", str(SUBMITTER)],
+            ["bash", str(script)],
             check=False,
             capture_output=True,
             text=True,
@@ -885,6 +903,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "PSEUDO_SOURCE",
             "ORBITAL_SOURCE",
             "PYTHON_EXE",
+            "SOURCE_COMMIT",
             "SUBMITTED_JOB_ID.txt",
             "SUBMISSION_PROVENANCE.json",
             "squeue",
@@ -897,6 +916,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         ):
             self.assertIn(value, text)
         self.assertNotIn("--dependency", text)
+        self.assertNotIn("git -C", text)
 
     def test_readme_documents_physical_and_operational_gate(self):
         text = README.read_text()
@@ -911,6 +931,9 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "126500 MB",
             "24 hours",
             "canonical absolute paths",
+            "SOURCE_COMMIT",
+            "standalone source archive",
+            "does not require `.git`",
             "login node",
             "DIAGNOSTIC_ONLY",
             "PBE_GATE_PASSED",
@@ -930,17 +953,20 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         )
         self.assertEqual(provenance["status"], "SUBMITTED")
         self.assertEqual(provenance["job_id"], "4242")
-        self.assertEqual(provenance["source_commit"], subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip())
+        self.assertEqual(provenance["source_commit"], self.source_commit)
         self.assertEqual(
             provenance["resolved_paths"]["gate_root"], str(self.gate_root)
         )
-        for name in ("abacus", "pseudo", "orbital", "runner", "submitter"):
+        for name in (
+            "abacus",
+            "pseudo",
+            "orbital",
+            "gate_contract",
+            "prepare_gate",
+            "audit_gate",
+            "runner",
+            "submitter",
+        ):
             record = provenance["files"][name]
             self.assertGreater(record["size"], 0)
             self.assertRegex(record["sha256"], r"^[0-9a-f]{64}$")
@@ -951,6 +977,30 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertIn(f"PSEUDO_ASSET={self.pseudo}", log)
         self.assertIn(f"ORBITAL_ASSET={self.orbital}", log)
         self.assertNotIn("--dependency", log)
+
+    def test_python_and_source_commit_are_required_and_validated(self):
+        cases = (
+            ("missing Python", {"PYTHON_EXE": ""}),
+            ("missing commit", {"SOURCE_COMMIT": ""}),
+            ("short commit", {"SOURCE_COMMIT": "a" * 39}),
+            ("uppercase commit", {"SOURCE_COMMIT": "A" * 40}),
+        )
+        for index, (label, overrides) in enumerate(cases):
+            with self.subTest(label=label):
+                completed = self._run_submitter(
+                    GATE_ROOT=self.base / f"required-{index}", **overrides
+                )
+                self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_standalone_source_archive_submits_without_parent_git(self):
+        archive_parent = self.base / "standalone"
+        archive = archive_parent / "pbe_reference_gate"
+        shutil.copytree(ROOT, archive)
+        self.assertFalse(any((path / ".git").exists() for path in archive.parents))
+        completed = self._run_submitter(script=archive / SUBMITTER.name)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._submission_count(), 1)
 
     def test_second_invocation_never_submits_again(self):
         first = self._run_submitter()
@@ -1037,6 +1087,19 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertEqual(sum(process.returncode == 0 for process in processes), 1)
         self.assertEqual(self._submission_count(), 1, results)
 
+    def test_branch_evidence_created_after_claim_blocks_sbatch(self):
+        completed = self._run_submitter(FAKE_CREATE_BRANCH_AFTER_CLAIM="1")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertTrue(
+            (self.gate_root / "runs/fixed/BRANCH_PROVENANCE.json").is_file()
+        )
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_receipt_files_are_durable_before_sbatch_begins(self):
+        completed = self._run_submitter(FAKE_REQUIRE_DURABLE_RECEIPT="1")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(self._submission_count(), 1)
+
     def test_sbatch_failure_after_job_id_retains_receipt_and_blocks_retry(self):
         first = self._run_submitter(FAKE_SBATCH_EXIT="99")
         self.assertNotEqual(first.returncode, 0)
@@ -1068,6 +1131,42 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         completed = self._run_submitter()
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("non-symlink regular file", completed.stderr)
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_runtime_source_files_must_be_nonempty_local_regular_files(self):
+        for index, mutation in enumerate(("empty", "symlink")):
+            with self.subTest(mutation=mutation):
+                archive = self.base / f"runtime-{index}/pbe_reference_gate"
+                shutil.copytree(ROOT, archive)
+                git_environment = os.environ.copy()
+                git_environment.update(
+                    {
+                        "GIT_AUTHOR_NAME": "Test",
+                        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                        "GIT_COMMITTER_NAME": "Test",
+                        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+                    }
+                )
+                subprocess.run(
+                    ["git", "init", "-q"], cwd=archive.parent, check=True
+                )
+                subprocess.run(
+                    ["git", "commit", "--allow-empty", "-q", "-m", "fixture"],
+                    cwd=archive.parent,
+                    env=git_environment,
+                    check=True,
+                )
+                runtime = archive / "audit_gate.py"
+                runtime.unlink()
+                if mutation == "empty":
+                    runtime.touch()
+                else:
+                    runtime.symlink_to(ROOT / "audit_gate.py")
+                completed = self._run_submitter(
+                    script=archive / SUBMITTER.name,
+                    GATE_ROOT=self.base / f"runtime-gate-{index}",
+                )
+                self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(self._submission_count(), 0)
 
 

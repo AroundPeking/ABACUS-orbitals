@@ -470,12 +470,17 @@ ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-2166
 PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
 ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
 PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
+SOURCE_COMMIT=<40-lowercase-hex-commit-used-to-create-the-source-archive>
 ```
 
 It resolves every path, records hashes in `SUBMISSION_PROVENANCE.json`, and
 submits the four-task PBE array.  The README explains that the audit is run on
 the login node after all four tasks finish and that only
 `status=PBE_GATE_PASSED` permits writing the Delta-ST plan.
+
+Task 6 copies the committed gate directory as a standalone archive without a
+`.git` directory and passes `SOURCE_COMMIT` explicitly.  Submission provenance
+must include SHA256 and size records for all five runtime source files.
 
 - [x] **Step 4: Run tests and shell syntax checks**
 
@@ -495,6 +500,18 @@ GIT_AUTHOR_NAME=Codex GIT_AUTHOR_EMAIL=codex@openai.com \
 GIT_COMMITTER_NAME=AroundPeking GIT_COMMITTER_EMAIL=gonghuanjing@iphy.ac.cn \
 git commit -m "docs(siab): package C PBE reference gate"
 ```
+
+#### Task 5 review hardening
+
+- [x] Remove runtime dependence on `.git`; require explicit `SOURCE_COMMIT` and
+  required `PYTHON_EXE`.
+- [x] Recheck formal evidence after the durable claim and final scheduler
+  query, while accepting only the current claim identity.
+- [x] Create and fsync exclusive receipt files before `sbatch`, then append to
+  the same inodes and fsync them again after return.
+- [x] Hash and size all five standalone runtime source files.
+- [x] Add standalone, race, receipt-order, and runtime-file regression tests.
+- [x] Commit the review fix separately without amending Task 5.
 
 ### Task 6: Stage and run the PBE gate on df_dcu
 

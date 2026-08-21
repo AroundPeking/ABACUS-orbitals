@@ -3,9 +3,11 @@
 set -euo pipefail
 
 MODULE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+GATE_CONTRACT="$MODULE_DIR/gate_contract.py"
+PREPARE_GATE="$MODULE_DIR/prepare_gate.py"
+AUDIT_GATE="$MODULE_DIR/audit_gate.py"
 RUNNER="$MODULE_DIR/run_pbe_branch.slurm"
 SUBMITTER="$MODULE_DIR/submit_pbe_gate.sh"
-PYTHON_EXE=${PYTHON_EXE:-python3}
 
 fail() {
     printf '%s\n' "$*" >&2
@@ -17,9 +19,14 @@ require_environment() {
     [[ -n ${!name:-} ]] || fail "required environment variable is missing: $name"
 }
 
-for required in GATE_ROOT ABACUS_ARTIFACT PSEUDO_SOURCE ORBITAL_SOURCE; do
+for required in \
+    GATE_ROOT ABACUS_ARTIFACT PSEUDO_SOURCE ORBITAL_SOURCE PYTHON_EXE SOURCE_COMMIT
+do
     require_environment "$required"
 done
+
+[[ $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]] \
+    || fail "SOURCE_COMMIT must be exactly 40 lowercase hexadecimal characters"
 
 PYTHON_COMMAND=$(command -v -- "$PYTHON_EXE") \
     || fail "PYTHON_EXE is not executable: $PYTHON_EXE"
@@ -86,6 +93,9 @@ PYTHON_REAL=$(resolve_regular "$PYTHON_COMMAND" PYTHON_EXE 1 1)
 ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS_ARTIFACT 1)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_SOURCE" PSEUDO_SOURCE 0)
 ORBITAL_REAL=$(resolve_regular "$ORBITAL_SOURCE" ORBITAL_SOURCE 0)
+GATE_CONTRACT_REAL=$(resolve_regular "$GATE_CONTRACT" gate_contract.py 0)
+PREPARE_GATE_REAL=$(resolve_regular "$PREPARE_GATE" prepare_gate.py 0)
+AUDIT_GATE_REAL=$(resolve_regular "$AUDIT_GATE" audit_gate.py 0)
 RUNNER_REAL=$(resolve_regular "$RUNNER" run_pbe_branch.slurm 0)
 SUBMITTER_REAL=$(resolve_regular "$SUBMITTER" submit_pbe_gate.sh 0)
 GATE_ROOT_REAL=$(resolve_gate_root "$GATE_ROOT")
@@ -95,9 +105,6 @@ for value in "$GATE_ROOT_REAL" "$ABACUS_REAL" "$PSEUDO_REAL" "$ORBITAL_REAL" "$P
         || fail "resolved export paths must not contain commas or newlines: $value"
 done
 
-SOURCE_COMMIT=$(git -C "$MODULE_DIR" rev-parse --verify HEAD) \
-    || fail "cannot determine source commit"
-[[ $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]] || fail "invalid source commit: $SOURCE_COMMIT"
 JOB_NAME=$(
     "$PYTHON_REAL" - "$GATE_ROOT_REAL" <<'PY'
 import hashlib
@@ -108,13 +115,18 @@ print(f"c_pbe_gate_{digest}")
 PY
 )
 
-check_gate_is_unstarted() {
-    "$PYTHON_REAL" - "$GATE_ROOT_REAL" <<'PY'
+check_formal_evidence() {
+    local allow_claim=$1 claim_token=${2:-}
+    "$PYTHON_REAL" - "$GATE_ROOT_REAL" "$allow_claim" "$claim_token" <<'PY'
+import json
 import os
+import stat
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
+allow_claim = sys.argv[2] == "1"
+claim_token = sys.argv[3]
 root_markers = (
     "SUBMITTED_JOB_ID.txt",
     "SUBMISSION_PROVENANCE.json",
@@ -131,7 +143,25 @@ for name in root_markers:
         raise SystemExit(f"gate root already contains submission/result evidence: {path}")
 claim = root / ".submission-claim"
 if os.path.lexists(claim):
-    raise SystemExit(f"gate root already has an immutable submission claim: {claim}")
+    if not allow_claim:
+        raise SystemExit(f"gate root already has an immutable submission claim: {claim}")
+    metadata = claim.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise SystemExit(f"submission claim must be a non-symlink directory: {claim}")
+    claim_record = claim / "SUBMISSION_CLAIM.json"
+    if not os.path.lexists(claim_record):
+        raise SystemExit(f"submission claim identity is missing: {claim_record}")
+    record_metadata = claim_record.lstat()
+    if stat.S_ISLNK(record_metadata.st_mode) or not stat.S_ISREG(record_metadata.st_mode):
+        raise SystemExit(f"submission claim identity must be a regular file: {claim_record}")
+    try:
+        record = json.loads(claim_record.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"cannot read submission claim identity: {error}")
+    if record.get("status") != "CLAIMED" or record.get("claim_token") != claim_token:
+        raise SystemExit("submission claim is not owned by this submitter")
+elif allow_claim:
+    raise SystemExit(f"submission claim disappeared: {claim}")
 runs = root / "runs"
 if os.path.lexists(runs):
     metadata = runs.lstat()
@@ -213,17 +243,24 @@ PY
 fi
 
 query_scheduler job-name "$JOB_NAME" "$QUERY_DIR/preclaim"
-check_gate_is_unstarted
+check_formal_evidence 0
 
 CLAIM="$GATE_ROOT_REAL/.submission-claim"
+CLAIM_TOKEN=$(
+    "$PYTHON_REAL" - <<'PY'
+import secrets
+
+print(secrets.token_hex(32))
+PY
+)
 if ! mkdir "$CLAIM" 2>/dev/null; then
     query_scheduler job-name "$JOB_NAME" "$QUERY_DIR/concurrent-claim"
     fail "another submitter already owns the immutable submission claim: $CLAIM"
 fi
 
 write_json_noreplace() {
-    local target=$1 status=$2 message=$3
-    "$PYTHON_REAL" - "$target" "$status" "$message" <<'PY'
+    local target=$1 status=$2 message=$3 claim_token=${4:-}
+    "$PYTHON_REAL" - "$target" "$status" "$message" "$claim_token" <<'PY'
 import json
 import os
 import sys
@@ -237,6 +274,8 @@ payload = {
     "message": sys.argv[3],
     "recorded_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
 }
+if sys.argv[4]:
+    payload["claim_token"] = sys.argv[4]
 temporary = target.parent / f".{target.name}.tmp.{os.getpid()}"
 descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 try:
@@ -257,9 +296,10 @@ PY
 }
 
 write_json_noreplace "$CLAIM/SUBMISSION_CLAIM.json" CLAIMED \
-    "exclusive submission claim acquired before sbatch"
+    "exclusive submission claim acquired before sbatch" "$CLAIM_TOKEN"
 
 query_scheduler job-name "$JOB_NAME" "$CLAIM/pre_submit_scheduler"
+check_formal_evidence 1 "$CLAIM_TOKEN"
 
 EXPORT_MAP="ALL,GATE_ROOT=$GATE_ROOT_REAL,ABACUS_ARTIFACT=$ABACUS_REAL,PSEUDO_ASSET=$PSEUDO_REAL,ORBITAL_ASSET=$ORBITAL_REAL,PYTHON_EXE=$PYTHON_REAL"
 SBATCH_COMMAND=(
@@ -273,8 +313,38 @@ SBATCH_COMMAND=(
 RECEIPT="$CLAIM/SBATCH_RECEIPT.txt"
 SBATCH_STDERR="$CLAIM/SBATCH_STDERR.txt"
 
+"$PYTHON_REAL" - "$RECEIPT" "$SBATCH_STDERR" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+paths = tuple(Path(filename) for filename in sys.argv[1:])
+created = []
+try:
+    for path in paths:
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        created.append(path)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    directory = os.open(paths[0].parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+except Exception:
+    for path in created:
+        path.unlink(missing_ok=True)
+    raise
+PY
+write_json_noreplace "$CLAIM/RECEIPT_FILES_PREPARED.json" RECEIPT_FILES_PREPARED \
+    "exclusive empty receipt files and claim directory fsynced before sbatch"
+
 set +e
-"${SBATCH_COMMAND[@]}" >"$RECEIPT" 2>"$SBATCH_STDERR"
+"${SBATCH_COMMAND[@]}" >>"$RECEIPT" 2>>"$SBATCH_STDERR"
 SBATCH_STATUS=$?
 set -e
 "$PYTHON_REAL" - "$RECEIPT" "$SBATCH_STDERR" <<'PY'
@@ -326,8 +396,9 @@ JOB_ID_TEMP="$CLAIM/SUBMITTED_JOB_ID.txt"
 
 "$PYTHON_REAL" - \
     "$PROVENANCE_TEMP" "$JOB_ID_TEMP" "$GATE_ROOT_REAL" "$ABACUS_REAL" \
-    "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL" "$RUNNER_REAL" \
-    "$SUBMITTER_REAL" "$RECEIPT" "$SOURCE_COMMIT" "$JOB_ID" "$JOB_NAME" \
+    "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL" "$GATE_CONTRACT_REAL" \
+    "$PREPARE_GATE_REAL" "$AUDIT_GATE_REAL" "$RUNNER_REAL" "$SUBMITTER_REAL" \
+    "$RECEIPT" "$SOURCE_COMMIT" "$JOB_ID" "$JOB_NAME" \
     "$SUBMITTED_AT_UTC" "${SBATCH_COMMAND[@]}" <<'PY'
 import hashlib
 import json
@@ -343,6 +414,9 @@ from pathlib import Path
     pseudo,
     orbital,
     python,
+    gate_contract,
+    prepare_gate,
+    audit_gate,
     runner,
     submitter,
     receipt,
@@ -376,6 +450,9 @@ payload = {
         "pseudo_source": pseudo,
         "orbital_source": orbital,
         "python_exe": python,
+        "gate_contract": gate_contract,
+        "prepare_gate": prepare_gate,
+        "audit_gate": audit_gate,
         "runner": runner,
         "submitter": submitter,
     },
@@ -391,6 +468,9 @@ payload = {
         "pseudo": file_record(pseudo),
         "orbital": file_record(orbital),
         "python": file_record(python),
+        "gate_contract": file_record(gate_contract),
+        "prepare_gate": file_record(prepare_gate),
+        "audit_gate": file_record(audit_gate),
         "runner": file_record(runner),
         "submitter": file_record(submitter),
         "sbatch_receipt": file_record(receipt),

@@ -149,6 +149,14 @@ three physical assets must be nonempty non-symlink regular files, and ABACUS
 must be executable.  The runner receives the resolved pseudopotential and
 orbital as `PSEUDO_ASSET` and `ORBITAL_ASSET`.
 
+Task 6 stages the gate directory as a standalone source archive without
+`.git`.  It must pass the exact staging commit through required
+`SOURCE_COMMIT`, which is validated as 40 lowercase hexadecimal characters.
+`PYTHON_EXE` is also required explicitly.  Submission provenance records the
+size and SHA256 of `gate_contract.py`, `prepare_gate.py`, `audit_gate.py`,
+`run_pbe_branch.slurm`, and `submit_pbe_gate.sh`; each runtime source must be a
+nonempty non-symlink regular file.
+
 The Slurm job name is a stable hash of the canonical gate root.  Before and
 after acquiring the claim, the submitter queries both `squeue` and `sacct`;
 failure or malformed output from either command makes scheduler state
@@ -156,17 +164,24 @@ unobservable and stops submission.  Any prior scheduler record, immutable job
 ID, claim, formal branch, result, pass marker, or failure marker blocks reuse
 of that root.  The submitter creates `.submission-claim/` atomically before
 calling `sbatch`, and only its owner can submit the committed four-task array.
-It never adds a Delta-ST dependency.
+After durably recording a random claim identity and completing the final
+scheduler query, it immediately repeats the formal-evidence check.  That check
+accepts only its own claim and rejects branch, result, failure, job-ID, or
+submission-provenance evidence created during the race window.  It never adds
+a Delta-ST dependency.
 
-The shell opens a durable receipt before invoking `sbatch`, so a returned job
-ID survives interruption before final publication.  A nonzero `sbatch` exit or
-malformed success receipt produces `SUBMISSION_AMBIGUOUS.json`; the claim is
-retained and the same root must never be retried.  A unique numeric receipt is
-published without replacement as `SUBMITTED_JOB_ID.txt`, together with atomic
+The shell creates both receipt files with exclusive-create semantics, fsyncs
+both files and the claim directory, and only then invokes `sbatch` by appending
+through those existing inodes.  It fsyncs their contents and the claim
+directory again after return, so a returned job ID survives interruption
+before final publication.  A nonzero `sbatch` exit or malformed success
+receipt produces `SUBMISSION_AMBIGUOUS.json`; the claim is retained and the
+same root must never be retried.  A unique numeric receipt is published without
+replacement as `SUBMITTED_JOB_ID.txt`, together with atomic
 `SUBMISSION_PROVENANCE.json` containing the job ID, UTC time, exact command,
-source commit, resolved paths, and file sizes and SHA256 hashes.  These records
-authorize observation and audit only; they do not constitute physical
-acceptance.
+explicit source commit, resolved paths, and file sizes and SHA256 hashes.
+These records authorize observation and audit only; they do not constitute
+physical acceptance.
 
 ## Calculation branches
 

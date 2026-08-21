@@ -38,7 +38,10 @@ is authorized.
 
 Set canonical absolute paths.  The ABACUS executable, pseudopotential, and
 orbital must be nonempty local regular files, not symbolic links.  The
-submitter resolves the Python interpreter to its real executable.
+submitter resolves the required Python interpreter to its real executable.
+Task 6 stages this directory as a standalone source archive.  That archive
+does not require `.git`; `SOURCE_COMMIT` is the exact 40-character lowercase
+Git commit used to create it and is supplied explicitly by the staging step.
 
 ```bash
 export GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
@@ -46,6 +49,7 @@ export ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/bui
 export PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
 export ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
 export PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
+export SOURCE_COMMIT=0123456789abcdef0123456789abcdef01234567
 
 ./submit_pbe_gate.sh
 ```
@@ -53,8 +57,11 @@ export PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
 Successful submission creates immutable `SUBMITTED_JOB_ID.txt` and atomic
 `SUBMISSION_PROVENANCE.json`.  The provenance records the resolved paths,
 file sizes and SHA256 hashes, source commit, exact `sbatch` command, job ID,
-and UTC submission time.  The durable receipt remains under
-`.submission-claim/`, including when `sbatch` exits ambiguously.
+and UTC submission time.  Runtime provenance covers `gate_contract.py`,
+`prepare_gate.py`, `audit_gate.py`, `run_pbe_branch.slurm`, and
+`submit_pbe_gate.sh`; each must be a nonempty non-symlink regular file.  The
+durable receipt files are created exclusively and fsynced before `sbatch`
+starts, and remain under `.submission-claim/` when submission is ambiguous.
 
 ## Post-completion audit
 
