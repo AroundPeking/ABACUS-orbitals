@@ -9,10 +9,16 @@ def render_input(
 ) -> str:
     if mode not in VALID_MODES:
         raise ValueError(f"unsupported mode: {mode}")
-    if mode in {"field", "free"} and field_dir not in {0, 1, 2}:
-        raise ValueError("field_dir must be 0, 1, or 2")
     if mode == "fixed" and field_dir is not None:
         raise ValueError("fixed mode does not accept field_dir")
+    if mode in {"field", "free"} and (
+        type(field_dir) is not int or field_dir not in {0, 1, 2}
+    ):
+        raise ValueError("field_dir must be an integer 0, 1, or 2")
+    if mode == "field" and restart:
+        raise ValueError("field mode requires restart=False")
+    if mode == "free" and not restart:
+        raise ValueError("free mode requires restart=True")
 
     values = [
         ("INPUT_PARAMETERS", None),
@@ -32,6 +38,7 @@ def render_input(
         ("ks_solver", "genelpa"),
         ("dft_functional", "pbe"),
         ("symmetry", "0"),
+        ("gamma_only", "1"),
         ("kpar", "1"),
         ("pseudo_dir", "./"),
         ("orbital_dir", "./"),
