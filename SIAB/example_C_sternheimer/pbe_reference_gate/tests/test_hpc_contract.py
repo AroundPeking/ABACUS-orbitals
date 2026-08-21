@@ -70,6 +70,50 @@ class HpcStaticContractTests(unittest.TestCase):
 
 
 class RuntimeFileContractTests(unittest.TestCase):
+    @staticmethod
+    def _restart_phase(root):
+        phase = Path(root).resolve() / "phase"
+        out = phase / "OUT.C_PBE_REFERENCE_GATE"
+        out.mkdir(parents=True)
+        for name in audit_gate.RESTART_FILES:
+            (out / name).write_text(f"restart {name}\n")
+        return phase, out
+
+    @staticmethod
+    def _write_restart_load_logs(phase, wfc_paths, charge_paths):
+        (phase / "abacus.stdout").write_text(
+            "".join(
+                f"Read NAO wave functions from {path}\n" for path in wfc_paths
+            )
+        )
+        (phase / "OUT.C_PBE_REFERENCE_GATE/running_scf.log").write_text(
+            "".join(
+                f"Read in electron density: {path}\n" for path in charge_paths
+            )
+        )
+
+    @staticmethod
+    def _scheduler_fixture():
+        raw = (
+            "JobId=9100 ArrayJobId=9001 ArrayTaskId=0 Partition=normal "
+            "NumNodes=1 NumCPUs=32 NumTasks=1 CPUs/Task=32 "
+            "MinMemoryNode=126500M TimeLimit=1-00:00:00 "
+            "OverSubscribe=EXCLUSIVE\n"
+        )
+        environment = {
+            "SLURM_JOB_PARTITION": "normal",
+            "SLURM_ARRAY_TASK_ID": "0",
+            "SLURM_ARRAY_TASK_COUNT": "4",
+            "SLURM_CPUS_PER_TASK": "32",
+            "SLURM_NTASKS": "1",
+            "SLURM_JOB_NUM_NODES": "1",
+            "SLURM_TASKS_PER_NODE": "1",
+            "SLURM_MEM_PER_NODE": "126500",
+            "SLURM_JOB_ID": "9100",
+            "SLURM_ARRAY_JOB_ID": "9001",
+        }
+        return raw, environment
+
     def test_restart_copy_retries_short_writes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -87,6 +131,96 @@ class RuntimeFileContractTests(unittest.TestCase):
 
             self.assertEqual(destination.read_bytes(), content)
             self.assertEqual(record["size"], len(content))
+
+    def test_restart_load_accepts_real_relative_phase_local_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase, _ = self._restart_phase(tmp)
+            self._write_restart_load_logs(
+                phase,
+                (
+                    "OUT.C_PBE_REFERENCE_GATE/wfs1_nao.txt",
+                    "OUT.C_PBE_REFERENCE_GATE/wfs2_nao.txt",
+                ),
+                (
+                    "OUT.C_PBE_REFERENCE_GATE/chgs1.cube",
+                    "OUT.C_PBE_REFERENCE_GATE/chgs2.cube",
+                ),
+            )
+            evidence = audit_gate._restart_load_lines(phase)
+            self.assertEqual(len(evidence["wfc_load_lines"]), 2)
+            self.assertEqual(len(evidence["charge_load_lines"]), 2)
+
+    def test_restart_load_accepts_absolute_phase_local_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase, out = self._restart_phase(tmp)
+            self._write_restart_load_logs(
+                phase,
+                (out / "wfs1_nao.txt", out / "wfs2_nao.txt"),
+                (out / "chgs1.cube", out / "chgs2.cube"),
+            )
+            evidence = audit_gate._restart_load_lines(phase)
+            self.assertEqual(len(evidence["wfc_load_lines"]), 2)
+            self.assertEqual(len(evidence["charge_load_lines"]), 2)
+
+    def test_restart_load_rejects_traversal_and_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            external = base / "external"
+            external.mkdir()
+            for name in audit_gate.RESTART_FILES:
+                (external / name).write_text(f"external {name}\n")
+            for label, paths in (
+                (
+                    "traversal",
+                    (
+                        "../../external/wfs1_nao.txt",
+                        "../../external/wfs2_nao.txt",
+                        "../../external/chgs1.cube",
+                        "../../external/chgs2.cube",
+                    ),
+                ),
+                (
+                    "symlink",
+                    (
+                        "escape/wfs1_nao.txt",
+                        "escape/wfs2_nao.txt",
+                        "escape/chgs1.cube",
+                        "escape/chgs2.cube",
+                    ),
+                ),
+            ):
+                with self.subTest(label=label):
+                    phase, _ = self._restart_phase(base / label)
+                    if label == "symlink":
+                        (phase / "escape").symlink_to(external, target_is_directory=True)
+                    self._write_restart_load_logs(phase, paths[:2], paths[2:])
+                    with self.assertRaisesRegex(ValueError, "phase-local.*restart path"):
+                        audit_gate._restart_load_lines(phase)
+
+    def test_scheduler_record_preserves_raw_scontrol_evidence(self):
+        raw, environment = self._scheduler_fixture()
+        fields = audit_gate._parse_scontrol_fields(raw)
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+            audit_gate, "_query_scheduler", return_value=(fields, raw)
+        ):
+            scheduler = audit_gate._scheduler_record("fixed")
+        self.assertEqual(scheduler["observed"]["raw_record"], raw)
+        self.assertEqual(
+            scheduler["observed"]["scontrol_sha256"],
+            audit_gate._sha256_bytes(raw.encode("utf-8")),
+        )
+
+    def test_scheduler_validator_rejects_tampered_raw_scontrol_evidence(self):
+        raw, environment = self._scheduler_fixture()
+        fields = audit_gate._parse_scontrol_fields(raw)
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+            audit_gate, "_query_scheduler", return_value=(fields, raw)
+        ):
+            scheduler = audit_gate._scheduler_record("fixed")
+        self.assertIsInstance(scheduler["observed"].get("raw_record"), str)
+        scheduler["observed"]["raw_record"] += "tampered\n"
+        with self.assertRaisesRegex(ValueError, "raw scontrol.*hash"):
+            audit_gate._validate_scheduler_record(scheduler, "fixed")
 
 
 class FakeHpcEndToEndTests(unittest.TestCase):
@@ -164,8 +298,14 @@ if phase.name in {"fixed_cold", "field_seed", "free_restart1"}:
 log = []
 if restart:
     for spin in (1, 2):
-        print(f"Read NAO wave functions from {out / ('wfs%d_nao.txt' % spin)}")
-        log.append(f"Read in electron density: {out / ('chgs%d.cube' % spin)}")
+        print(
+            "Read NAO wave functions from "
+            f"OUT.C_PBE_REFERENCE_GATE/wfs{spin}_nao.txt"
+        )
+        log.append(
+            "Read in electron density: "
+            f"OUT.C_PBE_REFERENCE_GATE/chgs{spin}.cube"
+        )
 log.extend(("#SCF IS CONVERGED#", f"!FINAL_ETOT_IS {energy:.16f} eV"))
 (out / "running_scf.log").write_text("\n".join(log) + "\n")
 

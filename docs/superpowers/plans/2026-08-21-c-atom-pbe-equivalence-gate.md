@@ -390,7 +390,8 @@ The implemented runner and auditor must:
 
 1. require numeric job/array identifiers and assert the live Slurm resource
    contract from a testable `scontrol show job -o` query before preparation,
-   including memory, 24-hour time limit, and exclusive allocation;
+   including memory, 24-hour time limit, and exclusive allocation; preserve
+   the exact raw scheduler record and its SHA256 for independent revalidation;
 2. resolve `ABACUS_ARTIFACT`, verify the executable and record its SHA256;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
 4. call `prepare_gate.py` once successfully for its branch, using a bounded
@@ -408,7 +409,9 @@ The implemented runner and auditor must:
    `PLANNED`;
 9. require exactly two wavefunction-load messages in `abacus.stdout` and two
    charge-load messages in `running_scf.log`, each naming the exact canonical
-   phase-local restart path, then upgrade restart provenance to `VERIFIED`;
+   phase-local restart file after relative paths are resolved against the phase
+   directory; accept equivalent absolute local paths and reject any escape,
+   then upgrade restart provenance to `VERIFIED`;
 10. write `PHASE_COMPLETE.json` only after the phase input, 22-band 3/1
     occupations, energy, executable, resources, outputs and restart evidence
     have been rehashed;

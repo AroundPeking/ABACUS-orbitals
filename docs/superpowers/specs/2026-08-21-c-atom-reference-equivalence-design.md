@@ -89,10 +89,11 @@ Numeric Slurm job and array identifiers are mandatory.  Before any branch is
 created, the runner reads the live `scontrol show job -o` record and verifies
 the partition, node/rank/thread counts, requested memory, 24-hour limit, and
 exclusive allocation; manifests preserve both normalized values and the raw
-scheduler evidence.  Concurrent branch preparation is serialized by a stable,
-array-owned guard plus a bounded preparation mutex, so removing one mutex
-cannot invalidate another task's guard observation.  A pre-existing branch is
-never reused or overwritten.
+scheduler record together with its SHA256, and audits reparse the raw record
+and verify its hash and normalized content.  Concurrent branch preparation is
+serialized by a stable, array-owned guard plus a bounded preparation mutex, so
+removing one mutex cannot invalidate another task's guard observation.  A
+pre-existing branch is never reused or overwritten.
 
 Every phase records `abacus.stdout`, `abacus.stderr`, the unique converged
 energy, the complete 22-band occupations for both spins, and the four
@@ -119,9 +120,10 @@ A restart is upgraded to `VERIFIED` only if `restart_input_snapshot/` is a
 non-symlink phase-local directory, `abacus.stdout` contains exactly the two
 messages reading the canonical phase-local paths of `wfs1_nao.txt` and
 `wfs2_nao.txt`, and `running_scf.log` contains exactly the two messages reading
-the canonical phase-local paths of `chgs1.cube` and `chgs2.cube`.  Filename-only
-or external-path matches are rejected.  Only then is `PHASE_COMPLETE.json`
-published.  A branch obtains
+the canonical phase-local paths of `chgs1.cube` and `chgs2.cube`.  Real relative
+paths are resolved against the phase directory; equivalent absolute
+phase-local paths are also accepted.  External, traversal, or symlink escapes
+are rejected.  Only then is `PHASE_COMPLETE.json` published.  A branch obtains
 `BRANCH_COMPLETE.json` only after its complete fixed chain
 `fixed_cold -> fixed_restart` or free chain
 `field_seed -> free_restart1 -> free_restart2` has been rehashed.  Branches do

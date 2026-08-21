@@ -405,6 +405,7 @@ def _scheduler_record(branch: str) -> dict[str, object]:
             "memory_raw": memory_raw,
             "time_limit_raw": time_limit_raw,
             "over_subscribe": fields["OverSubscribe"],
+            "raw_record": raw_scontrol,
             "scontrol_sha256": _sha256_bytes(raw_scontrol.encode("utf-8")),
         },
     }
@@ -441,6 +442,7 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
         "memory_raw",
         "time_limit_raw",
         "over_subscribe",
+        "raw_record",
         "scontrol_sha256",
     }
     if not isinstance(observed, dict) or set(observed) != expected_observed_keys:
@@ -452,6 +454,7 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
         "memory_raw",
         "time_limit_raw",
         "over_subscribe",
+        "raw_record",
         "scontrol_sha256",
     }
     integer_fields = {
@@ -465,6 +468,26 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
         type(observed[name]) is not int for name in integer_fields
     ):
         raise ValueError(f"{branch} scheduler observed evidence is invalid")
+    raw_record = observed["raw_record"]
+    if _sha256_bytes(raw_record.encode("utf-8")) != observed["scontrol_sha256"]:
+        raise ValueError(f"{branch} raw scontrol record hash is invalid")
+    raw_fields = _parse_scontrol_fields(raw_record)
+    raw_memory, _ = _scontrol_memory(raw_fields)
+    raw_values = {
+        "job_id": raw_fields["JobId"],
+        "array_job_id": raw_fields["ArrayJobId"],
+        "array_task_id": int(raw_fields["ArrayTaskId"]),
+        "partition": raw_fields["Partition"],
+        "num_nodes": _scontrol_positive_int(raw_fields, "NumNodes"),
+        "num_cpus": _scontrol_positive_int(raw_fields, "NumCPUs"),
+        "num_tasks": _scontrol_positive_int(raw_fields, "NumTasks"),
+        "cpus_per_task": _scontrol_positive_int(raw_fields, "CPUs/Task"),
+        "memory_raw": raw_memory,
+        "time_limit_raw": raw_fields["TimeLimit"],
+        "over_subscribe": raw_fields["OverSubscribe"],
+    }
+    if any(observed[key] != raw_value for key, raw_value in raw_values.items()):
+        raise ValueError(f"{branch} raw scontrol record content is inconsistent")
     if (
         observed["array_job_id"] != value["array_job_id"]
         or observed["array_task_id"] != value["array_task_id"]
@@ -973,15 +996,23 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
         raise ValueError(
             "running_scf.log must contain exactly two charge-density load messages"
         )
-    out = phase_root / "OUT.C_PBE_REFERENCE_GATE"
+    canonical_phase = phase_root.resolve(strict=True)
+    out = canonical_phase / "OUT.C_PBE_REFERENCE_GATE"
     canonical_out = out.resolve(strict=True)
-    if out.absolute() != canonical_out:
+    if out != canonical_out:
         raise ValueError("restart OUT directory must be a canonical local directory")
 
     def require_exact_path(line: str, marker: str, name: str) -> None:
         loaded_path = line.split(marker, 1)[1].strip()
         expected_path = (canonical_out / name).resolve(strict=True)
-        if loaded_path != str(expected_path):
+        logged = Path(loaded_path)
+        candidate = logged if logged.is_absolute() else canonical_phase / logged
+        try:
+            canonical_candidate = candidate.resolve(strict=True)
+            canonical_candidate.relative_to(canonical_phase)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError):
+            canonical_candidate = None
+        if canonical_candidate != expected_path:
             raise ValueError(
                 f"restart load evidence must use the exact phase-local restart path: "
                 f"{expected_path}"
