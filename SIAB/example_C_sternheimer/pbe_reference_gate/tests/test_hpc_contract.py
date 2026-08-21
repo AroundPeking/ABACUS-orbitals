@@ -827,37 +827,34 @@ for spin in (1, 2):
             audit_gate._validate_scheduler_record(scheduler, "fixed")
 
     def test_wrong_live_resource_contract_stops_before_prepare(self):
-        root = self.base / f"wrong-resource-{next(tempfile._get_candidate_names())}"
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "PATH": f"{self.bin_dir}{os.pathsep}{environment['PATH']}",
-                "GATE_ROOT": str(root),
-                "ABACUS_ARTIFACT": str(self.fake_abacus),
-                "PSEUDO_ASSET": str(self.pseudo),
-                "ORBITAL_ASSET": str(self.orbital),
-                "PYTHON_EXE": sys.executable,
-                "SLURM_JOB_PARTITION": "normal",
-                "SLURM_ARRAY_TASK_ID": "0",
-                "SLURM_ARRAY_TASK_COUNT": "4",
-                "SLURM_CPUS_PER_TASK": "31",
-                "SLURM_NTASKS": "1",
-                "SLURM_JOB_NUM_NODES": "1",
-                "SLURM_TASKS_PER_NODE": "1",
-                "SLURM_MEM_PER_NODE": "126500",
-                "SLURM_JOB_ID": "9002",
-                "SLURM_ARRAY_JOB_ID": "9002",
-            }
+        cases = (
+            (
+                "cpu",
+                {"SLURM_CPUS_PER_TASK": "31"},
+                "cpus per task must be 30",
+            ),
+            (
+                "memory",
+                {"SLURM_MEM_PER_NODE": "126500"},
+                "memory per node must be 110610 MB",
+            ),
         )
-        completed = subprocess.run(
-            ["bash", str(RUNNER)],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=environment,
-        )
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertFalse((root / "runs/fixed").exists())
+        for label, overrides, expected_error in cases:
+            with self.subTest(label=label):
+                root = self.base / (
+                    f"wrong-{label}-{next(tempfile._get_candidate_names())}"
+                )
+                environment = self._task_environment(root, 0, overrides=overrides)
+                completed = subprocess.run(
+                    ["bash", str(RUNNER)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(expected_error, completed.stderr)
+                self.assertFalse((root / "runs/fixed").exists())
 
     def test_missing_or_nonnumeric_slurm_job_identity_stops_before_prepare(self):
         for label, overrides in (
