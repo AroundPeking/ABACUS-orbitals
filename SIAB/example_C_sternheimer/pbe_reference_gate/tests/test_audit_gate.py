@@ -339,13 +339,37 @@ class AuditCliTests(unittest.TestCase):
                 self.assertIn("energy_ev", phase)
                 self.assertIn("energy_ha", phase)
                 self.assertEqual(phase["spin_counts"], {"1": 3.0, "2": 1.0})
+                self.assertEqual(
+                    phase["occupations"],
+                    {
+                        "1": [1.0, 1.0, 1.0, 0.0],
+                        "2": [1.0, 0.0, 0.0, 0.0],
+                    },
+                )
                 self.assertTrue(phase["integer_occupations"])
                 self.assertEqual(len(phase["stage_sha256"]), 64)
-                self.assertEqual(len(phase["file_sha256"]["INPUT"]), 64)
+                self.assertEqual(
+                    set(phase["file_sha256"]),
+                    {"INPUT", "running_scf.log", "eig_occ.txt"},
+                )
+                for digest in phase["file_sha256"].values():
+                    self.assertRegex(digest, r"^[0-9a-f]{64}$")
             self.assertIn("status=PBE_GATE_PASSED", text)
             self.assertIn("fixed_drift_kcal=", text)
             self.assertIn("free_direction_2_drift_kcal=", text)
-            self.assertIn("input_sha256=", text)
+            phase_lines = [line for line in text.splitlines() if line.startswith("phase=")]
+            self.assertEqual(len(phase_lines), 8)
+            for line in phase_lines:
+                self.assertIn("spin1_occupations=1,1,1,0", line)
+                self.assertIn("spin2_occupations=1,0,0,0", line)
+                self.assertRegex(line, r"\bINPUT_sha256=[0-9a-f]{64}\b")
+                self.assertRegex(
+                    line, r"\brunning_scf\.log_sha256=[0-9a-f]{64}\b"
+                )
+                self.assertRegex(
+                    line, r"\beig_occ\.txt_sha256=[0-9a-f]{64}\b"
+                )
+                self.assertRegex(line, r"\bstage_sha256=[0-9a-f]{64}\b")
             self.assertFalse(list(root.glob(".RESULT_SUMMARY.*.tmp")))
 
     def test_cli_failure_cannot_leave_pass_marker(self):

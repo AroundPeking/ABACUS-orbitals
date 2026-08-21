@@ -43,6 +43,9 @@ def _phase_dict(phase: PhaseResult, root: Path) -> dict[str, object]:
         "energy_ev": phase.energy_ev,
         "energy_ha": phase.energy_ha,
         "spin_counts": {str(key): value for key, value in phase.spin_counts.items()},
+        "occupations": {
+            str(key): list(values) for key, values in phase.occupations.items()
+        },
         "integer_occupations": phase.integer_occupations,
         "file_sha256": dict(phase.file_hashes),
         "stage_sha256": phase.stage_hash,
@@ -99,12 +102,24 @@ def _summary_text(summary: dict[str, object]) -> str:
     for relative, _ in PHASES:
         phase = phases[relative]
         counts = phase["spin_counts"]
+        occupations = phase["occupations"]
+        spin1_occupations = ",".join(
+            f"{value:.16g}" for value in occupations["1"]
+        )
+        spin2_occupations = ",".join(
+            f"{value:.16g}" for value in occupations["2"]
+        )
         lines.append(
             f"phase={relative} energy_ev={phase['energy_ev']:.16g} "
             f"energy_ha={phase['energy_ha']:.16g} spin1={counts['1']:.1f} "
             f"spin2={counts['2']:.1f} integer_occupations="
             f"{str(phase['integer_occupations']).lower()} "
-            f"input_sha256={phase['file_sha256']['INPUT']} "
+            f"spin1_occupations={spin1_occupations} "
+            f"spin2_occupations={spin2_occupations} "
+            f"INPUT_sha256={phase['file_sha256']['INPUT']} "
+            f"running_scf.log_sha256="
+            f"{phase['file_sha256']['running_scf.log']} "
+            f"eig_occ.txt_sha256={phase['file_sha256']['eig_occ.txt']} "
             f"stage_sha256={phase['stage_sha256']}"
         )
 
