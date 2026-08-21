@@ -43,10 +43,25 @@ class HpcStaticContractTests(unittest.TestCase):
             "export OMP_NUM_THREADS=32",
             "export MKL_NUM_THREADS=32",
             "export OPENBLAS_NUM_THREADS=32",
-            'mpirun -np 1 -ppn 1 "$ABACUS_REAL"',
+            '"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"',
         ):
             self.assertIn(value, text)
         self.assertNotIn("debug", text.lower())
+
+    def test_runtime_environment_is_sourced_before_mpirun_resolution(self):
+        text = RUNNER.read_text()
+        source_index = text.index('source "$ABACUS_ENV_REAL"')
+        mpirun_index = text.index('command -v -- mpirun')
+        launch_index = text.index('"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"')
+        self.assertLess(source_index, mpirun_index)
+        self.assertLess(mpirun_index, launch_index)
+        for value in (
+            "ABACUS_ENV_SCRIPT",
+            "export OMP_NUM_THREADS=32",
+            "export MKL_NUM_THREADS=32",
+            "export OPENBLAS_NUM_THREADS=32",
+        ):
+            self.assertIn(value, text[source_index:])
 
     def test_runner_checks_inputs_and_restart_semantics(self):
         text = RUNNER.read_text()
@@ -246,6 +261,9 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         cls.fake_mpirun.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
+            "[[ ${OMP_NUM_THREADS:-} == 32 ]]\n"
+            "[[ ${MKL_NUM_THREADS:-} == 32 ]]\n"
+            "[[ ${OPENBLAS_NUM_THREADS:-} == 32 ]]\n"
             "[[ $1 == -np && $2 == 1 && $3 == -ppn && $4 == 1 ]]\n"
             "shift 4\n"
             'exec "$@"\n'
@@ -267,6 +285,15 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         cls.fake_abacus.write_text(cls._fake_abacus_text())
         for path in (cls.fake_mpirun, cls.fake_scontrol, cls.fake_abacus):
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        cls.fake_environment = cls.assets / "env_intel.sh"
+        cls.environment_marker = cls.base / "environment-sourced.log"
+        cls.fake_environment.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'sourced\\n' >>'{cls.environment_marker}'\n"
+            "export OMP_NUM_THREADS=1\n"
+            "export MKL_NUM_THREADS=1\n"
+            "export OPENBLAS_NUM_THREADS=1\n"
+        )
 
         cls.completed_gate = cls.base / "completed-gate"
         for task in range(4):
@@ -352,6 +379,7 @@ for spin in (1, 2):
                 "PATH": f"{cls.bin_dir}{os.pathsep}{environment['PATH']}",
                 "GATE_ROOT": str(root),
                 "ABACUS_ARTIFACT": str(cls.fake_abacus),
+                "ABACUS_ENV_SCRIPT": str(cls.fake_environment),
                 "PSEUDO_ASSET": str(pseudo or cls.pseudo),
                 "ORBITAL_ASSET": str(orbital or cls.orbital),
                 "PYTHON_EXE": sys.executable,
@@ -420,6 +448,20 @@ for spin in (1, 2):
             "RESTART_CHAIN_VERIFIED",
         )
         self.assertEqual(len(summary["phases"]), 11)
+        self.assertEqual(
+            summary["restart_chain_evidence"]["environment_script"][
+                "absolute_path"
+            ],
+            str(self.fake_environment),
+        )
+        self.assertEqual(
+            summary["restart_chain_evidence"]["mpirun"]["absolute_path"],
+            str(self.fake_mpirun),
+        )
+
+    def test_runtime_environment_is_actually_sourced(self):
+        self.assertTrue(self.environment_marker.is_file())
+        self.assertGreaterEqual(len(self.environment_marker.read_text().splitlines()), 4)
 
     def test_phase_and_branch_manifests_capture_required_evidence(self):
         phase = self.completed_gate / "runs/dir1/free_restart1"
@@ -432,6 +474,14 @@ for spin in (1, 2):
         self.assertTrue(phase_manifest["restart_loaded"])
         self.assertEqual(restart_manifest["status"], "VERIFIED")
         self.assertEqual(branch_manifest["status"], "BRANCH_COMPLETE")
+        for manifest in (phase_manifest, branch_manifest):
+            self.assertEqual(
+                manifest["environment_script"]["absolute_path"],
+                str(self.fake_environment),
+            )
+            self.assertEqual(
+                manifest["mpirun"]["absolute_path"], str(self.fake_mpirun)
+            )
         self.assertEqual(phase_manifest["scheduler"]["partition"], "normal")
         self.assertEqual(phase_manifest["scheduler"]["cpus_per_task"], 32)
         self.assertEqual(phase_manifest["scheduler"]["ntasks"], 1)
@@ -579,6 +629,76 @@ for spin in (1, 2):
                 root = self.copy_gate()
                 mutate(root)
                 self.assert_not_passed(root)
+
+    def test_missing_runtime_environment_stops_before_prepare(self):
+        root = self.base / f"missing-env-{next(tempfile._get_candidate_names())}"
+        completed = self._run_task(
+            root, 0, overrides={"ABACUS_ENV_SCRIPT": ""}
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertFalse((root / "runs/fixed").exists())
+
+    def test_audit_rejects_tampered_runtime_environment_script(self):
+        original = self.fake_environment.read_bytes()
+        try:
+            self.fake_environment.write_bytes(original + b"# tampered\n")
+            self.assert_not_passed(self.completed_gate)
+        finally:
+            self.fake_environment.write_bytes(original)
+
+    def test_audit_rejects_tampered_mpirun(self):
+        original = self.fake_mpirun.read_bytes()
+        mode = self.fake_mpirun.stat().st_mode
+        try:
+            self.fake_mpirun.write_bytes(original + b"# tampered\n")
+            self.fake_mpirun.chmod(mode)
+            self.assert_not_passed(self.completed_gate)
+        finally:
+            self.fake_mpirun.write_bytes(original)
+            self.fake_mpirun.chmod(mode)
+
+    def test_global_audit_rejects_mpirun_mismatch_across_branches(self):
+        alternate_bin = self.base / f"mpi-{next(tempfile._get_candidate_names())}"
+        alternate_bin.mkdir()
+        alternate_mpirun = alternate_bin / "mpirun"
+        alternate_mpirun.write_text(self.fake_mpirun.read_text() + "# alternate\n")
+        alternate_mpirun.chmod(
+            alternate_mpirun.stat().st_mode | stat.S_IXUSR
+        )
+        alternate_root = self.base / (
+            f"alternate-mpi-{next(tempfile._get_candidate_names())}"
+        )
+        completed = self._run_task(
+            alternate_root,
+            2,
+            overrides={
+                "PATH": (
+                    f"{alternate_bin}{os.pathsep}{self.bin_dir}"
+                    f"{os.pathsep}{os.environ['PATH']}"
+                )
+            },
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        baseline_run = json.loads(
+            (
+                self.completed_gate
+                / "runs/dir1/BRANCH_RUN_PROVENANCE.json"
+            ).read_text()
+        )
+        alternate_run = json.loads(
+            (
+                alternate_root / "runs/dir1/BRANCH_RUN_PROVENANCE.json"
+            ).read_text()
+        )
+        self.assertEqual(
+            baseline_run["environment_script"],
+            alternate_run["environment_script"],
+        )
+        self.assertNotEqual(baseline_run["mpirun"], alternate_run["mpirun"])
+        root = self.copy_gate()
+        shutil.rmtree(root / "runs/dir1")
+        shutil.copytree(alternate_root / "runs/dir1", root / "runs/dir1")
+        self.assert_not_passed(root)
 
     @staticmethod
     def _mutate_json(path, mutate):
@@ -787,7 +907,14 @@ for spin in (1, 2):
             "SLURM_ARRAY_JOB_ID": "9003",
         }
         with mock.patch.dict(os.environ, environment, clear=False):
-            audit_gate.initialize_branch_run(root, "fixed", self.fake_abacus, RUNNER)
+            audit_gate.initialize_branch_run(
+                root,
+                "fixed",
+                self.fake_abacus,
+                RUNNER,
+                self.fake_environment,
+                self.fake_mpirun,
+            )
         stru = branch / "fixed_cold/STRU"
         stru.write_text(
             stru.read_text().replace("37.79452249150619", "18.89726124575309")
@@ -855,10 +982,12 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.abacus = self.assets / "abacus"
         self.pseudo = self.assets / "C_ONCV_PBE-1.0.upf"
         self.orbital = self.assets / "C_gga_10au_100Ry_3s3p2d.orb"
+        self.environment_script = self.assets / "env_intel.sh"
         self.abacus.write_text("#!/usr/bin/env bash\nexit 0\n")
         self.abacus.chmod(self.abacus.stat().st_mode | stat.S_IXUSR)
         self.pseudo.write_text("pseudo\n")
         self.orbital.write_text("orbital\n")
+        self.environment_script.write_text("#!/usr/bin/env bash\n")
         self.gate_root = self.base / "gate"
         self.source_commit = "0123456789abcdef0123456789abcdef01234567"
 
@@ -877,6 +1006,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
                 "PATH": f"{self.bin_dir}{os.pathsep}{environment['PATH']}",
                 "GATE_ROOT": str(self.gate_root),
                 "ABACUS_ARTIFACT": str(self.abacus),
+                "ABACUS_ENV_SCRIPT": str(self.environment_script),
                 "PSEUDO_SOURCE": str(self.pseudo),
                 "ORBITAL_SOURCE": str(self.orbital),
                 "PYTHON_EXE": sys.executable,
@@ -907,6 +1037,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         for value in (
             "GATE_ROOT",
             "ABACUS_ARTIFACT",
+            "ABACUS_ENV_SCRIPT",
             "PSEUDO_SOURCE",
             "ORBITAL_SOURCE",
             "PYTHON_EXE",
@@ -945,6 +1076,8 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "DIAGNOSTIC_ONLY",
             "PBE_GATE_PASSED",
             "Delta-ST",
+            "ABACUS_ENV_SCRIPT",
+            "Intel MPI/MKL",
         ):
             self.assertIn(value, text)
 
@@ -966,6 +1099,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         )
         for name in (
             "abacus",
+            "abacus_env_script",
             "pseudo",
             "orbital",
             "gate_contract",
@@ -981,6 +1115,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertEqual(log.count("sbatch "), 1)
         self.assertIn("--array=0-3", log)
         self.assertIn(f"GATE_ROOT={self.gate_root}", log)
+        self.assertIn(f"ABACUS_ENV_SCRIPT={self.environment_script}", log)
         self.assertIn(f"PSEUDO_ASSET={self.pseudo}", log)
         self.assertIn(f"ORBITAL_ASSET={self.orbital}", log)
         self.assertNotIn("--dependency", log)
@@ -988,6 +1123,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
     def test_python_and_source_commit_are_required_and_validated(self):
         cases = (
             ("missing Python", {"PYTHON_EXE": ""}),
+            ("missing environment", {"ABACUS_ENV_SCRIPT": ""}),
             ("missing commit", {"SOURCE_COMMIT": ""}),
             ("short commit", {"SOURCE_COMMIT": "a" * 39}),
             ("uppercase commit", {"SOURCE_COMMIT": "A" * 40}),
@@ -1066,10 +1202,16 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         symlink.symlink_to(self.orbital)
         directory = self.assets / "directory"
         directory.mkdir()
+        empty_environment = self.assets / "empty-env.sh"
+        empty_environment.touch()
+        linked_environment = self.assets / "linked-env.sh"
+        linked_environment.symlink_to(self.environment_script)
         cases = (
             {"PSEUDO_SOURCE": empty},
             {"ORBITAL_SOURCE": symlink},
             {"ABACUS_ARTIFACT": directory},
+            {"ABACUS_ENV_SCRIPT": empty_environment},
+            {"ABACUS_ENV_SCRIPT": linked_environment},
         )
         for index, overrides in enumerate(cases):
             with self.subTest(index=index):

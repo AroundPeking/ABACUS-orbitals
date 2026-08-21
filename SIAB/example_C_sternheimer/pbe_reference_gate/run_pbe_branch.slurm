@@ -13,10 +13,6 @@
 set -euo pipefail
 set -E
 
-export OMP_NUM_THREADS=32
-export MKL_NUM_THREADS=32
-export OPENBLAS_NUM_THREADS=32
-
 MODULE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 PREPARE="$MODULE_DIR/prepare_gate.py"
 AUDIT="$MODULE_DIR/audit_gate.py"
@@ -31,9 +27,55 @@ require_environment() {
     fi
 }
 
-for required in GATE_ROOT ABACUS_ARTIFACT PSEUDO_ASSET ORBITAL_ASSET; do
+for required in \
+    GATE_ROOT ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_ASSET ORBITAL_ASSET
+do
     require_environment "$required"
 done
+
+resolve_regular() {
+    "$PYTHON_EXE" - "$1" "$2" "${3:-0}" "${4:-0}" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+raw, kind, executable, allow_symlink = sys.argv[1:]
+path = Path(raw).expanduser().absolute()
+try:
+    metadata = path.lstat()
+except OSError as error:
+    raise SystemExit(f"cannot inspect {kind}: {path}: {error}")
+if stat.S_ISLNK(metadata.st_mode) and allow_symlink != "1":
+    raise SystemExit(f"{kind} must be a non-symlink regular file: {path}")
+resolved = path.resolve(strict=True)
+resolved_metadata = resolved.stat()
+if not stat.S_ISREG(resolved_metadata.st_mode) or resolved_metadata.st_size == 0:
+    raise SystemExit(f"{kind} must be a nonempty regular file: {resolved}")
+if executable == "1" and not os.access(resolved, os.X_OK):
+    raise SystemExit(f"{kind} must be executable: {resolved}")
+if allow_symlink != "1" and resolved != path:
+    raise SystemExit(f"{kind} path must already be resolved: {path}")
+print(resolved)
+PY
+}
+
+PYTHON_COMMAND=$(command -v -- "$PYTHON_EXE") || {
+    printf 'PYTHON_EXE is not executable: %s\n' "$PYTHON_EXE" >&2
+    exit 2
+}
+PYTHON_REAL=$(resolve_regular "$PYTHON_COMMAND" PYTHON_EXE 1 1)
+ABACUS_ENV_REAL=$(resolve_regular "$ABACUS_ENV_SCRIPT" ABACUS_ENV_SCRIPT)
+
+# The submitted ABACUS artifact is linked against the pinned Intel MPI/MKL stack.
+source "$ABACUS_ENV_REAL"
+
+# The environment script may set its own threading defaults; the gate owns these.
+set -euo pipefail
+set -E
+export OMP_NUM_THREADS=32
+export MKL_NUM_THREADS=32
+export OPENBLAS_NUM_THREADS=32
 
 [[ ${SLURM_JOB_PARTITION:-} == normal ]] || { printf 'partition must be normal\n' >&2; exit 2; }
 [[ ${SLURM_JOB_ID:-} =~ ^[1-9][0-9]*$ ]] || { printf 'job ID must be numeric\n' >&2; exit 2; }
@@ -57,33 +99,14 @@ case "$SLURM_ARRAY_TASK_ID" in
     *) printf 'invalid array task: %s\n' "$SLURM_ARRAY_TASK_ID" >&2; exit 2 ;;
 esac
 
-resolve_regular() {
-    "$PYTHON_EXE" - "$1" "$2" <<'PY'
-import os
-import stat
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1]).expanduser().absolute()
-kind = sys.argv[2]
-metadata = path.lstat()
-if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-    raise SystemExit(f"{kind} must be a non-symlink regular file: {path}")
-resolved = path.resolve(strict=True)
-if resolved != path:
-    raise SystemExit(f"{kind} path must already be resolved: {path}")
-if metadata.st_size == 0:
-    raise SystemExit(f"{kind} must be nonempty: {path}")
-if kind == "ABACUS" and not os.access(path, os.X_OK):
-    raise SystemExit(f"ABACUS is not executable: {path}")
-print(path)
-PY
-}
-
-ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS)
+ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS 1)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_ASSET" pseudo)
 ORBITAL_REAL=$(resolve_regular "$ORBITAL_ASSET" orbital)
-PYTHON_REAL=$(command -v "$PYTHON_EXE")
+MPIRUN_COMMAND=$(command -v -- mpirun) || {
+    printf 'mpirun is unavailable after sourcing ABACUS_ENV_SCRIPT\n' >&2
+    exit 2
+}
+MPIRUN_REAL=$(resolve_regular "$MPIRUN_COMMAND" mpirun 1 1)
 "$PYTHON_REAL" "$AUDIT" check-scheduler --branch "$BRANCH" >/dev/null
 GATE_ROOT=$(
     "$PYTHON_REAL" - "$GATE_ROOT" <<'PY'
@@ -299,7 +322,8 @@ trap 'record_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 "$PYTHON_REAL" "$AUDIT" runner-init \
     --root "$GATE_ROOT" --branch "$BRANCH" \
-    --abacus "$ABACUS_REAL" --runner "$RUNNER"
+    --abacus "$ABACUS_REAL" --runner "$RUNNER" \
+    --environment-script "$ABACUS_ENV_REAL" --mpirun "$MPIRUN_REAL"
 
 BRANCH_STARTED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 BRANCH_STARTED_EPOCH=$(date '+%s')
@@ -313,7 +337,8 @@ run_phase() {
     started_epoch=$(date '+%s')
     (
         cd "$phase_root"
-        mpirun -np 1 -ppn 1 "$ABACUS_REAL" >abacus.stdout 2>abacus.stderr
+        "$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL" \
+            >abacus.stdout 2>abacus.stderr
     )
     ended_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     ended_epoch=$(date '+%s')

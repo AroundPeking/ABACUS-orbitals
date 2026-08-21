@@ -392,13 +392,17 @@ The implemented runner and auditor must:
    contract from a testable `scontrol show job -o` query before preparation,
    including memory, 24-hour time limit, and exclusive allocation; preserve
    the exact raw scheduler record and its SHA256 for independent revalidation;
-2. resolve `ABACUS_ARTIFACT`, verify the executable and record its SHA256;
+2. require and resolve the canonical non-symlink `ABACUS_ENV_SCRIPT`, source
+   it before resolving `mpirun`, reset OpenMP/MKL/OpenBLAS threads to 32, then
+   resolve `ABACUS_ARTIFACT` and the canonical executable `mpirun`; record the
+   path, size, and SHA256 of the environment script, ABACUS, and `mpirun`;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
 4. call `prepare_gate.py` once successfully for its branch, using a bounded
    stable array-owned cross-node guard and bounded preparation mutex so the
    four array tasks do not collide on the preparation lock or race guard
    deletion;
-5. run ABACUS through `mpirun -np 1 -ppn 1` with 32 OpenMP threads;
+5. run ABACUS through the recorded `mpirun -np 1 -ppn 1` with 32 OpenMP
+   threads;
 6. require convergence, final energy, `eig_occ.txt`, both spin wavefunctions,
    and charge restart output after every phase;
 7. create the next restart phase atomically without copying the old output
@@ -417,7 +421,10 @@ The implemented runner and auditor must:
     have been rehashed;
 11. write `BRANCH_COMPLETE.json` atomically only after the complete fixed or
     field/free chain finishes;
-12. let the global audit publish `PBE_GATE_PASSED` only after all 11 phases and
+12. copy the environment-script and `mpirun` records into each phase and
+    branch manifest, independently rehash both files during audit, and require
+    identical records in all four branches;
+13. let the global audit publish `PBE_GATE_PASSED` only after all 11 phases and
     all four branch manifests close the evidence chain with identical staged
     pseudopotential/orbital content and frozen preparation identity.  Any
     `RUN_FAILED.json` blocks the gate.  With no Task 4 evidence, the old Task 2
@@ -467,14 +474,16 @@ The submitter requires these environment variables:
 ```text
 GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
 ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442/abacus_3p
+ABACUS_ENV_SCRIPT=/public/home/ghj/app/src/env_60_245_intel2021.sh
 PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
 ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
 PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
 SOURCE_COMMIT=<40-lowercase-hex-commit-used-to-create-the-source-archive>
 ```
 
-It resolves every path, records hashes in `SUBMISSION_PROVENANCE.json`, and
-submits the four-task PBE array.  The README explains that the audit is run on
+It resolves every path, records hashes in `SUBMISSION_PROVENANCE.json`, exports
+the pinned `ABACUS_ENV_SCRIPT` to the runner, and submits the four-task PBE
+array.  The README explains that the audit is run on
 the login node after all four tasks finish and that only
 `status=PBE_GATE_PASSED` permits writing the Delta-ST plan.
 
@@ -512,6 +521,19 @@ git commit -m "docs(siab): package C PBE reference gate"
 - [x] Hash and size all five standalone runtime source files.
 - [x] Add standalone, race, receipt-order, and runtime-file regression tests.
 - [x] Commit the review fix separately without amending Task 5.
+
+#### df_dcu ABACUS runtime-environment hardening
+
+- [x] Require the canonical non-symlink
+  `/public/home/ghj/app/src/env_60_245_intel2021.sh` through
+  `ABACUS_ENV_SCRIPT`; record its path, size, and SHA256 at submission.
+- [x] Source the script before resolving or using `mpirun`, then reassert the
+  32-thread and full normal-node resource contract.
+- [x] Record canonical `mpirun` path, size, and SHA256 in run, phase, branch,
+  and global evidence; independently revalidate both runtime files and require
+  cross-branch identity.
+- [x] Cover missing and tampered environment scripts, tampered and mismatched
+  `mpirun`, and the complete fake four-branch workflow with local tests only.
 
 ### Task 6: Stage and run the PBE gate on df_dcu
 

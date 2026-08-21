@@ -20,7 +20,8 @@ require_environment() {
 }
 
 for required in \
-    GATE_ROOT ABACUS_ARTIFACT PSEUDO_SOURCE ORBITAL_SOURCE PYTHON_EXE SOURCE_COMMIT
+    GATE_ROOT ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_SOURCE ORBITAL_SOURCE \
+    PYTHON_EXE SOURCE_COMMIT
 do
     require_environment "$required"
 done
@@ -91,6 +92,7 @@ PY
 
 PYTHON_REAL=$(resolve_regular "$PYTHON_COMMAND" PYTHON_EXE 1 1)
 ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS_ARTIFACT 1)
+ABACUS_ENV_REAL=$(resolve_regular "$ABACUS_ENV_SCRIPT" ABACUS_ENV_SCRIPT 0)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_SOURCE" PSEUDO_SOURCE 0)
 ORBITAL_REAL=$(resolve_regular "$ORBITAL_SOURCE" ORBITAL_SOURCE 0)
 GATE_CONTRACT_REAL=$(resolve_regular "$GATE_CONTRACT" gate_contract.py 0)
@@ -100,7 +102,10 @@ RUNNER_REAL=$(resolve_regular "$RUNNER" run_pbe_branch.slurm 0)
 SUBMITTER_REAL=$(resolve_regular "$SUBMITTER" submit_pbe_gate.sh 0)
 GATE_ROOT_REAL=$(resolve_gate_root "$GATE_ROOT")
 
-for value in "$GATE_ROOT_REAL" "$ABACUS_REAL" "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL"; do
+for value in \
+    "$GATE_ROOT_REAL" "$ABACUS_REAL" "$ABACUS_ENV_REAL" "$PSEUDO_REAL" \
+    "$ORBITAL_REAL" "$PYTHON_REAL"
+do
     [[ $value != *','* && $value != *$'\n'* && $value != *$'\r'* ]] \
         || fail "resolved export paths must not contain commas or newlines: $value"
 done
@@ -304,7 +309,7 @@ write_json_noreplace "$CLAIM/SUBMISSION_CLAIM.json" CLAIMED \
 query_scheduler job-name "$JOB_NAME" "$CLAIM/pre_submit_scheduler"
 check_formal_evidence 1 "$CLAIM_TOKEN"
 
-EXPORT_MAP="ALL,GATE_ROOT=$GATE_ROOT_REAL,ABACUS_ARTIFACT=$ABACUS_REAL,PSEUDO_ASSET=$PSEUDO_REAL,ORBITAL_ASSET=$ORBITAL_REAL,PYTHON_EXE=$PYTHON_REAL"
+EXPORT_MAP="ALL,GATE_ROOT=$GATE_ROOT_REAL,ABACUS_ARTIFACT=$ABACUS_REAL,ABACUS_ENV_SCRIPT=$ABACUS_ENV_REAL,PSEUDO_ASSET=$PSEUDO_REAL,ORBITAL_ASSET=$ORBITAL_REAL,PYTHON_EXE=$PYTHON_REAL"
 SBATCH_COMMAND=(
     sbatch
     --parsable
@@ -402,7 +407,8 @@ JOB_ID_TEMP="$CLAIM/SUBMITTED_JOB_ID.txt"
 
 "$PYTHON_REAL" - \
     "$PROVENANCE_TEMP" "$JOB_ID_TEMP" "$GATE_ROOT_REAL" "$ABACUS_REAL" \
-    "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL" "$GATE_CONTRACT_REAL" \
+    "$ABACUS_ENV_REAL" "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL" \
+    "$GATE_CONTRACT_REAL" \
     "$PREPARE_GATE_REAL" "$AUDIT_GATE_REAL" "$RUNNER_REAL" "$SUBMITTER_REAL" \
     "$RECEIPT" "$SOURCE_COMMIT" "$JOB_ID" "$JOB_NAME" \
     "$SUBMITTED_AT_UTC" "${SBATCH_COMMAND[@]}" <<'PY'
@@ -417,6 +423,7 @@ from pathlib import Path
     job_id_path,
     gate_root,
     abacus,
+    abacus_env_script,
     pseudo,
     orbital,
     python,
@@ -453,6 +460,7 @@ payload = {
     "resolved_paths": {
         "gate_root": gate_root,
         "abacus_artifact": abacus,
+        "abacus_env_script": abacus_env_script,
         "pseudo_source": pseudo,
         "orbital_source": orbital,
         "python_exe": python,
@@ -465,12 +473,14 @@ payload = {
     "runner_environment": {
         "GATE_ROOT": gate_root,
         "ABACUS_ARTIFACT": abacus,
+        "ABACUS_ENV_SCRIPT": abacus_env_script,
         "PSEUDO_ASSET": pseudo,
         "ORBITAL_ASSET": orbital,
         "PYTHON_EXE": python,
     },
     "files": {
         "abacus": file_record(abacus),
+        "abacus_env_script": file_record(abacus_env_script),
         "pseudo": file_record(pseudo),
         "orbital": file_record(orbital),
         "python": file_record(python),

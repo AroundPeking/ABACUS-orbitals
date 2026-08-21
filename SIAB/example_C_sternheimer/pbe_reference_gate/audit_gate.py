@@ -754,12 +754,21 @@ def _validate_phase_controls(
 
 
 def initialize_branch_run(
-    root: str | Path, branch: str, abacus: str | Path, runner: str | Path
+    root: str | Path,
+    branch: str,
+    abacus: str | Path,
+    runner: str | Path,
+    environment_script: str | Path,
+    mpirun: str | Path,
 ) -> dict[str, object]:
     root_path = Path(root).expanduser().absolute()
     branch_root, _ = _branch_provenance(root_path, branch)
     _, executable = _canonical_file(abacus, "ABACUS executable", executable=True)
     _, runner_record = _canonical_file(runner, "Task4 runner", executable=False)
+    _, environment_record = _canonical_file(
+        environment_script, "ABACUS environment script", executable=False
+    )
+    _, mpirun_record = _canonical_file(mpirun, "mpirun executable", executable=True)
     scheduler = _scheduler_record(branch)
     provenance = {
         "schema": "c-pbe-reference-gate-run",
@@ -768,6 +777,8 @@ def initialize_branch_run(
         "branch": branch,
         "executable": executable,
         "runner": runner_record,
+        "environment_script": environment_record,
+        "mpirun": mpirun_record,
         "scheduler": scheduler,
         "preparation_provenance_sha256": _sha256_bytes(
             _read_regular(
@@ -796,7 +807,12 @@ def _run_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
     _validate_scheduler_record(value.get("scheduler"), branch)
     executable = value.get("executable")
     runner = value.get("runner")
-    if not isinstance(executable, dict) or not isinstance(runner, dict):
+    environment_script = value.get("environment_script")
+    mpirun = value.get("mpirun")
+    if any(
+        not isinstance(record, dict)
+        for record in (executable, runner, environment_script, mpirun)
+    ):
         raise ValueError(f"{branch} run provenance lacks binary records")
     _, current_executable = _canonical_file(
         executable.get("absolute_path", ""),
@@ -806,7 +822,21 @@ def _run_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
     _, current_runner = _canonical_file(
         runner.get("absolute_path", ""), "recorded Task4 runner"
     )
-    if current_executable != executable or current_runner != runner:
+    _, current_environment = _canonical_file(
+        environment_script.get("absolute_path", ""),
+        "recorded ABACUS environment script",
+    )
+    _, current_mpirun = _canonical_file(
+        mpirun.get("absolute_path", ""),
+        "recorded mpirun executable",
+        executable=True,
+    )
+    if (
+        current_executable != executable
+        or current_runner != runner
+        or current_environment != environment_script
+        or current_mpirun != mpirun
+    ):
         raise ValueError(f"{branch} recorded binary hash no longer matches")
     current_preparation_hash = _sha256_bytes(
         _read_regular(
@@ -1252,6 +1282,8 @@ def complete_phase(
         "scheduler": run["scheduler"],
         "executable": run["executable"],
         "runner": run["runner"],
+        "environment_script": run["environment_script"],
+        "mpirun": run["mpirun"],
         "controls": controls,
         "assets": assets,
         "outputs": outputs,
@@ -1308,6 +1340,8 @@ def _verify_phase_evidence(
         manifest.get("scheduler") != run["scheduler"]
         or manifest.get("executable") != run["executable"]
         or manifest.get("runner") != run["runner"]
+        or manifest.get("environment_script") != run["environment_script"]
+        or manifest.get("mpirun") != run["mpirun"]
     ):
         raise ValueError(
             f"{branch}/{phase} runtime provenance differs from branch evidence"
@@ -1447,6 +1481,8 @@ def complete_branch(
         "restart_provenance_sha256": restart_hashes,
         "executable": run["executable"],
         "runner": run["runner"],
+        "environment_script": run["environment_script"],
+        "mpirun": run["mpirun"],
         "scheduler": run["scheduler"],
         "branch_run_provenance_sha256": _sha256_bytes(
             _read_regular(
@@ -1497,6 +1533,8 @@ def _verify_execution_evidence(
     branch_summaries = {}
     executable_records = []
     runner_records = []
+    environment_records = []
+    mpirun_records = []
     array_job_ids = []
     preparation_signatures = []
     for branch, phases in BRANCH_PHASES.items():
@@ -1505,6 +1543,8 @@ def _verify_execution_evidence(
         branch_root, run = _run_provenance(root, branch)
         executable_records.append(run["executable"])
         runner_records.append(run["runner"])
+        environment_records.append(run["environment_script"])
+        mpirun_records.append(run["mpirun"])
         array_job_ids.append(run["scheduler"]["array_job_id"])
         for phase in phases:
             _verify_phase_evidence(
@@ -1520,6 +1560,8 @@ def _verify_execution_evidence(
             or complete.get("scheduler") != run["scheduler"]
             or complete.get("executable") != run["executable"]
             or complete.get("runner") != run["runner"]
+            or complete.get("environment_script") != run["environment_script"]
+            or complete.get("mpirun") != run["mpirun"]
         ):
             raise ValueError(f"{branch} completion manifest identity is invalid")
         expected_phase_hashes = {
@@ -1578,6 +1620,10 @@ def _verify_execution_evidence(
         raise ValueError("ABACUS executable provenance differs across branches")
     if any(record != runner_records[0] for record in runner_records[1:]):
         raise ValueError("Task4 runner provenance differs across branches")
+    if any(record != environment_records[0] for record in environment_records[1:]):
+        raise ValueError("ABACUS environment provenance differs across branches")
+    if any(record != mpirun_records[0] for record in mpirun_records[1:]):
+        raise ValueError("mpirun provenance differs across branches")
     if any(job_id != array_job_ids[0] for job_id in array_job_ids[1:]):
         raise ValueError("branches do not belong to one Slurm array job")
     if any(
@@ -1592,6 +1638,8 @@ def _verify_execution_evidence(
         "branches": branch_summaries,
         "executable": executable_records[0],
         "runner": runner_records[0],
+        "environment_script": environment_records[0],
+        "mpirun": mpirun_records[0],
         "preparation": preparation_signatures[0],
     }
 
@@ -1803,6 +1851,8 @@ def _runner_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--branch", required=True, choices=BRANCH_PHASES)
     initialize.add_argument("--abacus", required=True)
     initialize.add_argument("--runner", required=True)
+    initialize.add_argument("--environment-script", required=True)
+    initialize.add_argument("--mpirun", required=True)
 
     preflight = subparsers.add_parser("preflight-phase")
     preflight.add_argument("--root", required=True)
@@ -1840,7 +1890,12 @@ def _runner_main(argv: list[str]) -> int:
             result = _scheduler_record(arguments.branch)
         elif arguments.runner_command == "runner-init":
             result = initialize_branch_run(
-                arguments.root, arguments.branch, arguments.abacus, arguments.runner
+                arguments.root,
+                arguments.branch,
+                arguments.abacus,
+                arguments.runner,
+                arguments.environment_script,
+                arguments.mpirun,
             )
         elif arguments.runner_command == "preflight-phase":
             preflight_phase(arguments.root, arguments.branch, arguments.phase)

@@ -85,6 +85,16 @@ matrix, or LibRPA calculation is allowed before it passes.
 The production runner is a four-task Slurm array on `normal`.  Every task uses
 one exclusive node, one MPI rank, 32 OpenMP threads, 126500 MB, and a 24-hour
 limit.  The four array tasks map to `fixed`, `dir0`, `dir1`, and `dir2`.
+The submitted ABACUS artifact is linked against the Intel MPI/MKL environment
+provided by the canonical non-symlink file
+`/public/home/ghj/app/src/env_60_245_intel2021.sh`.  The submitter requires this
+path as `ABACUS_ENV_SCRIPT`, records its size and SHA256, and exports it to the
+runner.  The runner sources it before resolving `mpirun`, then resets
+`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and `OPENBLAS_NUM_THREADS` to 32.  The
+login-node OpenMPI command is not an admissible fallback.  The selected
+`mpirun` is resolved to a canonical executable and its path, size, and SHA256
+are recorded.
+
 Numeric Slurm job and array identifiers are mandatory.  Before any branch is
 created, the runner reads the live `scontrol show job -o` record and verifies
 the partition, node/rank/thread counts, requested memory, 24-hour limit, and
@@ -130,7 +140,10 @@ are rejected.  Only then is `PHASE_COMPLETE.json` published.  A branch obtains
 not publish a scientific result.
 
 The global audit independently reopens every control, asset, executable,
-output, snapshot, phase manifest, and branch manifest.  It also independently
+environment script, `mpirun`, output, snapshot, phase manifest, and branch
+manifest.  Runtime records are copied into every phase and branch manifest,
+rehashed from the recorded canonical files, and required to be identical in
+all four branches.  It also independently
 checks identical pseudopotential/orbital content and the frozen preparation
 identity across all branches.  Eleven valid phases, four valid branch
 completions, one identical ABACUS hash and observed resource contract, verified
@@ -143,11 +156,13 @@ inconsistent Task 4 evidence is rejected.
 ### Task 5 submission evidence
 
 Formal execution uses one duplicate-safe submission wrapper.  It resolves the
-gate root, ABACUS executable, pseudopotential, orbital, Python interpreter,
+gate root, ABACUS executable, ABACUS environment script, pseudopotential,
+orbital, Python interpreter,
 runner, and submitter to canonical absolute paths before submission.  The
-three physical assets must be nonempty non-symlink regular files, and ABACUS
-must be executable.  The runner receives the resolved pseudopotential and
-orbital as `PSEUDO_ASSET` and `ORBITAL_ASSET`.
+four external runtime/physical inputs must be nonempty non-symlink regular
+files, and ABACUS must be executable.  The runner receives the resolved
+environment script, pseudopotential, and orbital as `ABACUS_ENV_SCRIPT`,
+`PSEUDO_ASSET`, and `ORBITAL_ASSET`.
 
 Task 6 stages the gate directory as a standalone source archive without
 `.git`.  It must pass the exact staging commit through required
