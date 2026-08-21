@@ -55,6 +55,37 @@ class PrepareGateTests(unittest.TestCase):
             orbital=self.orbital,
         )
 
+    def assert_control_template_tamper_rejected(
+        self, name, original_token, replacement_token
+    ):
+        root = self.base / f"template-tamper-{name.lower()}"
+        prepared = prepare_branch(
+            root,
+            branch="fixed",
+            pseudo=self.pseudo,
+            orbital=self.orbital,
+        )
+        staged = prepared / "fixed_cold" / name
+        content = staged.read_bytes()
+        self.assertIn(original_token, content)
+        staged.write_bytes(content.replace(original_token, replacement_token))
+
+        provenance_path = prepared / "BRANCH_PROVENANCE.json"
+        provenance = json.loads(provenance_path.read_text())
+        record = provenance["phase"]["files"][name]
+        record["sha256"] = sha256(staged)
+        record["size"] = staged.stat().st_size
+        provenance_path.write_text(json.dumps(provenance))
+
+        with self.assertRaisesRegex(ValueError, f"{name}.*template"):
+            prepare_branch(
+                root,
+                branch="dir0",
+                pseudo=self.pseudo,
+                orbital=self.orbital,
+            )
+        self.assertFalse(os.path.lexists(root / "runs" / "dir0"))
+
     def test_branch_mapping_is_exact(self):
         self.assertEqual(BRANCHES, EXPECTED_BRANCHES)
 
@@ -361,6 +392,23 @@ class PrepareGateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "frozen_protocol"):
             self.prepare("dir0")
+
+    def test_existing_input_is_bound_to_renderer_template(self):
+        self.assert_control_template_tamper_rejected(
+            "INPUT", b"ecutwfc 30\n", b"ecutwfc 31\n"
+        )
+
+    def test_existing_stru_is_bound_to_twenty_angstrom_template(self):
+        self.assert_control_template_tamper_rejected(
+            "STRU",
+            b"37.79452249150619\n",
+            b"18.897261245753095\n",
+        )
+
+    def test_existing_kpt_is_bound_to_gamma_template(self):
+        self.assert_control_template_tamper_rejected(
+            "KPT", b"1 1 1 0 0 0\n", b"2 1 1 0 0 0\n"
+        )
 
     def test_staged_asset_and_phase_record_cannot_diverge_from_source_record(self):
         for label, source in (("pseudo", self.pseudo), ("orbital", self.orbital)):

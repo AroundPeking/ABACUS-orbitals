@@ -537,6 +537,19 @@ def _validate_existing_branch_provenance(
                     f"existing branch {existing_branch} {label} asset provenance chain does not close"
                 )
 
+        control_templates = {
+            "INPUT": render_input(
+                mode=expected_mode,
+                field_dir=expected_field_dir,
+                restart=False,
+            ).encode("utf-8"),
+            "STRU": _render_stru(
+                sources["pseudo"]["basename"],
+                sources["orbital"]["basename"],
+            ).encode("utf-8"),
+            "KPT": _KPT_TEXT.encode("utf-8"),
+        }
+
         phase_fd = _open_directory_at(
             branch_fd,
             phase_name,
@@ -560,6 +573,10 @@ def _validate_existing_branch_provenance(
                 ):
                     raise ValueError(
                         f"existing branch {existing_branch} staged file {name} does not match provenance"
+                    )
+                if name in control_templates and content != control_templates[name]:
+                    raise ValueError(
+                        f"existing branch {existing_branch} {name} does not match its frozen template"
                     )
         finally:
             os.close(phase_fd)
