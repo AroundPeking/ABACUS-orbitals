@@ -2,10 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import hashlib
 import json
 import os
+import re
+import secrets
+import shutil
+import stat
 import sys
 import tempfile
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,14 +22,18 @@ if __package__:
         PhaseResult,
         audit_phase,
         compare_zero_field_results,
+        render_input,
     )
+    from . import prepare_gate
 else:
     from gate_contract import (
         HA_TO_KCAL_MOL,
         PhaseResult,
         audit_phase,
         compare_zero_field_results,
+        render_input,
     )
+    import prepare_gate
 
 
 AUTHORITATIVE_RESULT = "RESULT_SUMMARY.json"
@@ -32,6 +43,22 @@ RESTART_CHAIN_NOTE = (
     "Task2 verifies INPUT restart semantics only; actual WFC/CHG copy and load "
     "provenance must be verified by the Task4 runner before production use."
 )
+RESTART_FILES = ("wfs1_nao.txt", "wfs2_nao.txt", "chgs1.cube", "chgs2.cube")
+RESOURCE_CONTRACT = {
+    "partition": "normal",
+    "nodes": 1,
+    "ntasks": 1,
+    "tasks_per_node": 1,
+    "cpus_per_task": 32,
+    "memory_mb": 126500,
+    "time_limit": "24:00:00",
+}
+BRANCH_PHASES = {
+    "fixed": ("fixed_cold", "fixed_restart"),
+    "dir0": ("field_seed", "free_restart1", "free_restart2"),
+    "dir1": ("field_seed", "free_restart1", "free_restart2"),
+    "dir2": ("field_seed", "free_restart1", "free_restart2"),
+}
 
 
 @dataclass(frozen=True)
@@ -55,6 +82,1095 @@ PHASES = (
     PhaseSpec("runs/dir2/free_restart1", "free", True),
     PhaseSpec("runs/dir2/free_restart2", "free", True),
 )
+_PHASE_LOOKUP = {spec.relative: spec for spec in PHASES}
+
+
+def _sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _read_regular(path: Path, label: str, *, nonempty: bool = False) -> bytes:
+    try:
+        before = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"missing {label}: {path}") from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"{label} must be a non-symlink regular file: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError(f"{label} changed while being opened: {path}")
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        content = b"".join(chunks)
+        after = os.fstat(descriptor)
+        if (after.st_size, after.st_mtime_ns) != (opened.st_size, opened.st_mtime_ns):
+            raise ValueError(f"{label} changed while being read: {path}")
+    finally:
+        os.close(descriptor)
+    if nonempty and not content:
+        raise ValueError(f"{label} must be nonempty: {path}")
+    return content
+
+
+def _record(
+    path: Path, base: Path, label: str, *, nonempty: bool = False
+) -> dict[str, object]:
+    content = _read_regular(path, label, nonempty=nonempty)
+    return {
+        "relative_path": str(path.relative_to(base)),
+        "sha256": _sha256_bytes(content),
+        "size": len(content),
+    }
+
+
+def _load_json(path: Path, label: str) -> dict[str, object]:
+    content = _read_regular(path, label, nonempty=True)
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid JSON: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain a JSON object: {path}")
+    return value
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError as exc:
+            if exc.errno not in {errno.EINVAL, errno.ENOTSUP}:
+                raise
+    finally:
+        os.close(descriptor)
+
+
+def _write_all(descriptor: int, content: bytes) -> None:
+    remaining = memoryview(content)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise OSError("short write while recording Task4 evidence")
+        remaining = remaining[written:]
+
+
+def _atomic_write_json(
+    path: Path, value: dict[str, object], *, noreplace: bool
+) -> None:
+    content = json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        descriptor, name = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+        )
+        temporary = Path(name)
+        try:
+            _write_all(descriptor, content)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        if noreplace:
+            os.link(temporary, path)
+            temporary.unlink()
+        else:
+            os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _canonical_file(
+    path: str | Path, label: str, *, executable: bool = False
+) -> tuple[Path, dict[str, object]]:
+    argument = Path(path).expanduser().absolute()
+    content = _read_regular(argument, label, nonempty=True)
+    resolved = argument.resolve(strict=True)
+    if resolved != argument:
+        raise ValueError(f"{label} must be supplied as a resolved non-symlink path")
+    if executable and not os.access(resolved, os.X_OK):
+        raise ValueError(f"{label} is not executable: {resolved}")
+    return resolved, {
+        "absolute_path": str(resolved),
+        "sha256": _sha256_bytes(content),
+        "size": len(content),
+    }
+
+
+def _positive_int_environment(name: str) -> int:
+    value = os.environ.get(name)
+    if value is None or not re.fullmatch(r"\d+", value) or int(value) < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
+
+def _scheduler_record(branch: str) -> dict[str, object]:
+    partition = os.environ.get("SLURM_JOB_PARTITION")
+    if partition != RESOURCE_CONTRACT["partition"]:
+        raise ValueError("Slurm partition must be normal")
+    task_id = (
+        _positive_int_environment("SLURM_ARRAY_TASK_ID")
+        if os.environ.get("SLURM_ARRAY_TASK_ID") != "0"
+        else 0
+    )
+    expected_task = tuple(BRANCH_PHASES).index(branch)
+    if task_id != expected_task:
+        raise ValueError(f"array task {task_id} does not map to branch {branch}")
+    if _positive_int_environment("SLURM_ARRAY_TASK_COUNT") != 4:
+        raise ValueError("Slurm array must contain exactly four tasks")
+    if _positive_int_environment("SLURM_CPUS_PER_TASK") != 32:
+        raise ValueError("SLURM_CPUS_PER_TASK must equal 32")
+    if _positive_int_environment("SLURM_NTASKS") != 1:
+        raise ValueError("SLURM_NTASKS must equal 1")
+    if _positive_int_environment("SLURM_JOB_NUM_NODES") != 1:
+        raise ValueError("SLURM_JOB_NUM_NODES must equal 1")
+    tasks_per_node = os.environ.get("SLURM_TASKS_PER_NODE", "")
+    match = re.fullmatch(r"1(?:\(x1\))?", tasks_per_node)
+    if match is None:
+        raise ValueError("SLURM_TASKS_PER_NODE must equal 1")
+    if (
+        "SLURM_MEM_PER_NODE" in os.environ
+        and int(os.environ["SLURM_MEM_PER_NODE"]) != 126500
+    ):
+        raise ValueError("SLURM_MEM_PER_NODE must equal 126500")
+    return {
+        **RESOURCE_CONTRACT,
+        "array_task_id": task_id,
+        "array_task_count": 4,
+        "job_id": os.environ.get("SLURM_JOB_ID", "UNKNOWN"),
+        "array_job_id": os.environ.get(
+            "SLURM_ARRAY_JOB_ID", os.environ.get("SLURM_JOB_ID", "UNKNOWN")
+        ),
+    }
+
+
+def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{branch} scheduler evidence is not an object")
+    expected = {
+        **RESOURCE_CONTRACT,
+        "array_task_id": tuple(BRANCH_PHASES).index(branch),
+        "array_task_count": 4,
+    }
+    for key, expected_value in expected.items():
+        if value.get(key) != expected_value:
+            raise ValueError(f"{branch} scheduler evidence has invalid {key}")
+    if not isinstance(value.get("job_id"), str) or not value["job_id"]:
+        raise ValueError(f"{branch} scheduler evidence lacks job_id")
+    if not isinstance(value.get("array_job_id"), str) or not value["array_job_id"]:
+        raise ValueError(f"{branch} scheduler evidence lacks array_job_id")
+    return value
+
+
+def _branch_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
+    branch_root = root / "runs" / branch
+    if branch_root.is_symlink() or not branch_root.is_dir():
+        raise ValueError(f"branch directory is missing or a symlink: {branch}")
+    provenance = _load_json(
+        branch_root / "BRANCH_PROVENANCE.json", f"{branch} preparation provenance"
+    )
+    if (
+        provenance.get("branch") != branch
+        or provenance.get("schema") != "c-pbe-reference-gate-branch"
+    ):
+        raise ValueError(f"{branch} preparation provenance identity is invalid")
+    return branch_root, provenance
+
+
+def _phase_spec(branch: str, phase: str) -> PhaseSpec:
+    relative = f"runs/{branch}/{phase}"
+    try:
+        return _PHASE_LOOKUP[relative]
+    except KeyError as exc:
+        raise ValueError(f"unexpected phase for {branch}: {phase}") from exc
+
+
+def _field_direction(branch: str, spec: PhaseSpec) -> int | None:
+    if spec.mode == "fixed":
+        return None
+    return int(branch[-1])
+
+
+def _expected_input(branch: str, spec: PhaseSpec) -> bytes:
+    return render_input(
+        mode=spec.mode,
+        field_dir=_field_direction(branch, spec),
+        restart=spec.restart,
+    ).encode("utf-8")
+
+
+def _asset_names(provenance: dict[str, object]) -> tuple[str, str]:
+    try:
+        pseudo = provenance["sources"]["pseudo"]["basename"]
+        orbital = provenance["sources"]["orbital"]["basename"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("preparation provenance lacks source asset names") from exc
+    if not isinstance(pseudo, str) or not isinstance(orbital, str):
+        raise ValueError("preparation provenance has invalid source asset names")
+    return pseudo, orbital
+
+
+def _validate_phase_controls(
+    root: Path, branch: str, phase: str
+) -> tuple[Path, dict[str, object], PhaseSpec]:
+    branch_root, provenance = _branch_provenance(root, branch)
+    spec = _phase_spec(branch, phase)
+    phase_root = branch_root / phase
+    if phase_root.is_symlink() or not phase_root.is_dir():
+        raise ValueError(f"phase directory is missing or a symlink: {branch}/{phase}")
+    input_content = _read_regular(phase_root / "INPUT", "phase INPUT", nonempty=True)
+    if input_content != _expected_input(branch, spec):
+        raise ValueError(f"{branch}/{phase} INPUT does not match the frozen renderer")
+
+    initial_phase = BRANCH_PHASES[branch][0]
+    initial_root = branch_root / initial_phase
+    pseudo_name, orbital_name = _asset_names(provenance)
+    if phase == initial_phase:
+        prepared_phase = provenance.get("phase")
+        if not isinstance(prepared_phase, dict):
+            raise ValueError(f"{branch} preparation provenance lacks phase records")
+        prepared_files = prepared_phase.get("files")
+        prepared_names = {"INPUT", "STRU", "KPT", pseudo_name, orbital_name}
+        if (
+            prepared_phase.get("relative_path") != f"runs/{branch}/{initial_phase}"
+            or not isinstance(prepared_files, dict)
+            or set(prepared_files) != prepared_names
+        ):
+            raise ValueError(f"{branch} preparation provenance phase record is invalid")
+        for name in prepared_names:
+            record = prepared_files[name]
+            content = _read_regular(
+                phase_root / name, f"prepared {initial_phase} {name}", nonempty=True
+            )
+            expected_record = {
+                "relative_path": f"runs/{branch}/{initial_phase}/{name}",
+                "sha256": _sha256_bytes(content),
+                "size": len(content),
+            }
+            if record != expected_record:
+                raise ValueError(
+                    f"{branch}/{initial_phase} {name} differs from preparation provenance"
+                )
+    for name in ("STRU", "KPT"):
+        current = _read_regular(phase_root / name, f"{phase} {name}", nonempty=True)
+        initial = _read_regular(
+            initial_root / name, f"{initial_phase} {name}", nonempty=True
+        )
+        if current != initial:
+            raise ValueError(
+                f"{branch}/{phase} {name} differs from the prepared branch"
+            )
+    for label, name in zip(("pseudo", "orbital"), (pseudo_name, orbital_name)):
+        content = _read_regular(phase_root / name, f"{phase} {label}", nonempty=True)
+        source = provenance["sources"][label]
+        if _sha256_bytes(content) != source.get("sha256") or len(content) != source.get(
+            "size"
+        ):
+            raise ValueError(f"{branch}/{phase} {label} differs from branch provenance")
+    return phase_root, provenance, spec
+
+
+def initialize_branch_run(
+    root: str | Path, branch: str, abacus: str | Path, runner: str | Path
+) -> dict[str, object]:
+    root_path = Path(root).expanduser().absolute()
+    branch_root, _ = _branch_provenance(root_path, branch)
+    _, executable = _canonical_file(abacus, "ABACUS executable", executable=True)
+    _, runner_record = _canonical_file(runner, "Task4 runner", executable=False)
+    scheduler = _scheduler_record(branch)
+    provenance = {
+        "schema": "c-pbe-reference-gate-run",
+        "version": 1,
+        "status": "RUN_PROVENANCE",
+        "branch": branch,
+        "executable": executable,
+        "runner": runner_record,
+        "scheduler": scheduler,
+        "preparation_provenance_sha256": _sha256_bytes(
+            _read_regular(
+                branch_root / "BRANCH_PROVENANCE.json",
+                "preparation provenance",
+                nonempty=True,
+            )
+        ),
+    }
+    _atomic_write_json(
+        branch_root / "BRANCH_RUN_PROVENANCE.json", provenance, noreplace=True
+    )
+    return provenance
+
+
+def _run_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
+    branch_root, _ = _branch_provenance(root, branch)
+    value = _load_json(
+        branch_root / "BRANCH_RUN_PROVENANCE.json", f"{branch} run provenance"
+    )
+    if (
+        value.get("schema") != "c-pbe-reference-gate-run"
+        or value.get("branch") != branch
+    ):
+        raise ValueError(f"{branch} run provenance identity is invalid")
+    _validate_scheduler_record(value.get("scheduler"), branch)
+    executable = value.get("executable")
+    runner = value.get("runner")
+    if not isinstance(executable, dict) or not isinstance(runner, dict):
+        raise ValueError(f"{branch} run provenance lacks binary records")
+    _, current_executable = _canonical_file(
+        executable.get("absolute_path", ""),
+        "recorded ABACUS executable",
+        executable=True,
+    )
+    _, current_runner = _canonical_file(
+        runner.get("absolute_path", ""), "recorded Task4 runner"
+    )
+    if current_executable != executable or current_runner != runner:
+        raise ValueError(f"{branch} recorded binary hash no longer matches")
+    current_preparation_hash = _sha256_bytes(
+        _read_regular(
+            branch_root / "BRANCH_PROVENANCE.json",
+            f"{branch} preparation provenance",
+            nonempty=True,
+        )
+    )
+    if value.get("preparation_provenance_sha256") != current_preparation_hash:
+        raise ValueError(f"{branch} preparation provenance hash changed after launch")
+    return branch_root, value
+
+
+def preflight_phase(root: str | Path, branch: str, phase: str) -> None:
+    root_path = Path(root).expanduser().absolute()
+    phase_root, _, spec = _validate_phase_controls(root_path, branch, phase)
+    _run_provenance(root_path, branch)
+    for name in ("PHASE_COMPLETE.json", "abacus.stdout", "abacus.stderr"):
+        if os.path.lexists(phase_root / name):
+            raise ValueError(
+                f"stale phase evidence exists before launch: {branch}/{phase}/{name}"
+            )
+    out = phase_root / "OUT.C_PBE_REFERENCE_GATE"
+    if spec.restart:
+        if out.is_symlink() or not out.is_dir():
+            raise ValueError(
+                f"restart phase lacks local OUT directory: {branch}/{phase}"
+            )
+        actual = set(os.listdir(out))
+        if actual != set(RESTART_FILES):
+            raise ValueError(
+                f"restart phase contains stale or incomplete OUT files: {branch}/{phase}"
+            )
+        for name in RESTART_FILES:
+            _read_regular(out / name, f"restart input {name}", nonempty=True)
+        _verify_restart_provenance(
+            root_path,
+            branch,
+            phase,
+            require_verified=False,
+            check_planned_destination=True,
+        )
+    elif os.path.lexists(out):
+        raise ValueError(
+            f"cold/seed phase contains stale OUT directory: {branch}/{phase}"
+        )
+
+
+def _copy_regular(source: Path, destination: Path, label: str) -> dict[str, object]:
+    content = _read_regular(source, label, nonempty=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(destination, flags, 0o644)
+    try:
+        _write_all(descriptor, content)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return {"sha256": _sha256_bytes(content), "size": len(content)}
+
+
+def create_restart_phase(
+    root: str | Path, branch: str, source_phase: str, destination_phase: str
+) -> Path:
+    root_path = Path(root).expanduser().absolute()
+    branch_root, provenance = _branch_provenance(root_path, branch)
+    chain = BRANCH_PHASES[branch]
+    try:
+        source_index = chain.index(source_phase)
+    except ValueError as exc:
+        raise ValueError(f"invalid source phase for {branch}: {source_phase}") from exc
+    if source_index + 1 >= len(chain) or chain[source_index + 1] != destination_phase:
+        raise ValueError(f"invalid restart chain {source_phase}->{destination_phase}")
+    source_root = branch_root / source_phase
+    _verify_phase_evidence(root_path, branch, source_phase)
+    source_manifest = _load_json(
+        source_root / "PHASE_COMPLETE.json", "source phase completion"
+    )
+    if source_manifest.get("status") != "PHASE_COMPLETE":
+        raise ValueError("source phase is not complete")
+    destination_spec = _phase_spec(branch, destination_phase)
+    if not destination_spec.restart:
+        raise ValueError("restart destination must declare restart input")
+    destination = branch_root / destination_phase
+    if os.path.lexists(destination):
+        raise FileExistsError(f"restart destination already exists: {destination}")
+
+    temporary = branch_root / f".{destination_phase}.restart-{secrets.token_hex(8)}"
+    temporary.mkdir(mode=0o700)
+    published = False
+    try:
+        pseudo_name, orbital_name = _asset_names(provenance)
+        for name in ("STRU", "KPT", pseudo_name, orbital_name):
+            _copy_regular(source_root / name, temporary / name, f"source {name}")
+        input_content = _expected_input(branch, destination_spec)
+        (temporary / "INPUT").write_bytes(input_content)
+        os.mkdir(temporary / "OUT.C_PBE_REFERENCE_GATE")
+        os.mkdir(temporary / "restart_input_snapshot")
+        file_records = {}
+        for name in RESTART_FILES:
+            source = source_root / "OUT.C_PBE_REFERENCE_GATE" / name
+            destination_file = temporary / "OUT.C_PBE_REFERENCE_GATE" / name
+            snapshot = temporary / "restart_input_snapshot" / name
+            source_content = _read_regular(
+                source, f"source restart file {name}", nonempty=True
+            )
+            _copy_regular(source, destination_file, f"source restart file {name}")
+            _copy_regular(source, snapshot, f"source restart file {name}")
+            digest = _sha256_bytes(source_content)
+            size = len(source_content)
+            file_records[name] = {
+                "source_relative_path": str(source.relative_to(root_path)),
+                "source_sha256": digest,
+                "source_size": size,
+                "destination_relative_path": str(
+                    (destination / "OUT.C_PBE_REFERENCE_GATE" / name).relative_to(
+                        root_path
+                    )
+                ),
+                "destination_sha256": digest,
+                "destination_size": size,
+                "snapshot_relative_path": str(
+                    (destination / "restart_input_snapshot" / name).relative_to(
+                        root_path
+                    )
+                ),
+                "snapshot_sha256": digest,
+                "snapshot_size": size,
+            }
+        restart = {
+            "schema": "c-pbe-reference-gate-restart",
+            "version": 1,
+            "status": "PLANNED",
+            "branch": branch,
+            "source_phase": source_phase,
+            "destination_phase": destination_phase,
+            "source_phase_complete_sha256": _sha256_bytes(
+                _read_regular(
+                    source_root / "PHASE_COMPLETE.json",
+                    "source phase completion",
+                    nonempty=True,
+                )
+            ),
+            "destination_input_sha256": _sha256_bytes(input_content),
+            "files": file_records,
+            "load_evidence": None,
+        }
+        _atomic_write_json(
+            temporary / "RESTART_PROVENANCE.json", restart, noreplace=True
+        )
+        _fsync_directory(temporary)
+        branch_fd = os.open(
+            branch_root, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            prepare_gate._publish_noreplace(
+                branch_fd, temporary.name, destination_phase
+            )
+            published = True
+            prepare_gate._fsync_directory(branch_fd)
+        finally:
+            os.close(branch_fd)
+    finally:
+        if not published and temporary.exists():
+            shutil.rmtree(temporary)
+    return destination
+
+
+def _restart_load_lines(phase_root: Path) -> dict[str, object]:
+    stdout_path = phase_root / "abacus.stdout"
+    log_path = phase_root / "OUT.C_PBE_REFERENCE_GATE/running_scf.log"
+    stdout = _read_regular(stdout_path, "ABACUS stdout").decode(
+        "utf-8", errors="strict"
+    )
+    log = _read_regular(log_path, "running_scf.log", nonempty=True).decode(
+        "utf-8", errors="strict"
+    )
+    wfc_lines = []
+    charge_lines = []
+    all_wfc_lines = re.findall(
+        r"^.*Read NAO wave functions from .*\s*$", stdout, flags=re.MULTILINE
+    )
+    all_charge_lines = re.findall(
+        r"^.*Read in electron density: .*\s*$", log, flags=re.MULTILINE
+    )
+    if len(all_wfc_lines) != 2:
+        raise ValueError(
+            "restart stdout must contain exactly two wave-function load messages"
+        )
+    if len(all_charge_lines) != 2:
+        raise ValueError(
+            "running_scf.log must contain exactly two charge-density load messages"
+        )
+    for spin in (1, 2):
+        wfc_pattern = re.compile(
+            rf"^.*Read NAO wave functions from .*wfs{spin}_nao\.txt\s*$", re.MULTILINE
+        )
+        charge_pattern = re.compile(
+            rf"^.*Read in electron density: .*chgs{spin}\.cube\s*$", re.MULTILINE
+        )
+        wfc_matches = wfc_pattern.findall(stdout)
+        charge_matches = charge_pattern.findall(log)
+        if len(wfc_matches) != 1 or len(charge_matches) != 1:
+            raise ValueError(
+                f"restart load evidence for spin {spin} is missing or ambiguous"
+            )
+        wfc_lines.extend(wfc_matches)
+        charge_lines.extend(charge_matches)
+    return {
+        "stdout_sha256": _sha256_bytes(stdout.encode("utf-8")),
+        "running_scf_log_sha256": _sha256_bytes(log.encode("utf-8")),
+        "wfc_load_lines": wfc_lines,
+        "charge_load_lines": charge_lines,
+    }
+
+
+def _verify_restart_provenance(
+    root: Path,
+    branch: str,
+    phase: str,
+    *,
+    require_verified: bool,
+    check_planned_destination: bool = True,
+) -> dict[str, object]:
+    phase_root = root / "runs" / branch / phase
+    path = phase_root / "RESTART_PROVENANCE.json"
+    value = _load_json(path, "restart provenance")
+    expected_status = "VERIFIED" if require_verified else "PLANNED"
+    if (
+        value.get("schema") != "c-pbe-reference-gate-restart"
+        or value.get("status") != expected_status
+    ):
+        raise ValueError(f"{branch}/{phase} restart provenance status is invalid")
+    if value.get("branch") != branch or value.get("destination_phase") != phase:
+        raise ValueError(f"{branch}/{phase} restart provenance identity is invalid")
+    chain = BRANCH_PHASES[branch]
+    phase_index = chain.index(phase)
+    expected_source = chain[phase_index - 1]
+    if phase_index == 0 or value.get("source_phase") != expected_source:
+        raise ValueError(f"{branch}/{phase} restart source chain is invalid")
+    source_root = root / "runs" / branch / expected_source
+    source_manifest_path = source_root / "PHASE_COMPLETE.json"
+    if value.get("source_phase_complete_sha256") != _sha256_bytes(
+        _read_regular(source_manifest_path, "source phase completion", nonempty=True)
+    ):
+        raise ValueError(f"{branch}/{phase} source phase manifest hash changed")
+    if value.get("destination_input_sha256") != _sha256_bytes(
+        _read_regular(phase_root / "INPUT", "restart INPUT", nonempty=True)
+    ):
+        raise ValueError(f"{branch}/{phase} destination INPUT hash changed")
+    files = value.get("files")
+    if not isinstance(files, dict) or set(files) != set(RESTART_FILES):
+        raise ValueError(f"{branch}/{phase} restart file manifest is incomplete")
+    for name in RESTART_FILES:
+        record = files[name]
+        if not isinstance(record, dict):
+            raise ValueError(f"{branch}/{phase} restart record is invalid for {name}")
+        expected_paths = {
+            "source_relative_path": f"runs/{branch}/{expected_source}/OUT.C_PBE_REFERENCE_GATE/{name}",
+            "destination_relative_path": f"runs/{branch}/{phase}/OUT.C_PBE_REFERENCE_GATE/{name}",
+            "snapshot_relative_path": f"runs/{branch}/{phase}/restart_input_snapshot/{name}",
+        }
+        for key, expected_path in expected_paths.items():
+            if record.get(key) != expected_path:
+                raise ValueError(
+                    f"{branch}/{phase} restart relative path is invalid for {name}"
+                )
+        source_content = _read_regular(
+            source_root / "OUT.C_PBE_REFERENCE_GATE" / name,
+            f"source {name}",
+            nonempty=True,
+        )
+        snapshot_content = _read_regular(
+            phase_root / "restart_input_snapshot" / name,
+            f"snapshot {name}",
+            nonempty=True,
+        )
+        digest = _sha256_bytes(source_content)
+        size = len(source_content)
+        if digest != _sha256_bytes(snapshot_content) or size != len(snapshot_content):
+            raise ValueError(
+                f"{branch}/{phase} snapshot differs from source output for {name}"
+            )
+        for prefix in ("source", "destination", "snapshot"):
+            if (
+                record.get(f"{prefix}_sha256") != digest
+                or record.get(f"{prefix}_size") != size
+            ):
+                raise ValueError(
+                    f"{branch}/{phase} recorded {prefix} hash is invalid for {name}"
+                )
+        if not require_verified and check_planned_destination:
+            destination_content = _read_regular(
+                phase_root / "OUT.C_PBE_REFERENCE_GATE" / name,
+                f"destination restart input {name}",
+                nonempty=True,
+            )
+            if (
+                _sha256_bytes(destination_content) != digest
+                or len(destination_content) != size
+            ):
+                raise ValueError(
+                    f"{branch}/{phase} destination restart input differs for {name}"
+                )
+    if require_verified:
+        actual_evidence = _restart_load_lines(phase_root)
+        if value.get("load_evidence") != actual_evidence:
+            raise ValueError(f"{branch}/{phase} recorded load evidence is invalid")
+    elif value.get("load_evidence") is not None:
+        raise ValueError(
+            f"{branch}/{phase} planned restart already claims load evidence"
+        )
+    return value
+
+
+def _verify_and_publish_restart(root: Path, branch: str, phase: str) -> str:
+    phase_root = root / "runs" / branch / phase
+    value = _verify_restart_provenance(
+        root,
+        branch,
+        phase,
+        require_verified=False,
+        check_planned_destination=False,
+    )
+    value["status"] = "VERIFIED"
+    value["load_evidence"] = _restart_load_lines(phase_root)
+    _atomic_write_json(phase_root / "RESTART_PROVENANCE.json", value, noreplace=False)
+    _verify_restart_provenance(root, branch, phase, require_verified=True)
+    return _sha256_bytes(
+        _read_regular(
+            phase_root / "RESTART_PROVENANCE.json", "restart provenance", nonempty=True
+        )
+    )
+
+
+def _parse_utc(value: str, label: str) -> datetime:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an ISO UTC timestamp") from exc
+    return parsed
+
+
+def complete_phase(
+    root: str | Path,
+    branch: str,
+    phase: str,
+    started_utc: str,
+    ended_utc: str,
+    wall_seconds: float,
+) -> dict[str, object]:
+    root_path = Path(root).expanduser().absolute()
+    phase_root, provenance, spec = _validate_phase_controls(root_path, branch, phase)
+    branch_root, run = _run_provenance(root_path, branch)
+    started = _parse_utc(started_utc, "phase start")
+    ended = _parse_utc(ended_utc, "phase end")
+    if ended < started or wall_seconds < 0:
+        raise ValueError("phase timing is invalid")
+    result = audit_phase(
+        phase_root,
+        expected_mode=spec.mode,
+        expected_restart=spec.restart,
+        expected_field_dir=spec.field_dir,
+    )
+    out = phase_root / "OUT.C_PBE_REFERENCE_GATE"
+    for name in RESTART_FILES:
+        _read_regular(out / name, f"phase restart output {name}", nonempty=True)
+    for name in ("abacus.stdout", "abacus.stderr"):
+        _read_regular(phase_root / name, name)
+    restart_hash = (
+        _verify_and_publish_restart(root_path, branch, phase) if spec.restart else None
+    )
+    pseudo_name, orbital_name = _asset_names(provenance)
+    controls = {
+        name: _record(phase_root / name, phase_root, name, nonempty=True)
+        for name in ("INPUT", "STRU", "KPT")
+    }
+    assets = {
+        name: _record(phase_root / name, phase_root, name, nonempty=True)
+        for name in (pseudo_name, orbital_name)
+    }
+    output_paths = {
+        "running_scf.log": out / "running_scf.log",
+        "eig_occ.txt": out / "eig_occ.txt",
+        "abacus.stdout": phase_root / "abacus.stdout",
+        "abacus.stderr": phase_root / "abacus.stderr",
+        **{name: out / name for name in RESTART_FILES},
+    }
+    outputs = {
+        name: _record(
+            path,
+            phase_root,
+            name,
+            nonempty=name not in {"abacus.stdout", "abacus.stderr"},
+        )
+        for name, path in output_paths.items()
+    }
+    manifest = {
+        "schema": "c-pbe-reference-gate-phase-complete",
+        "version": 1,
+        "status": "PHASE_COMPLETE",
+        "branch": branch,
+        "phase": phase,
+        "mode": spec.mode,
+        "field_dir": _field_direction(branch, spec),
+        "restart_loaded": spec.restart,
+        "restart_provenance_sha256": restart_hash,
+        "started_utc": started_utc,
+        "ended_utc": ended_utc,
+        "wall_seconds": float(wall_seconds),
+        "scheduler": run["scheduler"],
+        "executable": run["executable"],
+        "runner": run["runner"],
+        "controls": controls,
+        "assets": assets,
+        "outputs": outputs,
+        "energy_ev": result.energy_ev,
+        "energy_ha": result.energy_ha,
+        "spin_counts": {str(key): value for key, value in result.spin_counts.items()},
+        "occupations": {
+            str(key): list(values) for key, values in result.occupations.items()
+        },
+        "stage_sha256": result.stage_hash,
+    }
+    _atomic_write_json(phase_root / "PHASE_COMPLETE.json", manifest, noreplace=True)
+    return manifest
+
+
+def _verify_record(
+    path: Path, record: object, base: Path, label: str, *, nonempty: bool = False
+) -> None:
+    if not isinstance(record, dict):
+        raise ValueError(f"{label} record is invalid")
+    actual = _record(path, base, label, nonempty=nonempty)
+    if record != actual:
+        raise ValueError(f"{label} record does not match the current file")
+
+
+def _verify_phase_evidence(
+    root: Path, branch: str, phase: str, result: PhaseResult | None = None
+) -> dict[str, object]:
+    phase_root, provenance, spec = _validate_phase_controls(root, branch, phase)
+    _, run = _run_provenance(root, branch)
+    manifest_path = phase_root / "PHASE_COMPLETE.json"
+    manifest = _load_json(manifest_path, f"{branch}/{phase} phase completion")
+    identity = (
+        manifest.get("schema"),
+        manifest.get("status"),
+        manifest.get("branch"),
+        manifest.get("phase"),
+        manifest.get("mode"),
+        manifest.get("field_dir"),
+        manifest.get("restart_loaded"),
+    )
+    expected_identity = (
+        "c-pbe-reference-gate-phase-complete",
+        "PHASE_COMPLETE",
+        branch,
+        phase,
+        spec.mode,
+        _field_direction(branch, spec),
+        spec.restart,
+    )
+    if identity != expected_identity:
+        raise ValueError(f"{branch}/{phase} phase manifest identity is invalid")
+    if (
+        manifest.get("scheduler") != run["scheduler"]
+        or manifest.get("executable") != run["executable"]
+        or manifest.get("runner") != run["runner"]
+    ):
+        raise ValueError(
+            f"{branch}/{phase} runtime provenance differs from branch evidence"
+        )
+    _validate_scheduler_record(manifest["scheduler"], branch)
+    started = _parse_utc(manifest.get("started_utc"), "phase start")
+    ended = _parse_utc(manifest.get("ended_utc"), "phase end")
+    wall = manifest.get("wall_seconds")
+    if ended < started or not isinstance(wall, (int, float)) or wall < 0:
+        raise ValueError(f"{branch}/{phase} timing evidence is invalid")
+    pseudo_name, orbital_name = _asset_names(provenance)
+    controls = manifest.get("controls")
+    assets = manifest.get("assets")
+    outputs = manifest.get("outputs")
+    if not isinstance(controls, dict) or set(controls) != {"INPUT", "STRU", "KPT"}:
+        raise ValueError(f"{branch}/{phase} control manifest is incomplete")
+    if not isinstance(assets, dict) or set(assets) != {pseudo_name, orbital_name}:
+        raise ValueError(f"{branch}/{phase} asset manifest is incomplete")
+    expected_outputs = {
+        "running_scf.log",
+        "eig_occ.txt",
+        "abacus.stdout",
+        "abacus.stderr",
+        *RESTART_FILES,
+    }
+    if not isinstance(outputs, dict) or set(outputs) != expected_outputs:
+        raise ValueError(f"{branch}/{phase} output manifest is incomplete")
+    for name in controls:
+        _verify_record(
+            phase_root / name,
+            controls[name],
+            phase_root,
+            f"{phase} {name}",
+            nonempty=True,
+        )
+    for name in assets:
+        _verify_record(
+            phase_root / name,
+            assets[name],
+            phase_root,
+            f"{phase} {name}",
+            nonempty=True,
+        )
+    out = phase_root / "OUT.C_PBE_REFERENCE_GATE"
+    output_paths = {
+        "running_scf.log": out / "running_scf.log",
+        "eig_occ.txt": out / "eig_occ.txt",
+        "abacus.stdout": phase_root / "abacus.stdout",
+        "abacus.stderr": phase_root / "abacus.stderr",
+        **{name: out / name for name in RESTART_FILES},
+    }
+    for name, path in output_paths.items():
+        _verify_record(
+            path,
+            outputs[name],
+            phase_root,
+            f"{phase} {name}",
+            nonempty=name not in {"abacus.stdout", "abacus.stderr"},
+        )
+    if result is None:
+        result = audit_phase(phase_root, spec.mode, spec.restart, spec.field_dir)
+    if (
+        manifest.get("energy_ev") != result.energy_ev
+        or manifest.get("energy_ha") != result.energy_ha
+    ):
+        raise ValueError(f"{branch}/{phase} recorded energy differs from ABACUS output")
+    if manifest.get("spin_counts") != {
+        str(key): value for key, value in result.spin_counts.items()
+    }:
+        raise ValueError(
+            f"{branch}/{phase} recorded spin counts differ from ABACUS output"
+        )
+    if manifest.get("occupations") != {
+        str(key): list(values) for key, values in result.occupations.items()
+    }:
+        raise ValueError(
+            f"{branch}/{phase} recorded occupations differ from ABACUS output"
+        )
+    if manifest.get("stage_sha256") != result.stage_hash:
+        raise ValueError(
+            f"{branch}/{phase} recorded stage hash differs from ABACUS output"
+        )
+    if spec.restart:
+        _verify_restart_provenance(root, branch, phase, require_verified=True)
+        restart_hash = _sha256_bytes(
+            _read_regular(
+                phase_root / "RESTART_PROVENANCE.json",
+                "restart provenance",
+                nonempty=True,
+            )
+        )
+        if manifest.get("restart_provenance_sha256") != restart_hash:
+            raise ValueError(f"{branch}/{phase} restart provenance hash differs")
+    elif manifest.get("restart_provenance_sha256") is not None:
+        raise ValueError(f"{branch}/{phase} cold phase claims restart evidence")
+    return manifest
+
+
+def complete_branch(
+    root: str | Path, branch: str, started_utc: str, ended_utc: str, wall_seconds: float
+) -> dict[str, object]:
+    root_path = Path(root).expanduser().absolute()
+    branch_root, run = _run_provenance(root_path, branch)
+    if os.path.lexists(branch_root / "RUN_FAILED.json"):
+        raise ValueError(f"{branch} has failure evidence and cannot be completed")
+    started = _parse_utc(started_utc, "branch start")
+    ended = _parse_utc(ended_utc, "branch end")
+    if ended < started or wall_seconds < 0:
+        raise ValueError("branch timing is invalid")
+    phase_hashes = {}
+    restart_hashes = {}
+    for phase in BRANCH_PHASES[branch]:
+        _verify_phase_evidence(root_path, branch, phase)
+        phase_hashes[phase] = _sha256_bytes(
+            _read_regular(
+                branch_root / phase / "PHASE_COMPLETE.json",
+                "phase completion",
+                nonempty=True,
+            )
+        )
+        spec = _phase_spec(branch, phase)
+        if spec.restart:
+            restart_hashes[phase] = _sha256_bytes(
+                _read_regular(
+                    branch_root / phase / "RESTART_PROVENANCE.json",
+                    "restart provenance",
+                    nonempty=True,
+                )
+            )
+    manifest = {
+        "schema": "c-pbe-reference-gate-branch-complete",
+        "version": 1,
+        "status": "BRANCH_COMPLETE",
+        "branch": branch,
+        "phase_order": list(BRANCH_PHASES[branch]),
+        "phase_complete_sha256": phase_hashes,
+        "restart_provenance_sha256": restart_hashes,
+        "executable": run["executable"],
+        "runner": run["runner"],
+        "scheduler": run["scheduler"],
+        "branch_run_provenance_sha256": _sha256_bytes(
+            _read_regular(
+                branch_root / "BRANCH_RUN_PROVENANCE.json",
+                "branch run provenance",
+                nonempty=True,
+            )
+        ),
+        "started_utc": started_utc,
+        "ended_utc": ended_utc,
+        "wall_seconds": float(wall_seconds),
+    }
+    _atomic_write_json(branch_root / "BRANCH_COMPLETE.json", manifest, noreplace=True)
+    return manifest
+
+
+def _verify_execution_evidence(
+    root: Path, results: dict[str, PhaseResult]
+) -> dict[str, object] | None:
+    evidence_paths = []
+    for branch, phases in BRANCH_PHASES.items():
+        branch_root = root / "runs" / branch
+        evidence_paths.extend(
+            (
+                branch_root / "BRANCH_RUN_PROVENANCE.json",
+                branch_root / "BRANCH_COMPLETE.json",
+            )
+        )
+        for phase in phases:
+            evidence_paths.append(branch_root / phase / "PHASE_COMPLETE.json")
+            if _phase_spec(branch, phase).restart:
+                evidence_paths.append(branch_root / phase / "RESTART_PROVENANCE.json")
+    present = [path for path in evidence_paths if os.path.lexists(path)]
+    if not present:
+        return None
+    if len(present) != len(evidence_paths):
+        raise ValueError("Task4 execution evidence is incomplete")
+
+    branch_summaries = {}
+    executable_records = []
+    runner_records = []
+    array_job_ids = []
+    for branch, phases in BRANCH_PHASES.items():
+        branch_root, run = _run_provenance(root, branch)
+        if os.path.lexists(branch_root / "RUN_FAILED.json"):
+            raise ValueError(f"{branch} contains RUN_FAILED evidence")
+        executable_records.append(run["executable"])
+        runner_records.append(run["runner"])
+        array_job_ids.append(run["scheduler"]["array_job_id"])
+        for phase in phases:
+            _verify_phase_evidence(
+                root, branch, phase, results[f"runs/{branch}/{phase}"]
+            )
+        complete_path = branch_root / "BRANCH_COMPLETE.json"
+        complete = _load_json(complete_path, f"{branch} completion")
+        if (
+            complete.get("schema") != "c-pbe-reference-gate-branch-complete"
+            or complete.get("status") != "BRANCH_COMPLETE"
+            or complete.get("branch") != branch
+            or complete.get("phase_order") != list(phases)
+            or complete.get("scheduler") != run["scheduler"]
+            or complete.get("executable") != run["executable"]
+            or complete.get("runner") != run["runner"]
+        ):
+            raise ValueError(f"{branch} completion manifest identity is invalid")
+        expected_phase_hashes = {
+            phase: _sha256_bytes(
+                _read_regular(
+                    branch_root / phase / "PHASE_COMPLETE.json",
+                    "phase completion",
+                    nonempty=True,
+                )
+            )
+            for phase in phases
+        }
+        expected_restart_hashes = {
+            phase: _sha256_bytes(
+                _read_regular(
+                    branch_root / phase / "RESTART_PROVENANCE.json",
+                    "restart provenance",
+                    nonempty=True,
+                )
+            )
+            for phase in phases
+            if _phase_spec(branch, phase).restart
+        }
+        if (
+            complete.get("phase_complete_sha256") != expected_phase_hashes
+            or complete.get("restart_provenance_sha256") != expected_restart_hashes
+        ):
+            raise ValueError(f"{branch} completion manifest hashes are invalid")
+        run_hash = _sha256_bytes(
+            _read_regular(
+                branch_root / "BRANCH_RUN_PROVENANCE.json",
+                "run provenance",
+                nonempty=True,
+            )
+        )
+        if complete.get("branch_run_provenance_sha256") != run_hash:
+            raise ValueError(
+                f"{branch} run provenance hash differs from branch completion"
+            )
+        started = _parse_utc(complete.get("started_utc"), "branch start")
+        ended = _parse_utc(complete.get("ended_utc"), "branch end")
+        if (
+            ended < started
+            or not isinstance(complete.get("wall_seconds"), (int, float))
+            or complete["wall_seconds"] < 0
+        ):
+            raise ValueError(f"{branch} completion timing is invalid")
+        branch_summaries[branch] = {
+            "branch_complete_sha256": _sha256_bytes(
+                _read_regular(complete_path, "branch completion", nonempty=True)
+            ),
+            "wall_seconds": complete["wall_seconds"],
+            "scheduler": complete["scheduler"],
+        }
+    if any(record != executable_records[0] for record in executable_records[1:]):
+        raise ValueError("ABACUS executable provenance differs across branches")
+    if any(record != runner_records[0] for record in runner_records[1:]):
+        raise ValueError("Task4 runner provenance differs across branches")
+    if any(job_id != array_job_ids[0] for job_id in array_job_ids[1:]):
+        raise ValueError("branches do not belong to one Slurm array job")
+    return {
+        "status": "RESTART_CHAIN_VERIFIED",
+        "branches": branch_summaries,
+        "executable": executable_records[0],
+        "runner": runner_records[0],
+    }
 
 
 def _phase_dict(phase: PhaseResult, root: Path) -> dict[str, object]:
@@ -110,15 +1226,18 @@ def audit_gate(root: str | Path) -> dict[str, object]:
         fixed_drift_kcal=fixed_drift,
         free_drifts_kcal=free_drifts,
     )
+    execution_evidence = _verify_execution_evidence(root_path, phases)
+    evidence_complete = execution_evidence is not None
     return {
-        "status": "DIAGNOSTIC_ONLY",
+        "status": "PBE_GATE_PASSED" if evidence_complete else "DIAGNOSTIC_ONLY",
         "zero_field_comparison_status": comparison["status"],
         "authoritative_result": AUTHORITATIVE_RESULT,
-        "restart_chain_evidence": {
+        "restart_chain_evidence": execution_evidence
+        or {
             "status": RESTART_CHAIN_STATUS,
             "note": RESTART_CHAIN_NOTE,
         },
-        "blocked_on": "restart_chain_evidence",
+        "blocked_on": None if evidence_complete else "restart_chain_evidence",
         "phases": {
             spec.relative: _phase_dict(phases[spec.relative], root_path)
             for spec in PHASES
@@ -135,27 +1254,24 @@ def _summary_text(summary: dict[str, object]) -> str:
     if summary["status"] == "PBE_GATE_FAILED":
         lines.append(f"error={summary.get('error', 'unknown audit failure')}")
         return "\n".join(lines) + "\n"
-    if summary["status"] != "DIAGNOSTIC_ONLY":
+    if summary["status"] not in {"DIAGNOSTIC_ONLY", "PBE_GATE_PASSED"}:
         raise ValueError(f"unsupported audit status: {summary['status']}")
 
     lines.append(
-        "zero_field_comparison_status="
-        f"{summary['zero_field_comparison_status']}"
+        "zero_field_comparison_status=" f"{summary['zero_field_comparison_status']}"
     )
-    lines.append(f"restart_chain_evidence={RESTART_CHAIN_STATUS}")
+    restart_status = summary["restart_chain_evidence"]["status"]
+    lines.append(f"restart_chain_evidence={restart_status}")
     lines.append(f"blocked_on={summary['blocked_on']}")
-    lines.append(f"restart_chain_note={RESTART_CHAIN_NOTE}")
+    if summary["status"] == "DIAGNOSTIC_ONLY":
+        lines.append(f"restart_chain_note={RESTART_CHAIN_NOTE}")
     phases = summary["phases"]
     for spec in PHASES:
         phase = phases[spec.relative]
         counts = phase["spin_counts"]
         occupations = phase["occupations"]
-        spin1_occupations = ",".join(
-            f"{value:.16g}" for value in occupations["1"]
-        )
-        spin2_occupations = ",".join(
-            f"{value:.16g}" for value in occupations["2"]
-        )
+        spin1_occupations = ",".join(f"{value:.16g}" for value in occupations["1"])
+        spin2_occupations = ",".join(f"{value:.16g}" for value in occupations["2"])
         lines.append(
             f"phase={spec.relative} energy_ev={phase['energy_ev']:.16g} "
             f"energy_ha={phase['energy_ha']:.16g} spin1={counts['1']:.1f} "
@@ -246,11 +1362,102 @@ def write_summaries(root: Path, summary: dict[str, object]) -> None:
         raise
 
 
+def _runner_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Internal Task4 runner evidence operations"
+    )
+    subparsers = parser.add_subparsers(dest="runner_command", required=True)
+
+    initialize = subparsers.add_parser("runner-init")
+    initialize.add_argument("--root", required=True)
+    initialize.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    initialize.add_argument("--abacus", required=True)
+    initialize.add_argument("--runner", required=True)
+
+    preflight = subparsers.add_parser("preflight-phase")
+    preflight.add_argument("--root", required=True)
+    preflight.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    preflight.add_argument("--phase", required=True)
+
+    restart = subparsers.add_parser("create-restart")
+    restart.add_argument("--root", required=True)
+    restart.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    restart.add_argument("--source", required=True)
+    restart.add_argument("--destination", required=True)
+
+    phase = subparsers.add_parser("complete-phase")
+    phase.add_argument("--root", required=True)
+    phase.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    phase.add_argument("--phase", required=True)
+    phase.add_argument("--started-utc", required=True)
+    phase.add_argument("--ended-utc", required=True)
+    phase.add_argument("--wall-seconds", required=True, type=float)
+
+    branch = subparsers.add_parser("complete-branch")
+    branch.add_argument("--root", required=True)
+    branch.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    branch.add_argument("--started-utc", required=True)
+    branch.add_argument("--ended-utc", required=True)
+    branch.add_argument("--wall-seconds", required=True, type=float)
+    return parser
+
+
+def _runner_main(argv: list[str]) -> int:
+    parser = _runner_parser()
+    arguments = parser.parse_args(argv)
+    try:
+        if arguments.runner_command == "runner-init":
+            result = initialize_branch_run(
+                arguments.root, arguments.branch, arguments.abacus, arguments.runner
+            )
+        elif arguments.runner_command == "preflight-phase":
+            preflight_phase(arguments.root, arguments.branch, arguments.phase)
+            result = {"status": "PREFLIGHT_OK"}
+        elif arguments.runner_command == "create-restart":
+            path = create_restart_phase(
+                arguments.root,
+                arguments.branch,
+                arguments.source,
+                arguments.destination,
+            )
+            result = {"status": "RESTART_PREPARED", "path": str(path)}
+        elif arguments.runner_command == "complete-phase":
+            result = complete_phase(
+                arguments.root,
+                arguments.branch,
+                arguments.phase,
+                arguments.started_utc,
+                arguments.ended_utc,
+                arguments.wall_seconds,
+            )
+        else:
+            result = complete_branch(
+                arguments.root,
+                arguments.branch,
+                arguments.started_utc,
+                arguments.ended_utc,
+                arguments.wall_seconds,
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv and effective_argv[0] in {
+        "runner-init",
+        "preflight-phase",
+        "create-restart",
+        "complete-phase",
+        "complete-branch",
+    }:
+        return _runner_main(effective_argv)
     parser = argparse.ArgumentParser(description="Audit the C atom PBE reference gate")
     parser.add_argument("root_positional", nargs="?", help="gate root directory")
     parser.add_argument("--root", dest="root_option", help="gate root directory")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     if args.root_positional is not None and args.root_option is not None:
         parser.error("positional root and --root cannot be used together")
     root_argument = args.root_option or args.root_positional or "."

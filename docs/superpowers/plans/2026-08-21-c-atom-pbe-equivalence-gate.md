@@ -342,8 +342,11 @@ git commit -m "feat(siab): prepare C PBE gate branches"
 **Files:**
 - Create: `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch.slurm`
 - Create: `SIAB/example_C_sternheimer/pbe_reference_gate/tests/test_hpc_contract.py`
+- Modify: `SIAB/example_C_sternheimer/pbe_reference_gate/audit_gate.py`
+- Modify: `docs/superpowers/specs/2026-08-21-c-atom-reference-equivalence-design.md`
+- Modify: `docs/superpowers/plans/2026-08-21-c-atom-pbe-equivalence-gate.md`
 
-- [ ] **Step 1: Write failing static HPC tests**
+- [x] **Step 1: Write failing static HPC tests**
 
 ```python
 import unittest
@@ -363,7 +366,7 @@ class HpcContractTests(unittest.TestCase):
             "#SBATCH --cpus-per-task=32",
             "#SBATCH --mem=126500M",
             "#SBATCH --time=24:00:00",
-            "export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK",
+            "export OMP_NUM_THREADS=32",
         ):
             self.assertIn(value, text)
         self.assertNotIn("debug", text.lower())
@@ -377,33 +380,52 @@ class HpcContractTests(unittest.TestCase):
         self.assertIn('grep -q "^init_chg file$" INPUT', text)
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Expected: `FileNotFoundError` for the runner.
 
-- [ ] **Step 3: Implement the Slurm runner**
+- [x] **Step 3: Implement the Slurm runner**
 
-The runner must:
+The implemented runner and auditor must:
 
 1. assert the live Slurm resource contract;
 2. resolve `ABACUS_ARTIFACT`, verify the executable and record its SHA256;
 3. map array task 0 to `fixed`, and 1--3 to `dir0`--`dir2`;
-4. call `prepare_gate.py` once for its branch;
+4. call `prepare_gate.py` once successfully for its branch, using a bounded
+   cross-node guard so the four array tasks do not collide on the preparation
+   lock;
 5. run ABACUS through `mpirun -np 1 -ppn 1` with 32 OpenMP threads;
 6. require convergence, final energy, `eig_occ.txt`, both spin wavefunctions,
    and charge restart output after every phase;
-7. copy the completed phase into the next restart directory, rewrite only
-   `INPUT`, and verify the restart/free-input contract before launch;
-8. write `BRANCH_COMPLETE.json` atomically only after all phases finish.
+7. create the next restart phase atomically without copying the old output
+   directory: copy only `STRU`, `KPT`, both assets and
+   `wfs1_nao.txt`, `wfs2_nao.txt`, `chgs1.cube`, `chgs2.cube`;
+8. preserve the four source restart files under `restart_input_snapshot/` and
+   publish `RESTART_PROVENANCE.json` first as `PLANNED`;
+9. require exactly two wavefunction-load messages in `abacus.stdout` and two
+   charge-load messages in `running_scf.log`, then upgrade restart provenance
+   to `VERIFIED`;
+10. write `PHASE_COMPLETE.json` only after the phase input, 22-band 3/1
+    occupations, energy, executable, resources, outputs and restart evidence
+    have been rehashed;
+11. write `BRANCH_COMPLETE.json` atomically only after the complete fixed or
+    field/free chain finishes;
+12. let the global audit publish `PBE_GATE_PASSED` only after all 11 phases and
+    all four branch manifests close the evidence chain.  With no Task 4
+    evidence, the old Task 2 fixtures remain `DIAGNOSTIC_ONLY`; partial or
+    inconsistent evidence fails.
 
-Use `set -euo pipefail` and an `ERR` trap that records the failed line and
-command.  No branch writes the global scientific pass marker.
+Use `set -euo pipefail`, inherited ERR traps, and a branch-local atomic
+`RUN_FAILED.json` that records the failed line and command before exiting.
+No branch writes the global scientific pass marker.  The readable restart
+contract is fixed to `out_wfc_lcao=1`, `out_app_flag=1`, and the two spin text
+files; binary wavefunction restart output is not accepted.
 
-- [ ] **Step 4: Run all local tests**
+- [x] **Step 4: Run all local tests**
 
 Run the discovery command.  Expected: all tests pass.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add SIAB/example_C_sternheimer/pbe_reference_gate
