@@ -56,6 +56,20 @@ BRANCH_PHASES = {
     "dir1": ("field_seed", "free_restart1", "free_restart2"),
     "dir2": ("field_seed", "free_restart1", "free_restart2"),
 }
+RUNTIME_RECORD_SPECS = {
+    "python": ("Python interpreter", True),
+    "prepare_gate": ("prepare_gate.py source", False),
+    "audit_gate": ("audit_gate.py source", False),
+    "gate_contract": ("gate_contract.py source", False),
+    "resource_profiles": ("resource profile module", False),
+    "entrypoint": ("selected Slurm entrypoint", False),
+    "common_runner": ("common Task4 runner", False),
+    "executable": ("ABACUS executable", True),
+    "environment_script": ("ABACUS environment script", False),
+    "mpirun": ("mpirun executable", True),
+}
+
+
 @dataclass(frozen=True)
 class PhaseSpec:
     relative: str
@@ -804,6 +818,10 @@ def initialize_branch_run(
     root: str | Path,
     branch: str,
     gate_profile: str,
+    python: str | Path,
+    prepare_gate_source: str | Path,
+    audit_gate_source: str | Path,
+    gate_contract: str | Path,
     resource_profiles: str | Path,
     entrypoint: str | Path,
     common_runner: str | Path,
@@ -819,20 +837,24 @@ def initialize_branch_run(
         raise ValueError(f"invalid C PBE gate runtime profile: {gate_profile}") from exc
     if os.environ.get("C_PBE_GATE_PROFILE") != gate_profile:
         raise ValueError("runner profile differs from C_PBE_GATE_PROFILE")
-    _, resource_profiles_record = _canonical_file(
-        resource_profiles, "resource profile module", executable=False
-    )
-    _, entrypoint_record = _canonical_file(
-        entrypoint, "selected Slurm entrypoint", executable=False
-    )
-    _, common_runner_record = _canonical_file(
-        common_runner, "common Task4 runner", executable=False
-    )
-    _, executable = _canonical_file(abacus, "ABACUS executable", executable=True)
-    _, environment_record = _canonical_file(
-        environment_script, "ABACUS environment script", executable=False
-    )
-    _, mpirun_record = _canonical_file(mpirun, "mpirun executable", executable=True)
+    runtime_paths = {
+        "python": python,
+        "prepare_gate": prepare_gate_source,
+        "audit_gate": audit_gate_source,
+        "gate_contract": gate_contract,
+        "resource_profiles": resource_profiles,
+        "entrypoint": entrypoint,
+        "common_runner": common_runner,
+        "executable": abacus,
+        "environment_script": environment_script,
+        "mpirun": mpirun,
+    }
+    runtime_records = {}
+    for name, path in runtime_paths.items():
+        label, executable = RUNTIME_RECORD_SPECS[name]
+        _, runtime_records[name] = _canonical_file(
+            path, label, executable=executable
+        )
     scheduler = _scheduler_record(branch)
     if scheduler["profile"] != gate_profile:
         raise ValueError("scheduler profile differs from the runner profile")
@@ -842,12 +864,7 @@ def initialize_branch_run(
         "status": "RUN_PROVENANCE",
         "branch": branch,
         "gate_profile": gate_profile,
-        "resource_profiles": resource_profiles_record,
-        "entrypoint": entrypoint_record,
-        "common_runner": common_runner_record,
-        "executable": executable,
-        "environment_script": environment_record,
-        "mpirun": mpirun_record,
+        **runtime_records,
         "scheduler": scheduler,
         "preparation_provenance_sha256": _sha256_bytes(
             _read_regular(
@@ -877,38 +894,16 @@ def _run_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
     if value.get("gate_profile") != scheduler["profile"]:
         raise ValueError(f"{branch} run and scheduler profiles differ")
     records = {
-        "resource_profiles": (
-            value.get("resource_profiles"),
-            "recorded resource profile module",
-            False,
-        ),
-        "entrypoint": (
-            value.get("entrypoint"),
-            "recorded Slurm entrypoint",
-            False,
-        ),
-        "common_runner": (
-            value.get("common_runner"),
-            "recorded common runner",
-            False,
-        ),
-        "executable": (
-            value.get("executable"),
-            "recorded ABACUS executable",
-            True,
-        ),
-        "environment_script": (
-            value.get("environment_script"),
-            "recorded ABACUS environment script",
-            False,
-        ),
-        "mpirun": (value.get("mpirun"), "recorded mpirun executable", True),
+        name: value.get(name) for name in RUNTIME_RECORD_SPECS
     }
-    if any(not isinstance(record[0], dict) for record in records.values()):
-        raise ValueError(f"{branch} run provenance lacks binary records")
-    for name, (record, label, executable) in records.items():
+    if any(not isinstance(record, dict) for record in records.values()):
+        raise ValueError(f"{branch} run provenance lacks runtime file records")
+    for name, record in records.items():
+        label, executable = RUNTIME_RECORD_SPECS[name]
         _, current = _canonical_file(
-            record.get("absolute_path", ""), label, executable=executable
+            record.get("absolute_path", ""),
+            f"recorded {label}",
+            executable=executable,
         )
         if current != record:
             raise ValueError(f"{branch} recorded {name} hash no longer matches")
@@ -1355,12 +1350,7 @@ def complete_phase(
         "wall_seconds": float(wall_seconds),
         "scheduler": run["scheduler"],
         "gate_profile": run["gate_profile"],
-        "resource_profiles": run["resource_profiles"],
-        "entrypoint": run["entrypoint"],
-        "common_runner": run["common_runner"],
-        "executable": run["executable"],
-        "environment_script": run["environment_script"],
-        "mpirun": run["mpirun"],
+        **{name: run[name] for name in RUNTIME_RECORD_SPECS},
         "controls": controls,
         "assets": assets,
         "outputs": outputs,
@@ -1416,12 +1406,9 @@ def _verify_phase_evidence(
     if (
         manifest.get("scheduler") != run["scheduler"]
         or manifest.get("gate_profile") != run["gate_profile"]
-        or manifest.get("resource_profiles") != run["resource_profiles"]
-        or manifest.get("entrypoint") != run["entrypoint"]
-        or manifest.get("common_runner") != run["common_runner"]
-        or manifest.get("executable") != run["executable"]
-        or manifest.get("environment_script") != run["environment_script"]
-        or manifest.get("mpirun") != run["mpirun"]
+        or any(
+            manifest.get(name) != run[name] for name in RUNTIME_RECORD_SPECS
+        )
     ):
         raise ValueError(
             f"{branch}/{phase} runtime provenance differs from branch evidence"
@@ -1560,12 +1547,7 @@ def complete_branch(
         "phase_complete_sha256": phase_hashes,
         "restart_provenance_sha256": restart_hashes,
         "gate_profile": run["gate_profile"],
-        "resource_profiles": run["resource_profiles"],
-        "entrypoint": run["entrypoint"],
-        "common_runner": run["common_runner"],
-        "executable": run["executable"],
-        "environment_script": run["environment_script"],
-        "mpirun": run["mpirun"],
+        **{name: run[name] for name in RUNTIME_RECORD_SPECS},
         "scheduler": run["scheduler"],
         "branch_run_provenance_sha256": _sha256_bytes(
             _read_regular(
@@ -1615,12 +1597,7 @@ def _verify_execution_evidence(
 
     branch_summaries = {}
     gate_profiles = []
-    resource_profile_records = []
-    entrypoint_records = []
-    common_runner_records = []
-    executable_records = []
-    environment_records = []
-    mpirun_records = []
+    runtime_records = {name: [] for name in RUNTIME_RECORD_SPECS}
     array_job_ids = []
     preparation_signatures = []
     for branch, phases in BRANCH_PHASES.items():
@@ -1628,12 +1605,8 @@ def _verify_execution_evidence(
         preparation_signatures.append(_preparation_signature(preparation, branch))
         branch_root, run = _run_provenance(root, branch)
         gate_profiles.append(run["gate_profile"])
-        resource_profile_records.append(run["resource_profiles"])
-        entrypoint_records.append(run["entrypoint"])
-        common_runner_records.append(run["common_runner"])
-        executable_records.append(run["executable"])
-        environment_records.append(run["environment_script"])
-        mpirun_records.append(run["mpirun"])
+        for name in RUNTIME_RECORD_SPECS:
+            runtime_records[name].append(run[name])
         array_job_ids.append(run["scheduler"]["array_job_id"])
         for phase in phases:
             _verify_phase_evidence(
@@ -1648,12 +1621,10 @@ def _verify_execution_evidence(
             or complete.get("phase_order") != list(phases)
             or complete.get("scheduler") != run["scheduler"]
             or complete.get("gate_profile") != run["gate_profile"]
-            or complete.get("resource_profiles") != run["resource_profiles"]
-            or complete.get("entrypoint") != run["entrypoint"]
-            or complete.get("common_runner") != run["common_runner"]
-            or complete.get("executable") != run["executable"]
-            or complete.get("environment_script") != run["environment_script"]
-            or complete.get("mpirun") != run["mpirun"]
+            or any(
+                complete.get(name) != run[name]
+                for name in RUNTIME_RECORD_SPECS
+            )
         ):
             raise ValueError(f"{branch} completion manifest identity is invalid")
         expected_phase_hashes = {
@@ -1710,23 +1681,9 @@ def _verify_execution_evidence(
         }
     if any(profile != gate_profiles[0] for profile in gate_profiles[1:]):
         raise ValueError("C PBE gate profile differs across branches")
-    if any(
-        record != resource_profile_records[0]
-        for record in resource_profile_records[1:]
-    ):
-        raise ValueError("resource profile provenance differs across branches")
-    if any(record != entrypoint_records[0] for record in entrypoint_records[1:]):
-        raise ValueError("Slurm entrypoint provenance differs across branches")
-    if any(
-        record != common_runner_records[0] for record in common_runner_records[1:]
-    ):
-        raise ValueError("common runner provenance differs across branches")
-    if any(record != executable_records[0] for record in executable_records[1:]):
-        raise ValueError("ABACUS executable provenance differs across branches")
-    if any(record != environment_records[0] for record in environment_records[1:]):
-        raise ValueError("ABACUS environment provenance differs across branches")
-    if any(record != mpirun_records[0] for record in mpirun_records[1:]):
-        raise ValueError("mpirun provenance differs across branches")
+    for name, records in runtime_records.items():
+        if any(record != records[0] for record in records[1:]):
+            raise ValueError(f"{name} provenance differs across branches")
     if any(job_id != array_job_ids[0] for job_id in array_job_ids[1:]):
         raise ValueError("branches do not belong to one Slurm array job")
     if any(
@@ -1740,12 +1697,7 @@ def _verify_execution_evidence(
         "status": "RESTART_CHAIN_VERIFIED",
         "branches": branch_summaries,
         "gate_profile": gate_profiles[0],
-        "resource_profiles": resource_profile_records[0],
-        "entrypoint": entrypoint_records[0],
-        "common_runner": common_runner_records[0],
-        "executable": executable_records[0],
-        "environment_script": environment_records[0],
-        "mpirun": mpirun_records[0],
+        **{name: records[0] for name, records in runtime_records.items()},
         "preparation": preparation_signatures[0],
     }
 
@@ -1956,6 +1908,10 @@ def _runner_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--root", required=True)
     initialize.add_argument("--branch", required=True, choices=BRANCH_PHASES)
     initialize.add_argument("--gate-profile", required=True)
+    initialize.add_argument("--python", required=True)
+    initialize.add_argument("--prepare-gate", required=True)
+    initialize.add_argument("--audit-gate", required=True)
+    initialize.add_argument("--gate-contract", required=True)
     initialize.add_argument("--resource-profiles", required=True)
     initialize.add_argument("--entrypoint", required=True)
     initialize.add_argument("--common-runner", required=True)
@@ -2002,6 +1958,10 @@ def _runner_main(argv: list[str]) -> int:
                 arguments.root,
                 arguments.branch,
                 arguments.gate_profile,
+                arguments.python,
+                arguments.prepare_gate,
+                arguments.audit_gate,
+                arguments.gate_contract,
                 arguments.resource_profiles,
                 arguments.entrypoint,
                 arguments.common_runner,

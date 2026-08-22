@@ -3,11 +3,6 @@
 set -euo pipefail
 set -E
 
-COMMON_RUNNER_SOURCE=${BASH_SOURCE[0]}
-MODULE_DIR=$(cd -- "$(dirname -- "$COMMON_RUNNER_SOURCE")" && pwd -P)
-PREPARE="$MODULE_DIR/prepare_gate.py"
-AUDIT="$MODULE_DIR/audit_gate.py"
-RESOURCE_PROFILES="$MODULE_DIR/resource_profiles.py"
 PYTHON_EXE=${PYTHON_EXE:-python3}
 
 require_environment() {
@@ -19,7 +14,7 @@ require_environment() {
 }
 
 for required in \
-    C_PBE_GATE_PROFILE C_PBE_GATE_ENTRYPOINT \
+    C_PBE_GATE_PROFILE C_PBE_GATE_ENTRYPOINT C_PBE_GATE_COMMON_RUNNER \
     GATE_ROOT ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_ASSET ORBITAL_ASSET
 do
     require_environment "$required"
@@ -57,9 +52,17 @@ PYTHON_COMMAND=$(command -v -- "$PYTHON_EXE") || {
     exit 2
 }
 PYTHON_REAL=$(resolve_regular "$PYTHON_COMMAND" PYTHON_EXE 1 1)
+COMMON_RUNNER_REAL=$(resolve_regular "$C_PBE_GATE_COMMON_RUNNER" run_pbe_branch_common.sh)
+MODULE_DIR=$(cd -- "$(dirname -- "$COMMON_RUNNER_REAL")" && pwd -P)
+PREPARE="$MODULE_DIR/prepare_gate.py"
+AUDIT="$MODULE_DIR/audit_gate.py"
+GATE_CONTRACT="$MODULE_DIR/gate_contract.py"
+RESOURCE_PROFILES="$MODULE_DIR/resource_profiles.py"
+PREPARE_REAL=$(resolve_regular "$PREPARE" prepare_gate.py)
+AUDIT_REAL=$(resolve_regular "$AUDIT" audit_gate.py)
+GATE_CONTRACT_REAL=$(resolve_regular "$GATE_CONTRACT" gate_contract.py)
 RESOURCE_PROFILES_REAL=$(resolve_regular "$RESOURCE_PROFILES" resource_profiles.py)
 ENTRYPOINT_REAL=$(resolve_regular "$C_PBE_GATE_ENTRYPOINT" C_PBE_GATE_ENTRYPOINT)
-COMMON_RUNNER_REAL=$(resolve_regular "$COMMON_RUNNER_SOURCE" run_pbe_branch_common.sh)
 ABACUS_ENV_REAL=$(resolve_regular "$ABACUS_ENV_SCRIPT" ABACUS_ENV_SCRIPT)
 ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS 1)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_ASSET" pseudo)
@@ -144,7 +147,7 @@ MPIRUN_COMMAND=$(command -v -- mpirun) || {
     exit 2
 }
 MPIRUN_REAL=$(resolve_regular "$MPIRUN_COMMAND" mpirun 1 1)
-"$PYTHON_REAL" "$AUDIT" check-scheduler --branch "$BRANCH" >/dev/null
+"$PYTHON_REAL" "$AUDIT_REAL" check-scheduler --branch "$BRANCH" >/dev/null
 GATE_ROOT=$(
     "$PYTHON_REAL" - "$GATE_ROOT" <<'PY'
 import os
@@ -282,7 +285,7 @@ prepare_branch_once() {
     local attempt error_file
     error_file=$(mktemp "${TMPDIR:-/tmp}/c-pbe-prepare.XXXXXX")
     for attempt in 1 2 3 4 5 6; do
-        if "$PYTHON_REAL" "$PREPARE" prepare \
+        if "$PYTHON_REAL" "$PREPARE_REAL" prepare \
             --root "$GATE_ROOT" --branch "$BRANCH" \
             --pseudo "$PSEUDO_REAL" --orbital "$ORBITAL_REAL" \
             2>"$error_file"; then
@@ -357,9 +360,13 @@ PY
 }
 trap 'record_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
-"$PYTHON_REAL" "$AUDIT" runner-init \
+"$PYTHON_REAL" "$AUDIT_REAL" runner-init \
     --root "$GATE_ROOT" --branch "$BRANCH" \
     --gate-profile "$C_PBE_GATE_PROFILE" \
+    --python "$PYTHON_REAL" \
+    --prepare-gate "$PREPARE_REAL" \
+    --audit-gate "$AUDIT_REAL" \
+    --gate-contract "$GATE_CONTRACT_REAL" \
     --resource-profiles "$RESOURCE_PROFILES_REAL" \
     --entrypoint "$ENTRYPOINT_REAL" \
     --common-runner "$COMMON_RUNNER_REAL" \
@@ -372,7 +379,7 @@ BRANCH_STARTED_EPOCH=$(date '+%s')
 run_phase() {
     local phase=$1 phase_root started_utc started_epoch ended_utc ended_epoch wall
     phase_root="$BRANCH_ROOT/$phase"
-    "$PYTHON_REAL" "$AUDIT" preflight-phase \
+    "$PYTHON_REAL" "$AUDIT_REAL" preflight-phase \
         --root "$GATE_ROOT" --branch "$BRANCH" --phase "$phase"
     started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     started_epoch=$(date '+%s')
@@ -384,7 +391,7 @@ run_phase() {
     ended_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     ended_epoch=$(date '+%s')
     wall=$((ended_epoch - started_epoch))
-    "$PYTHON_REAL" "$AUDIT" complete-phase \
+    "$PYTHON_REAL" "$AUDIT_REAL" complete-phase \
         --root "$GATE_ROOT" --branch "$BRANCH" --phase "$phase" \
         --started-utc "$started_utc" --ended-utc "$ended_utc" \
         --wall-seconds "$wall"
@@ -392,14 +399,14 @@ run_phase() {
 
 prepare_restart() {
     local source=$1 destination=$2 input expected
-    "$PYTHON_REAL" "$AUDIT" create-restart \
+    "$PYTHON_REAL" "$AUDIT_REAL" create-restart \
         --root "$GATE_ROOT" --branch "$BRANCH" \
         --source "$source" --destination "$destination"
     input="$BRANCH_ROOT/$destination/INPUT"
     if [[ $BRANCH == fixed ]]; then
-        expected=$("$PYTHON_REAL" "$PREPARE" render --mode fixed --restart)
+        expected=$("$PYTHON_REAL" "$PREPARE_REAL" render --mode fixed --restart)
     else
-        expected=$("$PYTHON_REAL" "$PREPARE" render --mode free --field-dir "${BRANCH#dir}" --restart)
+        expected=$("$PYTHON_REAL" "$PREPARE_REAL" render --mode free --field-dir "${BRANCH#dir}" --restart)
         grep -q "^ocp 0$" "$input"
         grep -q "^efield_flag 0$" "$input"
         grep -q "^init_wfc file$" "$input"
@@ -426,7 +433,7 @@ fi
 BRANCH_ENDED_UTC=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 BRANCH_ENDED_EPOCH=$(date '+%s')
 BRANCH_WALL=$((BRANCH_ENDED_EPOCH - BRANCH_STARTED_EPOCH))
-"$PYTHON_REAL" "$AUDIT" complete-branch \
+"$PYTHON_REAL" "$AUDIT_REAL" complete-branch \
     --root "$GATE_ROOT" --branch "$BRANCH" \
     --started-utc "$BRANCH_STARTED_UTC" --ended-utc "$BRANCH_ENDED_UTC" \
     --wall-seconds "$BRANCH_WALL"

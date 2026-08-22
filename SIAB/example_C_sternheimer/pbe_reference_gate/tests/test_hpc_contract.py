@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -26,6 +27,9 @@ from resource_profiles import get_resource_profile
 
 
 RESOURCE_PROFILES = ROOT / "resource_profiles.py"
+PREPARE_SOURCE = ROOT / "prepare_gate.py"
+AUDIT_SOURCE = ROOT / "audit_gate.py"
+GATE_CONTRACT_SOURCE = ROOT / "gate_contract.py"
 
 
 class ResourceProfileTests(unittest.TestCase):
@@ -133,10 +137,12 @@ class HpcStaticContractTests(unittest.TestCase):
         )
         for value in (
             "export C_PBE_GATE_PROFILE=df_dcu",
-            'export C_PBE_GATE_ENTRYPOINT="${BASH_SOURCE[0]}"',
-            'source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/run_pbe_branch_common.sh"',
+            ': "${C_PBE_GATE_ENTRYPOINT:?C_PBE_GATE_ENTRYPOINT is required}"',
+            ': "${C_PBE_GATE_COMMON_RUNNER:?C_PBE_GATE_COMMON_RUNNER is required}"',
+            'source "$C_PBE_GATE_COMMON_RUNNER"',
         ):
             self.assertIn(value, text)
+        self.assertNotIn("BASH_SOURCE", text)
         self.assertNotIn("prepare_branch_once", text)
         self.assertNotIn("mpirun", text)
 
@@ -164,10 +170,12 @@ class HpcStaticContractTests(unittest.TestCase):
         self.assertNotIn("#SBATCH --exclusive", text)
         for value in (
             "export C_PBE_GATE_PROFILE=server66",
-            'export C_PBE_GATE_ENTRYPOINT="${BASH_SOURCE[0]}"',
-            'source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/run_pbe_branch_common.sh"',
+            ': "${C_PBE_GATE_ENTRYPOINT:?C_PBE_GATE_ENTRYPOINT is required}"',
+            ': "${C_PBE_GATE_COMMON_RUNNER:?C_PBE_GATE_COMMON_RUNNER is required}"',
+            'source "$C_PBE_GATE_COMMON_RUNNER"',
         ):
             self.assertIn(value, text)
+        self.assertNotIn("BASH_SOURCE", text)
         self.assertNotIn("prepare_branch_once", text)
         self.assertNotIn("mpirun", text)
 
@@ -177,6 +185,7 @@ class HpcStaticContractTests(unittest.TestCase):
             "resource_profiles.py",
             "C_PBE_GATE_PROFILE",
             "C_PBE_GATE_ENTRYPOINT",
+            "C_PBE_GATE_COMMON_RUNNER",
             '"$RESOURCE_PROFILES_REAL" shell "$C_PBE_GATE_PROFILE"',
             "GATE_ROOT",
             "ABACUS_ARTIFACT",
@@ -187,9 +196,9 @@ class HpcStaticContractTests(unittest.TestCase):
             "SLURM_CPUS_PER_TASK",
             "SLURM_NTASKS",
             "SLURM_JOB_NUM_NODES",
-            '"$PREPARE" prepare',
-            '"$PREPARE" render --mode fixed --restart',
-            '"$PREPARE" render --mode free',
+            '"$PREPARE_REAL" prepare',
+            '"$PREPARE_REAL" render --mode fixed --restart',
+            '"$PREPARE_REAL" render --mode free',
             'grep -q "^ocp 0$"',
             'grep -q "^efield_flag 0$"',
             'grep -q "^init_wfc file$"',
@@ -260,6 +269,9 @@ class HpcStaticContractTests(unittest.TestCase):
             "ENTRYPOINT_REAL=$(resolve_regular",
             "COMMON_RUNNER_REAL=$(resolve_regular",
             "PYTHON_REAL=$(resolve_regular",
+            "PREPARE_REAL=$(resolve_regular",
+            "AUDIT_REAL=$(resolve_regular",
+            "GATE_CONTRACT_REAL=$(resolve_regular",
             "ABACUS_ENV_REAL=$(resolve_regular",
             "ABACUS_REAL=$(resolve_regular",
             "PSEUDO_REAL=$(resolve_regular",
@@ -272,6 +284,10 @@ class HpcStaticContractTests(unittest.TestCase):
         text = COMMON_RUNNER.read_text()
         for value in (
             '--gate-profile "$C_PBE_GATE_PROFILE"',
+            '--python "$PYTHON_REAL"',
+            '--prepare-gate "$PREPARE_REAL"',
+            '--audit-gate "$AUDIT_REAL"',
+            '--gate-contract "$GATE_CONTRACT_REAL"',
             '--resource-profiles "$RESOURCE_PROFILES_REAL"',
             '--entrypoint "$ENTRYPOINT_REAL"',
             '--common-runner "$COMMON_RUNNER_REAL"',
@@ -542,6 +558,12 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         cls.orbital.write_text("fake orbital\n")
         cls.bin_dir = cls.base / "bin"
         cls.bin_dir.mkdir()
+        cls.fake_python = cls.bin_dir / "python-c-pbe-gate"
+        cls.fake_python.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"exec {shlex.quote(sys.executable)} \"$@\"\n"
+        )
         cls.fake_mpirun = cls.bin_dir / "mpirun"
         cls.fake_mpirun.write_text(
             "#!/usr/bin/env bash\n"
@@ -570,7 +592,12 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         )
         cls.fake_abacus = cls.bin_dir / "abacus"
         cls.fake_abacus.write_text(cls._fake_abacus_text())
-        for path in (cls.fake_mpirun, cls.fake_scontrol, cls.fake_abacus):
+        for path in (
+            cls.fake_python,
+            cls.fake_mpirun,
+            cls.fake_scontrol,
+            cls.fake_abacus,
+        ):
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
         cls.fake_environment = cls.assets / "env_intel.sh"
         cls.environment_marker = cls.base / "environment-sourced.log"
@@ -659,6 +686,8 @@ for spin in (1, 2):
         pseudo=None,
         orbital=None,
         profile_name="df_dcu",
+        entrypoint=RUNNER,
+        common_runner=COMMON_RUNNER,
         overrides=None,
     ):
         profile = get_resource_profile(profile_name)
@@ -671,7 +700,9 @@ for spin in (1, 2):
                 "ABACUS_ENV_SCRIPT": str(cls.fake_environment),
                 "PSEUDO_ASSET": str(pseudo or cls.pseudo),
                 "ORBITAL_ASSET": str(orbital or cls.orbital),
-                "PYTHON_EXE": sys.executable,
+                "PYTHON_EXE": str(cls.fake_python),
+                "C_PBE_GATE_ENTRYPOINT": str(entrypoint),
+                "C_PBE_GATE_COMMON_RUNNER": str(common_runner),
                 "SLURM_JOB_PARTITION": profile["partition"],
                 "SLURM_ARRAY_TASK_ID": str(task),
                 "SLURM_ARRAY_TASK_COUNT": "4",
@@ -702,6 +733,8 @@ for spin in (1, 2):
         orbital=None,
         runner=RUNNER,
         profile_name="df_dcu",
+        entrypoint=None,
+        common_runner=COMMON_RUNNER,
         overrides=None,
     ):
         environment = cls._task_environment(
@@ -711,6 +744,8 @@ for spin in (1, 2):
             pseudo=pseudo,
             orbital=orbital,
             profile_name=profile_name,
+            entrypoint=entrypoint or runner,
+            common_runner=common_runner,
             overrides=overrides,
         )
         return subprocess.run(
@@ -764,6 +799,57 @@ for spin in (1, 2):
             summary["restart_chain_evidence"]["common_runner"]["absolute_path"],
             str(COMMON_RUNNER),
         )
+        for name, path in (
+            ("python", self.fake_python),
+            ("prepare_gate", PREPARE_SOURCE),
+            ("audit_gate", AUDIT_SOURCE),
+            ("gate_contract", GATE_CONTRACT_SOURCE),
+        ):
+            self.assertEqual(
+                summary["restart_chain_evidence"][name]["absolute_path"],
+                str(path),
+            )
+
+    def test_spooled_wrappers_use_explicit_immutable_runtime_sources(self):
+        for profile_name, entrypoint in (
+            ("df_dcu", RUNNER),
+            ("server66", SERVER66_RUNNER),
+        ):
+            with self.subTest(profile=profile_name):
+                spool = self.base / (
+                    f"spool-{profile_name}-{next(tempfile._get_candidate_names())}"
+                )
+                spool.mkdir()
+                spooled_wrapper = spool / "slurm_script"
+                shutil.copy2(entrypoint, spooled_wrapper)
+                self.assertFalse((spool / COMMON_RUNNER.name).exists())
+                root = self.base / (
+                    f"spooled-gate-{profile_name}-"
+                    f"{next(tempfile._get_candidate_names())}"
+                )
+                incoming_profile = (
+                    "server66" if profile_name == "df_dcu" else "df_dcu"
+                )
+                completed = self._run_task(
+                    root,
+                    0,
+                    runner=spooled_wrapper,
+                    entrypoint=entrypoint,
+                    common_runner=COMMON_RUNNER,
+                    profile_name=profile_name,
+                    overrides={"C_PBE_GATE_PROFILE": incoming_profile},
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                run = json.loads(
+                    (root / "runs/fixed/BRANCH_RUN_PROVENANCE.json").read_text()
+                )
+                self.assertEqual(run["gate_profile"], profile_name)
+                self.assertEqual(
+                    run["entrypoint"]["absolute_path"], str(entrypoint)
+                )
+                self.assertEqual(
+                    run["common_runner"]["absolute_path"], str(COMMON_RUNNER)
+                )
 
     def test_runtime_environment_is_actually_sourced(self):
         self.assertTrue(self.environment_marker.is_file())
@@ -792,6 +878,13 @@ for spin in (1, 2):
             self.assertEqual(
                 manifest["common_runner"]["absolute_path"], str(COMMON_RUNNER)
             )
+            for name, path in (
+                ("python", self.fake_python),
+                ("prepare_gate", PREPARE_SOURCE),
+                ("audit_gate", AUDIT_SOURCE),
+                ("gate_contract", GATE_CONTRACT_SOURCE),
+            ):
+                self.assertEqual(manifest[name]["absolute_path"], str(path))
             self.assertEqual(
                 manifest["environment_script"]["absolute_path"],
                 str(self.fake_environment),
@@ -953,6 +1046,22 @@ for spin in (1, 2):
                 root / "runs/dir1/BRANCH_COMPLETE.json",
                 lambda data: data["common_runner"].update({"sha256": "0" * 64}),
             ),
+            "python hash": lambda root: self._mutate_json(
+                root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
+                lambda data: data["python"].update({"sha256": "0" * 64}),
+            ),
+            "prepare source hash": lambda root: self._mutate_json(
+                root / "runs/dir1/BRANCH_COMPLETE.json",
+                lambda data: data["prepare_gate"].update({"sha256": "0" * 64}),
+            ),
+            "audit source hash": lambda root: self._mutate_json(
+                root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
+                lambda data: data["audit_gate"].update({"sha256": "0" * 64}),
+            ),
+            "contract source hash": lambda root: self._mutate_json(
+                root / "runs/dir1/BRANCH_COMPLETE.json",
+                lambda data: data["gate_contract"].update({"sha256": "0" * 64}),
+            ),
             "preparation provenance": lambda root: self._mutate_json(
                 root / "runs/dir1/BRANCH_PROVENANCE.json",
                 lambda data: data.update({"tampered_after_prepare": True}),
@@ -991,8 +1100,16 @@ for spin in (1, 2):
             self.fake_mpirun.write_bytes(original)
             self.fake_mpirun.chmod(mode)
 
-    def test_audit_rehashes_profile_entrypoint_and_common_runner(self):
-        for path in (RESOURCE_PROFILES, RUNNER, COMMON_RUNNER):
+    def test_audit_rehashes_every_recorded_runtime_source(self):
+        for path in (
+            self.fake_python,
+            PREPARE_SOURCE,
+            AUDIT_SOURCE,
+            GATE_CONTRACT_SOURCE,
+            RESOURCE_PROFILES,
+            RUNNER,
+            COMMON_RUNNER,
+        ):
             with self.subTest(path=path.name):
                 original = path.read_bytes()
                 try:
@@ -1072,6 +1189,81 @@ for spin in (1, 2):
         shutil.copytree(alternate_root / "runs/dir1", root / "runs/dir1")
         with self.assertRaisesRegex(ValueError, "profile|entrypoint"):
             audit_gate.audit_gate(root)
+
+    def test_global_audit_rejects_new_runtime_source_mismatch_across_branches(self):
+        source_paths = {
+            "python": self.fake_python,
+            "prepare_gate": PREPARE_SOURCE,
+            "audit_gate": AUDIT_SOURCE,
+            "gate_contract": GATE_CONTRACT_SOURCE,
+        }
+        for field, source in source_paths.items():
+            with self.subTest(field=field):
+                root = self.copy_gate()
+                alternate = self.base / (
+                    f"alternate-{field}-{next(tempfile._get_candidate_names())}"
+                )
+                shutil.copy2(source, alternate)
+                _, record = audit_gate._canonical_file(
+                    alternate,
+                    f"alternate {field}",
+                    executable=field == "python",
+                )
+                branch_root = root / "runs/dir1"
+                run_path = branch_root / "BRANCH_RUN_PROVENANCE.json"
+                self._mutate_json(
+                    run_path, lambda data: data.update({field: record})
+                )
+                phases = audit_gate.BRANCH_PHASES["dir1"]
+                phase_hashes = {}
+                restart_hashes = {}
+                for index, phase in enumerate(phases):
+                    phase_path = branch_root / phase / "PHASE_COMPLETE.json"
+                    phase_update = {field: record}
+                    if index:
+                        restart_path = (
+                            branch_root / phase / "RESTART_PROVENANCE.json"
+                        )
+                        self._mutate_json(
+                            restart_path,
+                            lambda data, source=phases[index - 1]: data.update(
+                                {
+                                    "source_phase_complete_sha256": phase_hashes[
+                                        source
+                                    ]
+                                }
+                            ),
+                        )
+                        restart_hashes[phase] = audit_gate._sha256_bytes(
+                            restart_path.read_bytes()
+                        )
+                        phase_update["restart_provenance_sha256"] = (
+                            restart_hashes[phase]
+                        )
+                    self._mutate_json(
+                        phase_path,
+                        lambda data, update=phase_update: data.update(update),
+                    )
+                    phase_hashes[phase] = audit_gate._sha256_bytes(
+                        phase_path.read_bytes()
+                    )
+                self._mutate_json(
+                    branch_root / "BRANCH_COMPLETE.json",
+                    lambda data: data.update(
+                        {
+                            field: record,
+                            "phase_complete_sha256": phase_hashes,
+                            "restart_provenance_sha256": restart_hashes,
+                            "branch_run_provenance_sha256": (
+                                audit_gate._sha256_bytes(run_path.read_bytes())
+                            ),
+                        }
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    ValueError, f"{field} provenance differs across branches"
+                ):
+                    audit_gate.audit_gate(root)
 
     @staticmethod
     def _mutate_json(path, mutate):
@@ -1283,6 +1475,10 @@ for spin in (1, 2):
                 root,
                 "fixed",
                 "df_dcu",
+                self.fake_python,
+                PREPARE_SOURCE,
+                AUDIT_SOURCE,
+                GATE_CONTRACT_SOURCE,
                 RESOURCE_PROFILES,
                 RUNNER,
                 COMMON_RUNNER,

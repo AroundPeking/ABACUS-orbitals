@@ -10,5 +10,6 @@
 #SBATCH --no-requeue
 
 export C_PBE_GATE_PROFILE=server66
-export C_PBE_GATE_ENTRYPOINT="${BASH_SOURCE[0]}"
-source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/run_pbe_branch_common.sh"
+: "${C_PBE_GATE_ENTRYPOINT:?C_PBE_GATE_ENTRYPOINT is required}"
+: "${C_PBE_GATE_COMMON_RUNNER:?C_PBE_GATE_COMMON_RUNNER is required}"
+source "$C_PBE_GATE_COMMON_RUNNER"
