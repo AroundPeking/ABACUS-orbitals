@@ -21,17 +21,23 @@ optimization.
 
 ## Scheduler contract
 
-`run_pbe_branch.slurm` is one four-task array on the `normal` partition.  Each
-task receives one exclusive node, one MPI rank, all 30 OpenMP threads
-schedulable by Slurm, the account maximum of 110610 MB,
-and 24 hours.  Array tasks run `fixed`, `dir0`, `dir1`, and `dir2`.  The runner
-sources the pinned Intel MPI/MKL environment before resolving `mpirun`, resets
-all thread counts to 30, and checks the live Slurm allocation before creating
-calculation branches.
-On df_dcu's Slurm 22.05 installation, a job submitted with `--exclusive` is
-reported as `OverSubscribe=NO`; the runtime audit requires that exact live
-token together with the committed `#SBATCH --exclusive` directive and the
-full schedulable CPU allocation.
+The explicit `GATE_PROFILE` selects one of two committed resource profiles:
+
+| Profile | Partition | Nodes | MPI ranks | OpenMP threads | Memory per node | Time | Live Slurm token |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `df_dcu` | `normal` | 1 node | 1 MPI rank | 30 OpenMP threads | 110610 MB | 24 hours | `OverSubscribe=NO` |
+| `server66` | `640` | 1 node | 1 MPI rank | 48 OpenMP threads | 180000 MB | 24 hours | `OverSubscribe=OK` |
+
+Each profile submits one four-task array whose tasks run `fixed`, `dir0`,
+`dir1`, and `dir2`.  The runner sources the selected pinned environment before
+resolving `mpirun`, resets all thread counts to the profile value, and checks
+the live Slurm allocation before creating calculation branches.
+
+On df_dcu's Slurm 22.05 installation, the committed `--exclusive` request is
+reported as `OverSubscribe=NO`.  On server66, `OverSubscribe=OK` is the
+cluster's live presentation after Slurm has granted the full 48-CPU and 180000-MB allocation;
+it does not mean this gate shares either requested resource.  The runtime audit
+requires the exact profile-specific token and the complete CPU and memory allocation.
 
 The submitter uses a stable job name, checks both `squeue` and `sacct`, and
 creates an immutable submission claim before calling `sbatch`.  It submits
@@ -49,9 +55,26 @@ symbolic links.  The submitter resolves the required Python interpreter to its
 real executable.  On `df_dcu`, `ABACUS_ENV_SCRIPT` is the validated Intel
 MPI/MKL setup used by the existing C calculations; the login-node OpenMPI
 environment is not compatible with this ABACUS artifact.
-Task 6 stages this directory as a standalone source archive.  That archive
+On server66, use the committed minimal `server66_runtime_env.sh`.  It sources
+`/etc/profile.d/modules.sh`, runs `module purge`, then runs
+`module load gcc10.2` and `module load intel20u4`, and prepends only their GCC
+and Intel runtime directories to `LD_LIBRARY_PATH`.  It does not source the
+user shell startup file or import unrelated settings.
+
+The server66 preflight and formal run must use these immutable artifacts:
+
+- ABACUS SHA256:
+  `27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279`.
+- C SG15 pseudopotential SHA256:
+  `e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99`.
+- C TZDP-10au orbital SHA256:
+  `7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d`.
+
+The staging step packages this directory as a standalone source archive.  That archive
 does not require `.git`; `SOURCE_COMMIT` is the exact 40-character lowercase
 Git commit used to create it and is supplied explicitly by the staging step.
+
+For df_dcu, set the profile and canonical paths explicitly:
 
 ```bash
 export GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
@@ -62,7 +85,14 @@ export ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_g
 export PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
 export SOURCE_COMMIT=0123456789abcdef0123456789abcdef01234567
 
-./submit_pbe_gate.sh
+GATE_PROFILE=df_dcu ./submit_pbe_gate.sh
+```
+
+For server66, set its own canonical root, executable, environment script,
+assets, Python executable, and source commit, then submit explicitly:
+
+```bash
+GATE_PROFILE=server66 ./submit_pbe_gate.sh
 ```
 
 Successful submission creates immutable `SUBMITTED_JOB_ID.txt` and atomic
@@ -78,6 +108,19 @@ four branches must contain identical records.  The
 durable receipt files are created exclusively and fsynced before `sbatch`
 starts, and remain under `.submission-claim/` when submission is ambiguous.
 
+The `sbatch --export` value is an exact allowlist containing only
+`GATE_ROOT`, `ABACUS_ARTIFACT`, `ABACUS_ENV_SCRIPT`, `PSEUDO_ASSET`,
+`ORBITAL_ASSET`, `PYTHON_EXE`, `C_PBE_GATE_PROFILE`,
+`C_PBE_GATE_ENTRYPOINT`, and `C_PBE_GATE_COMMON_RUNNER`.  Submission must not use `ALL`;
+unrelated login-shell variables, credentials, and agent sockets are not part of
+the batch environment contract.
+
+For the approved migration, cancel df_dcu job 21709225 only after the complete server66 preflight has passed.
+Before cancellation, recheck that the df_dcu job is still pending
+with zero elapsed time and has produced no physical output.  Preserve its
+immutable root and provenance, and submit the new server66 formal root exactly
+once.
+
 ## Post-completion audit
 
 After all four array tasks have left the scheduler, run the audit once on the
@@ -88,6 +131,10 @@ login node; postprocessing does not need a compute allocation:
 ```
 
 Inspect both `RESULT_SUMMARY.json` and `RESULT_SUMMARY.txt`.
+
+A scheduler completion is not a physical pass.  Only the login-node global audit
+can create `PBE_GATE_PASSED` after all branches have left the scheduler and all
+physical and provenance checks have passed.
 
 - `DIAGNOSTIC_ONLY` means the scalar numerical comparison may be readable, but
   the complete four-branch runtime and restart evidence is absent.  It is not

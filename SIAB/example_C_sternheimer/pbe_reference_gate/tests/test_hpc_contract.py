@@ -1717,6 +1717,48 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         ):
             self.assertIn(value, text)
 
+    def test_readme_documents_cluster_profiles_and_migration_contract(self):
+        text = README.read_text()
+        for value in (
+            "df_dcu",
+            "server66",
+            "normal",
+            "1 node",
+            "1 MPI rank",
+            "30 OpenMP threads",
+            "110610 MB",
+            "OverSubscribe=NO",
+            "640",
+            "48 OpenMP threads",
+            "180000 MB",
+            "OverSubscribe=OK",
+            "27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279",
+            "e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99",
+            "7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d",
+            "server66_runtime_env.sh",
+            "/etc/profile.d/modules.sh",
+            "module purge",
+            "module load gcc10.2",
+            "module load intel20u4",
+            "full 48-CPU and 180000-MB allocation",
+            "exact allowlist",
+            "must not use `ALL`",
+            "21709225",
+            "server66 preflight",
+            "GATE_PROFILE=df_dcu ./submit_pbe_gate.sh",
+            "GATE_PROFILE=server66 ./submit_pbe_gate.sh",
+            "scheduler completion is not a physical pass",
+            "global audit",
+            "PBE_GATE_PASSED",
+        ):
+            self.assertIn(value, text)
+
+        self.assertIn("24 hours", text)
+        self.assertRegex(
+            text,
+            r"21709225[^\n]*only after[^\n]*server66 preflight[^\n]*pass",
+        )
+
     def _assert_profile_submission(self, profile_name, entrypoint):
         completed = self._run_submitter(GATE_PROFILE=profile_name)
         self.assertEqual(completed.returncode, 0, completed.stderr)
