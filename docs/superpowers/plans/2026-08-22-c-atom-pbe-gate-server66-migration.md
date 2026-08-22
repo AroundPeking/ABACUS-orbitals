@@ -16,6 +16,7 @@
 - Create `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch_common.sh`: shared four-branch execution and restart logic.
 - Modify `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch.slurm`: thin df_dcu Slurm entrypoint.
 - Create `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch_server66.slurm`: thin server66 Slurm entrypoint.
+- Create `SIAB/example_C_sternheimer/pbe_reference_gate/server66_runtime_env.sh`: minimal credential-free Intel/GCC runtime environment.
 - Modify `SIAB/example_C_sternheimer/pbe_reference_gate/audit_gate.py`: profile-aware scheduler and runtime-source validation.
 - Modify `SIAB/example_C_sternheimer/pbe_reference_gate/submit_pbe_gate.sh`: explicit profile selection and complete source provenance.
 - Modify `SIAB/example_C_sternheimer/pbe_reference_gate/tests/test_hpc_contract.py`: profile, scheduler, wrapper, provenance, and end-to-end tests.
@@ -106,6 +107,7 @@ feat(siab): define C PBE gate runtime profiles
 - Create: `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch_common.sh`
 - Modify: `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch.slurm`
 - Create: `SIAB/example_C_sternheimer/pbe_reference_gate/run_pbe_branch_server66.slurm`
+- Create: `SIAB/example_C_sternheimer/pbe_reference_gate/server66_runtime_env.sh`
 - Modify: `SIAB/example_C_sternheimer/pbe_reference_gate/audit_gate.py`
 - Modify: `SIAB/example_C_sternheimer/pbe_reference_gate/tests/test_hpc_contract.py`
 
@@ -154,11 +156,19 @@ the thin server66 entrypoint.  The common runner must:
    regular files;
 2. obtain the selected exact contract from `resource_profiles.py shell`;
 3. validate Slurm environment values against that contract;
-4. source `/etc/profile.d/modules.sh` before the recorded environment script
-   only for `server66`;
+4. source only the recorded environment script for both profiles;
 5. reset `OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and `OPENBLAS_NUM_THREADS` to
    the profile's `cpus_per_task` value;
 6. pass the profile, entrypoint, and common-runner paths to `audit_gate.py`.
+
+Create `server66_runtime_env.sh` with `set -euo pipefail`, source
+`/etc/profile.d/modules.sh`, purge inherited modules, load only `gcc10.2` and
+`intel20u4`, and prepend the GCC 10.2 and Intel 2020 library directories.
+It must not source `/home/ghj/.bashrc` or contain API keys, tokens, conda
+initialization, aliases, or unrelated application paths.  A static test must
+enforce those exclusions.  A clean-environment server66 probe must resolve
+Intel MPI, show no missing ABACUS dynamic library, and report ABACUS
+`v3.9.0.25`.
 
 - [ ] **Step 4: Make scheduler evidence profile-aware**
 
@@ -301,8 +311,9 @@ docs(siab): document C PBE gate cluster profiles
 
 Archive the exact implementation commit and extract it into a new root.  Copy
 the two local SG15 assets whose hashes match the frozen values.  Use the
-server66 ABACUS executable and `/home/ghj/.bashrc` as the recorded environment
-entrypoint.  Compare all local and remote SHA256 values.
+server66 ABACUS executable and the staged committed
+`server66_runtime_env.sh` as the recorded environment entrypoint.  Compare
+all local and remote SHA256 values.
 
 - [ ] **Step 2: Run server66 preflight**
 
@@ -325,7 +336,7 @@ Immediately recheck the canonical root, stable job name, `squeue`, and
 ```text
 GATE_PROFILE=server66
 ABACUS_ARTIFACT=/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/abacus-407979/abacus
-ABACUS_ENV_SCRIPT=/home/ghj/.bashrc
+ABACUS_ENV_SCRIPT=<immutable-root>/source/server66_runtime_env.sh
 PYTHON_EXE=/home/ghj/app/miniconda3/bin/python3
 ```
 

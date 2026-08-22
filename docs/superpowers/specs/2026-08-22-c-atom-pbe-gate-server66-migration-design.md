@@ -41,6 +41,14 @@ Intel MPI/MKL installations.  The PBE equivalence statement is internal to
 the four server66 branches, so identical source-level physics and one common
 server66 executable are required; binary identity across clusters is not.
 
+The server66 environment entrypoint is a committed, minimal shell file that
+sources `/etc/profile.d/modules.sh`, purges inherited modules, loads only
+`gcc10.2` and `intel20u4`, and adds the required GCC and Intel library
+directories.  It must not source or copy `/home/ghj/.bashrc`: that file
+contains unrelated interactive settings and credentials that must not enter
+the formal calculation environment.  The minimal entrypoint is hashed in the
+same provenance chain as the ABACUS executable and resolved `mpirun`.
+
 ## Runtime profiles
 
 The gate gains an explicit runtime-profile interface instead of replacing the
@@ -86,8 +94,8 @@ records are retained and never reused.
 
 1. Implement and locally test the explicit server66 profile without touching
    the frozen physical input contract.
-2. Stage the exact source commit, executable, environment entrypoint, and C
-   assets under a new server66 root.
+2. Stage the exact source commit, executable, committed minimal environment
+   entrypoint, and C assets under a new server66 root.
 3. Run all unit tests with the server66 Python and run `sbatch --test-only`
    for the exact four-task array resource shape.
 4. Recheck that df_dcu job `21709225` is still pending and has produced no
