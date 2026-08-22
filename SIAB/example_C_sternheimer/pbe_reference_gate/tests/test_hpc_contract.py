@@ -19,6 +19,65 @@ sys.path.insert(0, str(ROOT))
 
 import audit_gate
 import prepare_gate
+from resource_profiles import get_resource_profile
+
+
+RESOURCE_PROFILES = ROOT / "resource_profiles.py"
+
+
+class ResourceProfileTests(unittest.TestCase):
+    def test_df_dcu_profile(self):
+        self.assertEqual(
+            get_resource_profile("df_dcu"),
+            {
+                "name": "df_dcu",
+                "partition": "normal",
+                "nodes": 1,
+                "ntasks": 1,
+                "cpus_per_task": 30,
+                "memory_mb": 110610,
+                "time_limit": "1-00:00:00",
+                "over_subscribe": "NO",
+            },
+        )
+
+    def test_server66_profile(self):
+        self.assertEqual(
+            get_resource_profile("server66"),
+            {
+                "name": "server66",
+                "partition": "640",
+                "nodes": 1,
+                "ntasks": 1,
+                "cpus_per_task": 48,
+                "memory_mb": 180000,
+                "time_limit": "1-00:00:00",
+                "over_subscribe": "OK",
+            },
+        )
+
+    def test_unknown_profile_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unknown C PBE gate profile"):
+            get_resource_profile("automatic")
+
+    def test_profile_returns_a_copy(self):
+        profile = get_resource_profile("df_dcu")
+        profile["partition"] = "changed"
+        self.assertEqual(get_resource_profile("df_dcu")["partition"], "normal")
+
+    def test_shell_command_prints_server66_profile(self):
+        completed = subprocess.run(
+            [sys.executable, str(RESOURCE_PROFILES), "shell", "server66"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertEqual(
+            completed.stdout,
+            "server66|640|1|1|48|180000|1-00:00:00|OK\n",
+        )
+        self.assertEqual(completed.stderr, "")
 
 
 class HpcStaticContractTests(unittest.TestCase):
