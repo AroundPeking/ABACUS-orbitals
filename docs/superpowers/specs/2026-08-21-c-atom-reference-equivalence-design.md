@@ -139,7 +139,7 @@ paths are resolved against the phase directory; equivalent absolute
 phase-local paths are also accepted.  External, traversal, or symlink escapes
 are rejected.  Only then is `PHASE_COMPLETE.json` published.  A branch obtains
 `BRANCH_COMPLETE.json` only after its complete fixed chain
-`fixed_cold -> fixed_restart` or free chain
+`fixed_field_seed -> fixed_zero_restart` or free chain
 `field_seed -> free_restart1 -> free_restart2` has been rehashed.  Branches do
 not publish a scientific result.
 
@@ -204,19 +204,28 @@ physical acceptance.
 
 ## Calculation branches
 
-### A. Fixed zero-field reference
+### A. Field-seeded fixed-occupation reference
 
-Run a cold PBE SCF with
+Run a cold PBE SCF with the same weak field used by the direction-0 free
+route, while retaining the exact integer occupation:
 
 ```text
 ocp       1
 ocp_set   3*1 19*0 1*1 21*0
-efield_flag 0
-efield_amp  0
+efield_flag     1
+dip_cor_flag    0
+efield_dir      0
+efield_pos_max  0.8
+efield_pos_dec  0.1
+efield_amp      1e-4
 ```
 
-Then restart once with the same zero-field fixed-occupation input.  This
-restart checks numerical stability but is not the independent physical route.
+Then restart once with `ocp = 1` and the same `ocp_set`, but with
+`efield_flag = 0` and `efield_amp = 0`.  The final
+`fixed_zero_restart` state is the fixed-occupation zero-field reference.  The
+finite-field energy is not used as a PBE or response result; it is retained
+only to verify that withdrawing the weak orientation seed does not change the
+physical state.
 
 ### B. Weak-field seeds
 
@@ -264,9 +273,8 @@ All conditions below are mandatory:
    one within `1e-10`.
 3. The spin electron counts are exactly \(3\) and \(1\), and the total magnetic
    moment is consistent with the triplet constraint.
-4. The energy drift between the last two zero-field stages is less than
-   `0.001 kcal/mol`: cold-to-restart for the fixed route and first-to-second
-   zero-field restart for each free route.
+4. The fixed seed-to-zero energy change and the free first-to-second
+   zero-field restart drift are each less than `0.001 kcal/mol`.
 5. Each field-seeded free zero-field energy differs from the fixed zero-field
    energy by less than `1e-5 Ha`.
 6. The three field-direction zero-field energies differ from one another by
@@ -294,8 +302,10 @@ seed does not constitute passage of the gate.
 
 ## Delta-ST response gate after PBE passage
 
-After the PBE gate passes, run one fixed-occupation reference and one accepted
-free-occupation reference with the same zero-field numerical protocol and:
+After the PBE gate passes, use only the accepted final zero-field phases
+`fixed/fixed_zero_restart` and `dir0/free_restart2`.  The direction-0 free
+state is selected because it shares the orientation seed used by the fixed
+route.  Run both references with the same zero-field numerical protocol and:
 
 - FD8 atomic Sternheimer operator;
 - `sternheimer_nfreq = 6` for the equivalence gate only;
@@ -304,6 +314,14 @@ free-occupation reference with the same zero-field numerical protocol and:
 - `exx_ccp_rmesh_times = rpa_ccp_rmesh_times = 1`;
 - the same GreenX frequency grid in both routes;
 - LibRPA trace-log postprocessing.
+
+The six-point GreenX grid is generated once from the union of the same-spin
+occupied-to-virtual transition windows in the two accepted `eig_occ.txt`
+files.  The resulting frequency/weight file is copied byte-for-byte into both
+response branches.  The current server-66 FD8 feature build predates the
+explicit `sternheimer_delta_virtual_source` keyword; its Delta subspace uses
+all accepted LCAO virtual candidates, which is the `ks_bands` behavior.  This
+feature-branch exception and the exact source/binary hashes must be recorded.
 
 The response gate requires:
 
@@ -339,4 +357,4 @@ Each accepted branch records the ABACUS commit and executable hash, input and
 asset hashes, full inputs, final occupations, final energies, grid fingerprint,
 restart provenance, wall time, scheduler state, and the audit result.  The
 comparison summary must distinguish `PBE_GATE_PASSED`,
-`DELTA_ST_GATE_PASSED`, and `DIAGNOSTIC_ONLY`.
+`DELTA_RESPONSE_GATE_PASSED`, and `DIAGNOSTIC_ONLY`.
