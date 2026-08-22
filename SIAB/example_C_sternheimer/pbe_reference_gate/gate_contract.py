@@ -632,7 +632,7 @@ def compare_zero_field_results(
 
     if fixed_drift >= DRIFT_TOL_KCAL:
         raise ValueError(
-            f"fixed cold-to-restart drift {fixed_drift:.16g} kcal/mol is not "
+            f"fixed seed-to-zero-restart drift {fixed_drift:.16g} kcal/mol is not "
             f"below {DRIFT_TOL_KCAL}"
         )
     for direction, drift in free_drifts.items():

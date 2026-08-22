@@ -408,3 +408,41 @@ with full restart evidence.  Two independent blockers remained:
 Job `410626` and its root are failed provenance and must not be reused.  Fixing
 the scheduler selector alone does not authorize a replacement formal run until
 the fixed-occupation SCF protocol is reproducibly converged.
+
+## Fixed-occupation stabilization record
+
+The zero-field fixed cold start was not reproducible because the degenerate C
+2p subspace selected different numerical trajectories from the first SCF
+iteration.  Two one-variable mixing tests did not remove that instability:
+
+| Diagnostic job | Change from frozen protocol | Repetition 0 | Repetition 1 | Decision |
+| --- | --- | --- | --- | --- |
+| `410636` | `mixing_beta=0.1` | converged in 154 iterations, `-147.4773363622988 eV` | failed at 300 iterations | reject |
+| `410645` | `mixing_beta=0.1`, `mixing_gg0=0`, `mixing_gg0_mag=0` | failed at 300 iterations, `drho=9.02523e-4` | converged in 44 iterations, `-147.477336362294 eV` | reject |
+
+The selected replacement uses a fixed-occupation field seed followed by a
+zero-field fixed restart.  Diagnostic job `410652` ran two independent
+repetitions with one node, one MPI rank, 48 OpenMP threads, and 180000 MB:
+
+| Repetition | `fixed_field_seed` | `fixed_zero_restart` | Final zero-field energy |
+| --- | --- | --- | ---: |
+| 0 | converged in 45 iterations, final `drho=9.8875e-11` | converged in 29 iterations, final `drho=5.9385e-11` | `-147.4773363622931015 eV` |
+| 1 | converged in 43 iterations, final `drho=9.8879e-11` | converged in 28 iterations, final `drho=4.8962e-11` | `-147.4773363622958868 eV` |
+
+Both final zero-field states have exactly 3 up / 1 down integer occupations.
+Their energies agree with each other and with the completed free routes to
+about `1.6e-10 kcal/mol`, far inside the unchanged acceptance thresholds.  The
+field amplitude is `1e-4` and acts only as an orientation selector.  The
+field-seed energy is excluded from the final physical comparison; only the
+zero-field `fixed_zero_restart` energy is compared with the three zero-field
+`free_restart2` energies.  The seed-to-restart energy change remains an
+independent drift check.
+
+Commits `f852faaff4045bc05f772c9e753f0de92f3382ae`,
+`886f1d31983f6c88536a6cd48326a6d8b726acfa`, and
+`71f6b355c4e1f00a1bdb73fd12f48bc5f2db1a28` implement and test the input,
+preparation/audit, and runtime stages respectively.  The complete local fake
+HPC suite passes 176 tests and closes all 11 phase, restart, scheduler, and
+runtime provenance records.  A formal server66 calculation still requires a
+new documentation-complete source commit, a new commit-derived immutable root,
+a full preflight, duplicate checks, and exactly one new array submission.

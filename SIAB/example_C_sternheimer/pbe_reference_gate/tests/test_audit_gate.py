@@ -604,6 +604,13 @@ class GateComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "free direction 1 drift"):
             compare_zero_field_results(**args)
 
+        args = self.valid_arguments()
+        args["fixed_drift_kcal"] = DRIFT_TOL_KCAL
+        with self.assertRaisesRegex(
+            ValueError, "fixed seed-to-zero-restart drift"
+        ):
+            compare_zero_field_results(**args)
+
     def test_rejects_fixed_free_energy_difference(self):
         args = self.valid_arguments()
         args["free_energies_ha"][0] = -5.418

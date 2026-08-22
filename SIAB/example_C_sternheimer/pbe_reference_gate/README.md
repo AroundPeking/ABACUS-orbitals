@@ -6,18 +6,26 @@ This gate establishes a unique neutral carbon triplet PBE reference before any
 carbon Delta-ST response or SIAB basis optimization is attempted.  It checks
 that two independent constructions reach the same zero-field state:
 
-1. a cold calculation with fixed integer occupation, followed by one fixed
-   zero-field restart; and
+1. `fixed_field_seed`, with fixed integer occupation and Cartesian-direction-0
+   field amplitude `1e-4`, followed by `fixed_zero_restart`, which loads the
+   seed wave functions and charge, removes the field exactly, and retains the
+   fixed occupation; and
 2. three weak-field seeds along the Cartesian directions, each followed by two
    zero-field free restart calculations with the field and fixed occupation
    removed.
 
 The accepted state has four valence electrons, `nspin = 2`, `nupdown = 2`, and
-integer spin populations 3 and 1.  Every route uses the same 20 Angstrom cubic
-cell, centered C atom, `135 x 135 x 135` real-space grid, 30 Ry cutoff, SG15
-pseudopotential, TZDP-10au orbital, PBE functional, and Gamma-only sampling.
-This is a PBE reference test; it does not run Delta-ST, LibRPA, or basis
-optimization.
+integer spin populations 3 up / 1 down.  The weak field is only an orientation
+selector for the degenerate C 2p manifold.  The field-seed energy is excluded from the final physical comparison:
+the fixed reference is the zero-field
+`fixed_zero_restart` energy, and it is compared with the three zero-field
+`free_restart2` energies.  The seed-to-restart energy change is retained only
+as a drift check.
+
+Every route uses the same 20 Angstrom cubic cell, centered C atom,
+`135 x 135 x 135` real-space grid, 30 Ry cutoff, SG15 pseudopotential,
+TZDP-10au orbital, PBE functional, and Gamma-only sampling.  This is a PBE
+reference test; it does not run Delta-ST, LibRPA, or basis optimization.
 
 ## Scheduler contract
 
@@ -147,7 +155,7 @@ the immutable root it must:
 1. compare the source archive with `SOURCE_ARCHIVE.sha256`, compare
    `SOURCE_COMMIT.txt` with the exported `SOURCE_COMMIT`, and verify the exact
    ABACUS, pseudopotential, orbital, and environment-script hashes;
-2. run the complete gate suite and retain output ending in `Ran 172 tests`;
+2. run the complete gate suite and retain output ending in `Ran 176 tests`;
 3. retain successful shell and Python checks as `BASH_SYNTAX.txt` and
    `PY_COMPILE.txt`;
 4. run the exact server66 array shape through `sbatch --test-only` and retain
