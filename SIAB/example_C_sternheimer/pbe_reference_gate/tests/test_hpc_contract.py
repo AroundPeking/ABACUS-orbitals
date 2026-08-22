@@ -1525,7 +1525,10 @@ if [[ ${FAKE_CREATE_BRANCH_AFTER_CLAIM:-0} == 1 \
     printf 'injected after claim\n' >"$GATE_ROOT/runs/fixed/BRANCH_PROVENANCE.json"
 fi
 if [[ -n ${FAKE_TAMPER_SOURCE:-} && ! -e $FAKE_TAMPER_MARKER ]]; then
-    printf '\n# replaced after submitter resolution\n' >>"$FAKE_TAMPER_SOURCE"
+    replacement="${FAKE_TAMPER_SOURCE}.replacement.$$"
+    cp -p "$FAKE_TAMPER_SOURCE" "$replacement"
+    printf '\n# replaced after submitter resolution\n' >>"$replacement"
+    mv -f "$replacement" "$FAKE_TAMPER_SOURCE"
     : >"$FAKE_TAMPER_MARKER"
 fi
 printf '%s' "${FAKE_SACCT_OUTPUT:-}"
@@ -1573,11 +1576,20 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.pseudo = self.assets / "C_ONCV_PBE-1.0.upf"
         self.orbital = self.assets / "C_gga_10au_100Ry_3s3p2d.orb"
         self.environment_script = self.assets / "env_intel.sh"
+        self.python_real = self.assets / "python-c-pbe-gate"
+        self.python_exe = self.assets / "python3"
         self.abacus.write_text("#!/usr/bin/env bash\nexit 0\n")
         self.abacus.chmod(self.abacus.stat().st_mode | stat.S_IXUSR)
         self.pseudo.write_text("pseudo\n")
         self.orbital.write_text("orbital\n")
         self.environment_script.write_text("#!/usr/bin/env bash\n")
+        self.python_real.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"exec {shlex.quote(sys.executable)} \"$@\"\n"
+        )
+        self.python_real.chmod(self.python_real.stat().st_mode | stat.S_IXUSR)
+        self.python_exe.symlink_to(self.python_real.name)
         self.gate_root = self.base / "gate"
         self.source_commit = "0123456789abcdef0123456789abcdef01234567"
 
@@ -1604,7 +1616,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
                 "ABACUS_ENV_SCRIPT": str(self.environment_script),
                 "PSEUDO_SOURCE": str(self.pseudo),
                 "ORBITAL_SOURCE": str(self.orbital),
-                "PYTHON_EXE": sys.executable,
+                "PYTHON_EXE": str(self.python_exe),
                 "SOURCE_COMMIT": self.source_commit,
                 "FAKE_SCHEDULER_LOG": str(self.scheduler_log),
                 "FAKE_SBATCH_COUNT": str(self.sbatch_count),
@@ -1720,7 +1732,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertEqual(provenance["source_commit"], self.source_commit)
         self.assertEqual(provenance["gate_profile"], profile_name)
 
-        python = str(Path(sys.executable).resolve())
+        python = str(self.python_real)
         receipt = self.gate_root / ".submission-claim/SBATCH_RECEIPT.txt"
         resolved_paths = {
             "gate_root": self.gate_root,
@@ -1849,30 +1861,67 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertEqual(self._submission_count(), 0)
 
     def test_replaced_runtime_source_stops_before_claim_and_sbatch(self):
-        for index, (profile_name, relative) in enumerate(
+        for index, (label, profile_name) in enumerate(
             (
-                ("df_dcu", "resource_profiles.py"),
-                ("df_dcu", "run_pbe_branch.slurm"),
-                ("server66", "run_pbe_branch_server66.slurm"),
-                ("df_dcu", "run_pbe_branch_common.sh"),
+                ("python", "df_dcu"),
+                ("abacus", "df_dcu"),
+                ("abacus_env_script", "df_dcu"),
+                ("pseudo", "df_dcu"),
+                ("orbital", "df_dcu"),
+                ("resource_profiles", "df_dcu"),
+                ("gate_contract", "df_dcu"),
+                ("prepare_gate", "df_dcu"),
+                ("audit_gate", "df_dcu"),
+                ("df_dcu_entrypoint", "df_dcu"),
+                ("server66_entrypoint", "server66"),
+                ("common_runner", "df_dcu"),
+                ("submitter", "df_dcu"),
             )
         ):
-            with self.subTest(profile=profile_name, source=relative):
+            with self.subTest(profile=profile_name, source=label):
                 archive = self.base / f"tamper-{index}/pbe_reference_gate"
                 shutil.copytree(ROOT, archive)
+                assets = self.base / f"tamper-{index}/assets"
+                shutil.copytree(self.assets, assets, symlinks=True)
                 gate_root = self.base / f"tamper-gate-{index}"
                 tamper_marker = self.base / f"tamper-marker-{index}"
+                scheduler_log = self.base / f"tamper-scheduler-{index}.log"
+                sbatch_count = self.base / f"tamper-sbatch-{index}.count"
+                batch_environment = self.base / f"tamper-batch-{index}.txt"
+                source_paths = {
+                    "python": assets / self.python_real.name,
+                    "abacus": assets / self.abacus.name,
+                    "abacus_env_script": assets / self.environment_script.name,
+                    "pseudo": assets / self.pseudo.name,
+                    "orbital": assets / self.orbital.name,
+                    "resource_profiles": archive / RESOURCE_PROFILES.name,
+                    "gate_contract": archive / GATE_CONTRACT_SOURCE.name,
+                    "prepare_gate": archive / PREPARE_SOURCE.name,
+                    "audit_gate": archive / AUDIT_SOURCE.name,
+                    "df_dcu_entrypoint": archive / RUNNER.name,
+                    "server66_entrypoint": archive / SERVER66_RUNNER.name,
+                    "common_runner": archive / COMMON_RUNNER.name,
+                    "submitter": archive / SUBMITTER.name,
+                }
                 completed = self._run_submitter(
                     script=archive / SUBMITTER.name,
                     GATE_PROFILE=profile_name,
                     GATE_ROOT=gate_root,
-                    FAKE_TAMPER_SOURCE=archive / relative,
+                    ABACUS_ARTIFACT=assets / self.abacus.name,
+                    ABACUS_ENV_SCRIPT=assets / self.environment_script.name,
+                    PSEUDO_SOURCE=assets / self.pseudo.name,
+                    ORBITAL_SOURCE=assets / self.orbital.name,
+                    PYTHON_EXE=assets / self.python_exe.name,
+                    FAKE_SCHEDULER_LOG=scheduler_log,
+                    FAKE_SBATCH_COUNT=sbatch_count,
+                    FAKE_BATCH_ENVIRONMENT=batch_environment,
+                    FAKE_TAMPER_SOURCE=source_paths[label],
                     FAKE_TAMPER_MARKER=tamper_marker,
                 )
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn("changed after resolution", completed.stderr)
                 self.assertFalse((gate_root / ".submission-claim").exists())
-        self.assertEqual(self._submission_count(), 0)
+                self.assertFalse(sbatch_count.exists())
 
     def test_all_exported_paths_reject_commas_or_newlines_before_claim(self):
         comma_abacus = self.assets / "abacus,invalid"

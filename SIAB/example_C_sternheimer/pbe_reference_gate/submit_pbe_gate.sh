@@ -174,8 +174,17 @@ do
         || fail "resolved export paths must not contain commas or newlines: $value"
 done
 
-PINNED_SOURCE_KINDS=(resource_profiles.py selected-entrypoint run_pbe_branch_common.sh)
-PINNED_SOURCE_PATHS=("$RESOURCE_PROFILES_REAL" "$ENTRYPOINT_REAL" "$COMMON_RUNNER_REAL")
+PINNED_SOURCE_KINDS=(
+    PYTHON_EXE ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_SOURCE ORBITAL_SOURCE
+    resource_profiles.py gate_contract.py prepare_gate.py audit_gate.py
+    selected-entrypoint run_pbe_branch_common.sh submit_pbe_gate.sh
+)
+PINNED_SOURCE_PATHS=(
+    "$PYTHON_REAL" "$ABACUS_REAL" "$ABACUS_ENV_REAL" "$PSEUDO_REAL"
+    "$ORBITAL_REAL" "$RESOURCE_PROFILES_REAL" "$GATE_CONTRACT_REAL"
+    "$PREPARE_GATE_REAL" "$AUDIT_GATE_REAL" "$ENTRYPOINT_REAL"
+    "$COMMON_RUNNER_REAL" "$SUBMITTER_REAL"
+)
 PINNED_SOURCE_IDENTITIES=()
 for pinned_source in "${PINNED_SOURCE_PATHS[@]}"; do
     PINNED_SOURCE_IDENTITIES+=("$(source_identity "$pinned_source")")
