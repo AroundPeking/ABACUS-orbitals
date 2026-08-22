@@ -386,3 +386,25 @@ preserved as failed provenance and must never be reused.  The replacement run
 requires a reviewed source commit, a new commit-derived immutable root, a fresh
 preflight, and one new submission.  The physical gate remains pending until
 that replacement run creates `PBE_GATE_PASSED`.
+
+Source commit `6cae347f9e6f3767f6a7c5182bfda839c7520c93` then passed a
+fresh 171-test preflight and was submitted exactly once as array job `410626`
+under its own commit-derived root.  The `dir0` and `dir1` branches completed
+with full restart evidence.  Two independent blockers remained:
+
+1. server66 assigned the array parent number itself to task 3.  Querying
+   `scontrol show job 410626` returned all four array records, whereas the
+   canonical selector `410626_3` returned exactly the task-3 record.  The
+   scheduler audit therefore must always query
+   `<array_job_id>_<array_task_id>` and still verify the returned live job ID;
+2. the zero-field fixed-occupation cold SCF genuinely failed to converge after
+   300 iterations (`drho = 2.2274e-3`).  Its INPUT, STRU, KPT, executable,
+   resources, and node matched the earlier converged run, but the trajectories
+   differed from iteration 1.  The audit correctly rejected this result; no
+   parser relaxation is allowed.  This degenerate open-shell convergence issue
+   requires a separate one-variable physical stabilization test before another
+   formal gate run.
+
+Job `410626` and its root are failed provenance and must not be reused.  Fixing
+the scheduler selector alone does not authorize a replacement formal run until
+the fixed-occupation SCF protocol is reproducibly converged.

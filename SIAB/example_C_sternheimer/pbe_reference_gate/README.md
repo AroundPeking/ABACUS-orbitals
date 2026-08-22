@@ -147,7 +147,7 @@ the immutable root it must:
 1. compare the source archive with `SOURCE_ARCHIVE.sha256`, compare
    `SOURCE_COMMIT.txt` with the exported `SOURCE_COMMIT`, and verify the exact
    ABACUS, pseudopotential, orbital, and environment-script hashes;
-2. run the complete gate suite and retain output ending in `Ran 171 tests`;
+2. run the complete gate suite and retain output ending in `Ran 172 tests`;
 3. retain successful shell and Python checks as `BASH_SYNTAX.txt` and
    `PY_COMPILE.txt`;
 4. run the exact server66 array shape through `sbatch --test-only` and retain
@@ -189,6 +189,11 @@ the validated ABACUS versions: `Read in electron density: <path>` and
 not evidence.  The audit still requires exactly one canonical phase-local
 `chgs1.cube` path and one canonical phase-local `chgs2.cube` path, and rejects
 extra, ambiguous, external, or traversal paths.
+
+For every array branch, the scheduler audit queries the canonical Slurm array
+selector `<array_job_id>_<array_task_id>`.  This remains unique when Slurm uses
+the array parent number itself as one task's `SLURM_JOB_ID`; the returned
+record must still match the live job ID, array ID, and task ID.
 
 - `DIAGNOSTIC_ONLY` means the scalar numerical comparison may be readable, but
   the complete four-branch runtime and restart evidence is absent.  It is not

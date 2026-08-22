@@ -411,7 +411,7 @@ def _scheduler_record(branch: str) -> dict[str, object]:
         raise ValueError(
             f"SLURM_MEM_PER_NODE must equal {contract['memory_mb']}"
         )
-    fields, raw_scontrol = _query_scheduler(job_id)
+    fields, raw_scontrol = _query_scheduler(f"{array_job_id}_{task_id}")
     observed_job_id = fields["JobId"]
     if observed_job_id not in {job_id, f"{array_job_id}_{task_id}"}:
         raise ValueError("scontrol JobId differs from the running Slurm job")

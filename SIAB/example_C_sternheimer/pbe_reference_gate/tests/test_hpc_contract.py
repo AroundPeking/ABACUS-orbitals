@@ -536,6 +536,28 @@ class RuntimeFileContractTests(unittest.TestCase):
         self.assertEqual(scheduler["over_subscribe"], "OK")
         self.assertEqual(scheduler["observed"]["over_subscribe"], "OK")
 
+    def test_scheduler_record_queries_canonical_array_task_id_for_parent_alias(self):
+        raw, environment = self._scheduler_fixture("server66")
+        environment.update(
+            {
+                "SLURM_JOB_ID": "9001",
+                "SLURM_ARRAY_TASK_ID": "3",
+            }
+        )
+        raw = raw.replace("JobId=9100", "JobId=9001").replace(
+            "ArrayTaskId=0", "ArrayTaskId=3"
+        )
+        fields = audit_gate._parse_scontrol_fields(raw)
+        query = mock.Mock(return_value=(fields, raw))
+
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+            audit_gate, "_query_scheduler", query
+        ):
+            scheduler = audit_gate._scheduler_record("dir2")
+
+        query.assert_called_once_with("9001_3")
+        self.assertEqual(scheduler["observed"]["job_id"], "9001")
+
     def test_scheduler_record_requires_an_explicit_known_profile(self):
         raw, environment = self._scheduler_fixture()
         fields = audit_gate._parse_scontrol_fields(raw)
@@ -1805,7 +1827,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "git archive",
             "SOURCE_COMMIT.txt",
             "SOURCE_ARCHIVE.sha256",
-            "Ran 171 tests",
+            "Ran 172 tests",
             "BASH_SYNTAX.txt",
             "PY_COMPILE.txt",
             "SBATCH_TEST_ONLY.txt",
