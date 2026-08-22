@@ -63,12 +63,11 @@ user shell startup file or import unrelated settings.
 
 The server66 preflight and formal run must use these immutable artifacts:
 
-- ABACUS SHA256:
-  `27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279`.
-- C SG15 pseudopotential SHA256:
-  `e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99`.
-- C TZDP-10au orbital SHA256:
-  `7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d`.
+| Artifact | Canonical path after staging | SHA256 |
+| --- | --- | --- |
+| ABACUS | `/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/abacus-407979/abacus` | `27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279` |
+| C SG15 pseudopotential | `<immutable-root>/assets/C_ONCV_PBE-1.0.upf` | `e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99` |
+| C TZDP-10au orbital | `<immutable-root>/assets/C_gga_10au_100Ry_3s3p2d.orb` | `7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d` |
 
 The staging step packages this directory as a standalone source archive.  That archive
 does not require `.git`; `SOURCE_COMMIT` is the exact 40-character lowercase
@@ -90,8 +89,18 @@ GATE_PROFILE=df_dcu ./submit_pbe_gate.sh
 
 For server66, set its own canonical root, executable, environment script,
 assets, Python executable, and source commit, then submit explicitly:
+The staging must replace every angle-bracket placeholder before submission;
+placeholders must not be submitted literally.
 
 ```bash
+export GATE_ROOT='/home/ghj/abacus/260822/c-atom-pbe-equivalence-server66-<source-hash>'
+export ABACUS_ARTIFACT=/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/abacus-407979/abacus
+export ABACUS_ENV_SCRIPT="$GATE_ROOT/source/server66_runtime_env.sh"
+export PSEUDO_SOURCE="$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf"
+export ORBITAL_SOURCE="$GATE_ROOT/assets/C_gga_10au_100Ry_3s3p2d.orb"
+export PYTHON_EXE=/home/ghj/app/miniconda3/bin/python3
+export SOURCE_COMMIT='<exact-40-hex-source-commit>'
+
 GATE_PROFILE=server66 ./submit_pbe_gate.sh
 ```
 
@@ -100,11 +109,14 @@ Successful submission creates immutable `SUBMITTED_JOB_ID.txt` and atomic
 file sizes and SHA256 hashes, source commit, exact `sbatch` command, job ID,
 and UTC submission time.  It also records and exports the canonical
 `ABACUS_ENV_SCRIPT`.  Runtime provenance covers `gate_contract.py`,
-`prepare_gate.py`, `audit_gate.py`, `run_pbe_branch.slurm`, and
+`prepare_gate.py`, `audit_gate.py`, `resource_profiles.py`, the selected profile-specific entrypoint
+(`run_pbe_branch.slurm` or
+`run_pbe_branch_server66.slurm`), `run_pbe_branch_common.sh`, and
 `submit_pbe_gate.sh`; each must be a nonempty non-symlink regular file.  The
-branch, phase, and global evidence independently rehash both the environment
-script and the canonical `mpirun` selected after the script is sourced.  All
-four branches must contain identical records.  The
+branch, phase, and global evidence independently rehash the complete source
+chain, environment script, ABACUS executable, and canonical `mpirun` selected
+after the script is sourced.  All four branches must contain identical
+records.  The
 durable receipt files are created exclusively and fsynced before `sbatch`
 starts, and remain under `.submission-claim/` when submission is ambiguous.
 

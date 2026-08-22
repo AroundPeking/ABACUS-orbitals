@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -1758,6 +1759,55 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             text,
             r"21709225[^\n]*only after[^\n]*server66 preflight[^\n]*pass",
         )
+
+    def test_readme_server66_example_is_complete_and_bound_to_artifacts(self):
+        text = README.read_text()
+        self.assertIn("For server66,", text)
+        server66_section = text.split("For server66,", 1)[1]
+        match = re.search(
+            r"```bash\n(?P<block>.*?)\n```",
+            server66_section,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "missing server66 submission code block")
+        block = match.group("block")
+
+        for line in (
+            "export GATE_ROOT='/home/ghj/abacus/260822/"
+            "c-atom-pbe-equivalence-server66-<source-hash>'",
+            "export ABACUS_ARTIFACT=/home/ghj/abacus/260809/"
+            "sternheimer-solid-delta/artifacts/abacus-407979/abacus",
+            'export ABACUS_ENV_SCRIPT="$GATE_ROOT/source/server66_runtime_env.sh"',
+            'export PSEUDO_SOURCE="$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf"',
+            'export ORBITAL_SOURCE="$GATE_ROOT/assets/'
+            'C_gga_10au_100Ry_3s3p2d.orb"',
+            "export PYTHON_EXE=/home/ghj/app/miniconda3/bin/python3",
+            "export SOURCE_COMMIT='<exact-40-hex-source-commit>'",
+            "GATE_PROFILE=server66 ./submit_pbe_gate.sh",
+        ):
+            self.assertIn(line, block)
+
+        self.assertIn(
+            "staging must replace every angle-bracket placeholder before submission",
+            text,
+        )
+        self.assertIn("must not be submitted literally", text)
+        self.assertRegex(
+            text,
+            r"\| `/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/"
+            r"abacus-407979/abacus` \| "
+            r"`27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279` \|",
+        )
+        for source in (
+            "gate_contract.py",
+            "prepare_gate.py",
+            "audit_gate.py",
+            "resource_profiles.py",
+            "selected profile-specific entrypoint",
+            "run_pbe_branch_common.sh",
+            "submit_pbe_gate.sh",
+        ):
+            self.assertIn(source, text)
 
     def _assert_profile_submission(self, profile_name, entrypoint):
         completed = self._run_submitter(GATE_PROFILE=profile_name)
