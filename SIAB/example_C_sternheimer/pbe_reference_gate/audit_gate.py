@@ -1084,11 +1084,17 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
     )
     wfc_lines = []
     charge_lines = []
+    charge_markers = (
+        "Read in electron density: ",
+        "Read electron density from file: ",
+    )
     all_wfc_lines = re.findall(
         r"^.*Read NAO wave functions from .*\s*$", stdout, flags=re.MULTILINE
     )
     all_charge_lines = re.findall(
-        r"^.*Read in electron density: .*\s*$", log, flags=re.MULTILINE
+        r"^.*(?:Read in electron density: |Read electron density from file: ).*\s*$",
+        log,
+        flags=re.MULTILINE,
     )
     if len(all_wfc_lines) != 2:
         raise ValueError(
@@ -1124,11 +1130,12 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
         wfc_pattern = re.compile(
             rf"^.*Read NAO wave functions from .*wfs{spin}_nao\.txt\s*$", re.MULTILINE
         )
-        charge_pattern = re.compile(
-            rf"^.*Read in electron density: .*chgs{spin}\.cube\s*$", re.MULTILINE
-        )
         wfc_matches = wfc_pattern.findall(stdout)
-        charge_matches = charge_pattern.findall(log)
+        charge_matches = [
+            line
+            for line in all_charge_lines
+            if re.search(rf"chgs{spin}\.cube\s*$", line)
+        ]
         if len(wfc_matches) != 1 or len(charge_matches) != 1:
             raise ValueError(
                 f"restart load evidence for spin {spin} is missing or ambiguous"
@@ -1136,9 +1143,10 @@ def _restart_load_lines(phase_root: Path) -> dict[str, object]:
         require_exact_path(
             wfc_matches[0], "Read NAO wave functions from ", f"wfs{spin}_nao.txt"
         )
-        require_exact_path(
-            charge_matches[0], "Read in electron density: ", f"chgs{spin}.cube"
+        charge_marker = next(
+            marker for marker in charge_markers if marker in charge_matches[0]
         )
+        require_exact_path(charge_matches[0], charge_marker, f"chgs{spin}.cube")
         wfc_lines.extend(wfc_matches)
         charge_lines.extend(charge_matches)
     return {

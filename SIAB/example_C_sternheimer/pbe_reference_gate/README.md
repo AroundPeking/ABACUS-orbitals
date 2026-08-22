@@ -147,7 +147,7 @@ the immutable root it must:
 1. compare the source archive with `SOURCE_ARCHIVE.sha256`, compare
    `SOURCE_COMMIT.txt` with the exported `SOURCE_COMMIT`, and verify the exact
    ABACUS, pseudopotential, orbital, and environment-script hashes;
-2. run the complete gate suite and retain output ending in `Ran 169 tests`;
+2. run the complete gate suite and retain output ending in `Ran 171 tests`;
 3. retain successful shell and Python checks as `BASH_SYNTAX.txt` and
    `PY_COMPILE.txt`;
 4. run the exact server66 array shape through `sbatch --test-only` and retain
@@ -182,6 +182,13 @@ Inspect both `RESULT_SUMMARY.json` and `RESULT_SUMMARY.txt`.
 A scheduler completion is not a physical pass; only the login-node global audit
 can create `PBE_GATE_PASSED` after all branches have left the scheduler and all
 physical and provenance checks have passed.
+
+The restart audit accepts the two path-bearing density-load messages emitted by
+the validated ABACUS versions: `Read in electron density: <path>` and
+`Read electron density from file: <path>`.  A path-free informational line is
+not evidence.  The audit still requires exactly one canonical phase-local
+`chgs1.cube` path and one canonical phase-local `chgs2.cube` path, and rejects
+extra, ambiguous, external, or traversal paths.
 
 - `DIAGNOSTIC_ONLY` means the scalar numerical comparison may be readable, but
   the complete four-branch runtime and restart evidence is absent.  It is not

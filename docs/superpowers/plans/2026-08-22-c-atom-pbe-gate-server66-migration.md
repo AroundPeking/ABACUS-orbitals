@@ -366,3 +366,23 @@ After all four tasks reach scheduler `COMPLETED` with exit code `0:0`, run the
 global audit on the login node.  Report scheduler, numerical, and physical
 gates separately.  Only `status=PBE_GATE_PASSED` permits writing a separate C
 Delta-ST implementation plan.
+
+## Formal execution record
+
+On 2026-08-22, source commit `79c9c37755e85801c92ab281df1c2de35a1ff010`
+passed the complete server66 preflight and was submitted exactly once as array
+job `410615` under the immutable root
+`/home/ghj/abacus/260822/c-atom-pbe-equivalence-server66-79c9c37755e8`.
+The older df_dcu job `21709225` started and failed independently before it could
+be cancelled; it produced no PBE phase results and was not resubmitted.
+
+The server66 ABACUS calculations produced valid PBE output, including the fixed
+cold and fixed-restart triplet states, but the array stopped at the restart
+evidence audit.  ABACUS `v3.9.0.25` writes the path-bearing message
+`Read electron density from file: <path>`, while the frozen auditor accepted
+only `Read in electron density: <path>`.  This is an audit-parser compatibility
+failure, not a demonstrated PBE or SCF failure.  Job `410615` and its root are
+preserved as failed provenance and must never be reused.  The replacement run
+requires a reviewed source commit, a new commit-derived immutable root, a fresh
+preflight, and one new submission.  The physical gate remains pending until
+that replacement run creates `PBE_GATE_PASSED`.

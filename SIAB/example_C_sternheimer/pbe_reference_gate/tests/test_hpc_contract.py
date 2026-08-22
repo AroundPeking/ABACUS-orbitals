@@ -402,6 +402,62 @@ class RuntimeFileContractTests(unittest.TestCase):
             self.assertEqual(len(evidence["wfc_load_lines"]), 2)
             self.assertEqual(len(evidence["charge_load_lines"]), 2)
 
+    def test_restart_load_accepts_server66_abacus_charge_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase, _ = self._restart_phase(tmp)
+            (phase / "abacus.stdout").write_text(
+                "Read NAO wave functions from "
+                "OUT.C_PBE_REFERENCE_GATE/wfs1_nao.txt\n"
+                "Read NAO wave functions from "
+                "OUT.C_PBE_REFERENCE_GATE/wfs2_nao.txt\n"
+            )
+            (phase / "OUT.C_PBE_REFERENCE_GATE/running_scf.log").write_text(
+                "Read electron density from file\n"
+                "Find the file OUT.C_PBE_REFERENCE_GATE/chgs1.cube , "
+                "try to read it.\n"
+                "Read electron density from file: "
+                "OUT.C_PBE_REFERENCE_GATE/chgs1.cube\n"
+                "Find the file OUT.C_PBE_REFERENCE_GATE/chgs2.cube , "
+                "try to read it.\n"
+                "Read electron density from file: "
+                "OUT.C_PBE_REFERENCE_GATE/chgs2.cube\n"
+            )
+
+            evidence = audit_gate._restart_load_lines(phase)
+
+            self.assertEqual(len(evidence["wfc_load_lines"]), 2)
+            self.assertEqual(len(evidence["charge_load_lines"]), 2)
+            self.assertTrue(
+                all(
+                    "Read electron density from file:" in line
+                    for line in evidence["charge_load_lines"]
+                )
+            )
+
+    def test_restart_load_rejects_extra_mixed_format_charge_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase, _ = self._restart_phase(tmp)
+            self._write_restart_load_logs(
+                phase,
+                (
+                    "OUT.C_PBE_REFERENCE_GATE/wfs1_nao.txt",
+                    "OUT.C_PBE_REFERENCE_GATE/wfs2_nao.txt",
+                ),
+                (
+                    "OUT.C_PBE_REFERENCE_GATE/chgs1.cube",
+                    "OUT.C_PBE_REFERENCE_GATE/chgs2.cube",
+                ),
+            )
+            log = phase / "OUT.C_PBE_REFERENCE_GATE/running_scf.log"
+            log.write_text(
+                log.read_text()
+                + "Read electron density from file: "
+                "OUT.C_PBE_REFERENCE_GATE/chgs1.cube\n"
+            )
+
+            with self.assertRaisesRegex(ValueError, "exactly two charge-density"):
+                audit_gate._restart_load_lines(phase)
+
     def test_restart_load_accepts_absolute_phase_local_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             phase, out = self._restart_phase(tmp)
@@ -1749,7 +1805,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "git archive",
             "SOURCE_COMMIT.txt",
             "SOURCE_ARCHIVE.sha256",
-            "Ran 169 tests",
+            "Ran 171 tests",
             "BASH_SYNTAX.txt",
             "PY_COMPILE.txt",
             "SBATCH_TEST_ONLY.txt",
