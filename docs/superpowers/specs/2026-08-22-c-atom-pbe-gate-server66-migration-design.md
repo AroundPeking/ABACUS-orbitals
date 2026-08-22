@@ -86,6 +86,13 @@ server66 retry cannot collide with the cancelled df_dcu history.  Submission
 provenance records the profile, runner hash, executable hash, asset hashes,
 exact command, job ID, and resolved paths.
 
+The Slurm submission uses an explicit environment allowlist, not
+`--export=ALL`.  It exports only the canonical gate root, physical/runtime
+assets, explicit Python interpreter, selected profile, and immutable original
+entrypoint/common-runner paths needed by the spooled Slurm script.  Login
+shell credentials, agent sockets, aliases, conda state, and unrelated
+application variables must not enter the batch environment.
+
 The formal server66 root is a new immutable directory under
 `/home/ghj/abacus/260822/`.  Existing df_dcu roots and their cancellation
 records are retained and never reused.

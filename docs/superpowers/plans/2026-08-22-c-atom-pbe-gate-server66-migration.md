@@ -223,6 +223,15 @@ file records for `resource_profiles.py`, the selected entrypoint, and
 `run_pbe_branch_common.sh`.  Replacing any of those files after resolution
 must stop submission.
 
+Require the exact `sbatch --export` value to be an allowlist without `ALL`.
+It must contain only `GATE_ROOT`, `ABACUS_ARTIFACT`, `ABACUS_ENV_SCRIPT`,
+`PSEUDO_ASSET`, `ORBITAL_ASSET`, `PYTHON_EXE`, `C_PBE_GATE_PROFILE`,
+`C_PBE_GATE_ENTRYPOINT`, and `C_PBE_GATE_COMMON_RUNNER`.  Tests must seed the
+submitter process with fake API-key, token, socket, conda, and unrelated path
+variables, then prove none appears in the recorded command or fake batch
+environment.  The spooled wrapper simulation must receive the two immutable
+source paths through this allowlist.
+
 - [ ] **Step 2: Run submission tests and verify RED**
 
 Run:
@@ -239,7 +248,9 @@ Expected: failures because `GATE_PROFILE` is not consumed or recorded.
 Resolve `resource_profiles.py`, the selected entrypoint, and the common runner
 before the immutable claim.  Select only `df_dcu` or `server66`; never infer
 from hostname.  Add their hashes and `gate_profile` to submission provenance,
-and export the exact profile to the array.
+and export the exact profile and immutable source paths to the array.  Replace
+`--export=ALL,...` with the exact allowlist above so no ambient login
+environment is forwarded.
 
 - [ ] **Step 4: Verify focused and full tests**
 
