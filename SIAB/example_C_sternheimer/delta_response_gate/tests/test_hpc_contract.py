@@ -46,7 +46,10 @@ class HpcContractTests(unittest.TestCase):
             "sternheimer_delta yes",
             "all_converged yes",
             "max_solver_relative_residual",
-            "perturbation_coulomb_kernel full_periodic_poisson",
+            "ccp_rmesh_times 1",
+            "occupied_bands",
+            "abfs_ccp_fock_alpha_1_singularity_limits",
+            "full_coulomb_reader_v1",
             "workflow_source_commit",
             "v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat",
             "v1_coulomb_full_iq_1_rank0.dat",
@@ -54,6 +57,9 @@ class HpcContractTests(unittest.TestCase):
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)
+        self.assertNotIn("perturbation_coulomb_kernel full_periodic_poisson", text)
+        self.assertNotIn("ccp_rmesh_times_input", text)
+        self.assertNotIn("occupied_bands_total", text)
 
     def test_librpa_runner_uses_full_coulomb_and_records_each_frequency(self):
         text = self.read("run_librpa_branch_server66.slurm")

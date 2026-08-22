@@ -90,6 +90,17 @@
 
 - [x] **Step 4: Implement duplicate-safe submission and run all static tests plus `bash -n`.**
 
+- [x] **Step 5: Correct the molecular-report audit before production starts.**
+
+  Source inspection showed that the atomic Gamma fallback writes
+  `sternheimer_delta`, `ccp_rmesh_times`, and `occupied_bands`, whereas the
+  periodic path writes different field names.  Cancel the untouched first
+  submission, replace the mixed-field checks, and separate the ABFS CCP
+  `Fock, alpha=1, singularity_correction=limits` perturbation potential from
+  the reader-v1 full-Coulomb response metric in the completion record.  Verify
+  the actual `v1_coulomb_full_iq_1_rank0.dat` file and the LibRPA full-Coulomb
+  prefix instead of requiring a periodic-only report line.
+
 ### Task 4: Audit physical equivalence
 
 **Files:**

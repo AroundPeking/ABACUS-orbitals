@@ -121,12 +121,9 @@ grep -Eq '^format v1(_partial)?$' "$report"
 grep -q '^frequency_grid_source file$' "$report"
 grep -q '^nfreq 6$' "$report"
 grep -q '^sternheimer_fd_order 8$' "$report"
-# Historical molecular reports use "sternheimer_delta yes"; the current
-# feature branch uses "sternheimer_mode delta" for the same physical mode.
-grep -Eq '^sternheimer_(mode delta|delta yes)$' "$report"
-grep -q '^perturbation_coulomb_kernel full_periodic_poisson$' "$report"
+grep -q '^sternheimer_delta yes$' "$report"
 grep -q '^pca_threshold 0.0001$' "$report"
-grep -q '^ccp_rmesh_times_input 1$' "$report"
+grep -q '^ccp_rmesh_times 1$' "$report"
 grep -q '^sternheimer_frequency_mpi yes$' "$report"
 grep -q '^mpi_ranks 6$' "$report"
 grep -q '^all_converged yes$' "$report"
@@ -142,7 +139,7 @@ for name in stru_out bz_sampling_out basis_out basis_wfc_out basis_aux_out; do
 done
 
 channels=$(awk '$1=="abfs_channels" {print $2}' "$report")
-occupied=$(awk '$1=="occupied_bands_total" {print $2}' "$report")
+occupied=$(awk '$1=="occupied_bands" {print $2}' "$report")
 solved=$(awk '$1=="solved_equations" {print $2}' "$report")
 residual=$(awk '$1=="max_solver_relative_residual" {print $2}' "$report")
 test -n "$channels"
@@ -192,7 +189,9 @@ payload = {
     "sternheimer_delta": True,
     "virtual_source": "all_ks_bands_implicit_feature_branch",
     "pca_threshold": 1.0e-4,
-    "coulomb_kernel": "full",
+    "perturbation_hartree_kernel": "abfs_ccp_fock_alpha_1_singularity_limits",
+    "response_metric": "full_coulomb_reader_v1",
+    "librpa_coulomb_kernel": "full",
     "solver_tolerance": 1.0e-6,
     "max_solver_relative_residual": float(residual),
     "abfs_channels": int(channels),
