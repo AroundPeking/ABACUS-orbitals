@@ -39,7 +39,7 @@ response_receipt=$(sbatch --parsable \
   --array=0-1%2 \
   --output="$root/logs/${response_name}-%A_%a.out" \
   --error="$root/logs/${response_name}-%A_%a.err" \
-  --export=ALL,DELTA_GATE_ROOT="$root",DELTA_GATE_SOURCE="$source_dir",ABACUS_EXE="${ABACUS_EXE:?}",ABACUS_SHA256="${ABACUS_SHA256:?}",ABACUS_ENV_SCRIPT="${ABACUS_ENV_SCRIPT:?}",PYTHON_EXE="${PYTHON_EXE:-python3}" \
+  --export=ALL,DELTA_GATE_ROOT="$root",DELTA_GATE_SOURCE="$source_dir",DELTA_GATE_SOURCE_COMMIT="${DELTA_GATE_SOURCE_COMMIT:?}",ABACUS_EXE="${ABACUS_EXE:?}",ABACUS_SHA256="${ABACUS_SHA256:?}",ABACUS_ENV_SCRIPT="${ABACUS_ENV_SCRIPT:?}",PYTHON_EXE="${PYTHON_EXE:-python3}" \
   "$source_dir/run_response_branch_server66.slurm")
 response_job=${response_receipt%%;*}
 test -n "$response_job"

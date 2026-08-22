@@ -46,6 +46,8 @@ class HpcContractTests(unittest.TestCase):
             "sternheimer_delta yes",
             "all_converged yes",
             "max_solver_relative_residual",
+            "perturbation_coulomb_kernel full_periodic_poisson",
+            "workflow_source_commit",
             "v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat",
             "v1_coulomb_full_iq_1_rank0.dat",
             "RESPONSE_COMPLETE.json",
@@ -84,6 +86,7 @@ class HpcContractTests(unittest.TestCase):
             "--dependency=afterok:",
             "--job-name=",
             "--array=0-1%2",
+            "DELTA_GATE_SOURCE_COMMIT",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)

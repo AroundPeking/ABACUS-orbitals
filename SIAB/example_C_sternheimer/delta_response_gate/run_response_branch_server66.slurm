@@ -18,6 +18,7 @@ expected_abacus_sha=${ABACUS_SHA256:?}
 runtime_env=${ABACUS_ENV_SCRIPT:?}
 python=${PYTHON_EXE:-python3}
 source_dir=${DELTA_GATE_SOURCE:?}
+source_commit=${DELTA_GATE_SOURCE_COMMIT:?}
 branches=(fixed free)
 branch=${branches[${SLURM_ARRAY_TASK_ID:?}]}
 case_dir=$root/branches/$branch
@@ -28,6 +29,8 @@ test "${SLURM_NTASKS:?}" -eq 6
 test "${SLURM_NTASKS_PER_NODE:?}" -eq 1
 test "${SLURM_CPUS_PER_TASK:?}" -eq 48
 test -f "$root/PREPARATION_MANIFEST.json"
+test -s "$root/SOURCE_COMMIT.txt"
+test "$(cat "$root/SOURCE_COMMIT.txt")" = "$source_commit"
 test -x "$abacus"
 test -s "$runtime_env"
 test -s "$source_dir/response_contract.py"
@@ -96,6 +99,7 @@ cd "$case_dir"
   echo "mpi_ranks=$SLURM_NTASKS"
   echo "omp_threads=$OMP_NUM_THREADS"
   echo "abacus_sha256=$expected_abacus_sha"
+  echo "workflow_source_commit=$source_commit"
   sha256sum INPUT STRU KPT fixed_frequency_grid.dat ./*.upf ./*.orb SOURCE_EIG_OCC.txt
 } > RESPONSE_PROVENANCE.txt
 
@@ -120,6 +124,9 @@ grep -q '^sternheimer_fd_order 8$' "$report"
 # Historical molecular reports use "sternheimer_delta yes"; the current
 # feature branch uses "sternheimer_mode delta" for the same physical mode.
 grep -Eq '^sternheimer_(mode delta|delta yes)$' "$report"
+grep -q '^perturbation_coulomb_kernel full_periodic_poisson$' "$report"
+grep -q '^pca_threshold 0.0001$' "$report"
+grep -q '^ccp_rmesh_times_input 1$' "$report"
 grep -q '^sternheimer_frequency_mpi yes$' "$report"
 grep -q '^mpi_ranks 6$' "$report"
 grep -q '^all_converged yes$' "$report"
@@ -158,14 +165,14 @@ record = parse_eig_occ(Path(sys.argv[1]))
 assert record.spin_counts == {1: 3, 2: 1}
 PY
 
-"$python" - "$branch" "$report" "$expected_abacus_sha" "$residual" \
+"$python" - "$branch" "$report" "$expected_abacus_sha" "$source_commit" "$residual" \
   "$channels" "$solved" "${response_files[@]}" <<'PY'
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-branch, report, exe_sha, residual, channels, solved, *files = sys.argv[1:]
+branch, report, exe_sha, source_commit, residual, channels, solved, *files = sys.argv[1:]
 def record(path):
     path = Path(path)
     return {
@@ -178,6 +185,7 @@ payload = {
     "status": "RESPONSE_COMPLETE",
     "branch": branch,
     "abacus_sha256": exe_sha,
+    "workflow_source_commit": source_commit,
     "frequency_grid_source": "file",
     "nfreq": 6,
     "finite_difference_order": 8,

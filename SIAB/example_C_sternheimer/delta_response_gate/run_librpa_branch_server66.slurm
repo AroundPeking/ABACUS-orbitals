@@ -100,10 +100,13 @@ for match in row.finditer(text):
         rows.append({"ifreq": ifreq, "values": values})
 assert sorted(item["ifreq"] for item in rows) == list(range(1, 7))
 
-matches = re.findall(r"Total Sternheimer EcRPA:\s*([+\-0-9.eE]+)", text)
+matches = re.findall(
+    r"Total Sternheimer EcRPA:\s*([+\-0-9.eE]+)\s+([+\-0-9.eE]+)", text
+)
 assert matches
-energy = float(matches[-1])
-assert math.isfinite(energy)
+energy, energy_imag = map(float, matches[-1])
+assert math.isfinite(energy) and math.isfinite(energy_imag)
+assert abs(energy_imag) <= 1.0e-8
 payload = {
     "status": "LIBRPA_COMPLETE",
     "branch": branch,
@@ -114,6 +117,7 @@ payload = {
     "sqrt_coulomb_threshold": 1.0e-5,
     "trace_log_rows": rows,
     "ecrpa_ha": energy,
+    "ecrpa_imaginary_ha": energy_imag,
     "librpa_out_sha256": hashlib.sha256(Path("librpa.out").read_bytes()).hexdigest(),
 }
 Path("LIBRPA_COMPLETE.json.tmp").write_text(
