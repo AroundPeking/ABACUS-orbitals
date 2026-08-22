@@ -61,6 +61,7 @@ class InputContractTests(unittest.TestCase):
     def test_shared_protocol_is_frozen_in_every_mode(self):
         cases = (
             {"mode": "fixed", "restart": False},
+            {"mode": "fixed_field", "field_dir": 0, "restart": False},
             {"mode": "field", "field_dir": 1, "restart": False},
             {"mode": "free", "field_dir": 2, "restart": True},
         )
@@ -93,6 +94,36 @@ class InputContractTests(unittest.TestCase):
         self.assertEqual(values["ocp_set"], "3*1 19*0 1*1 21*0")
         self.assertEqual(values["init_wfc"], "file")
         self.assertEqual(values["init_chg"], "file")
+
+    def test_fixed_field_seed_combines_integer_occupation_and_field(self):
+        values = parse_input(
+            render_input(mode="fixed_field", field_dir=0, restart=False)
+        )
+
+        self.assertEqual(values["ocp"], "1")
+        self.assertEqual(values["ocp_set"], "3*1 19*0 1*1 21*0")
+        self.assertEqual(values["efield_flag"], "1")
+        self.assertEqual(values["dip_cor_flag"], "0")
+        self.assertEqual(values["efield_dir"], "0")
+        self.assertEqual(values["efield_pos_max"], "0.8")
+        self.assertEqual(values["efield_pos_dec"], "0.1")
+        self.assertEqual(values["efield_amp"], "1e-4")
+        self.assertNotIn("init_wfc", values)
+        self.assertNotIn("init_chg", values)
+        self.assertEqual(
+            set(values),
+            set(SHARED_PROTOCOL)
+            | {
+                "ocp",
+                "ocp_set",
+                "efield_flag",
+                "dip_cor_flag",
+                "efield_dir",
+                "efield_pos_max",
+                "efield_pos_dec",
+                "efield_amp",
+            },
+        )
 
     def test_field_seed_writes_each_requested_direction(self):
         for field_dir in (0, 1, 2):
@@ -134,7 +165,7 @@ class InputContractTests(unittest.TestCase):
         self.assertEqual(values["init_chg"], "file")
 
     def test_rejects_invalid_field_directions(self):
-        for mode in ("field", "free"):
+        for mode in ("fixed_field", "field", "free"):
             for field_dir in (None, -1, 3, "1", False, True):
                 with self.subTest(mode=mode, field_dir=field_dir):
                     with self.assertRaisesRegex(
@@ -164,6 +195,13 @@ class InputContractTests(unittest.TestCase):
             r"^field mode requires restart=False$",
         ):
             render_input(mode="field", field_dir=0, restart=True)
+
+    def test_fixed_field_rejects_restart(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"^fixed_field mode requires restart=False$",
+        ):
+            render_input(mode="fixed_field", field_dir=0, restart=True)
 
     def test_free_requires_restart(self):
         with self.assertRaisesRegex(

@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 
-VALID_MODES = {"fixed", "field", "free"}
+VALID_MODES = {"fixed", "fixed_field", "field", "free"}
 FROZEN_PROTOCOL = (
     ("suffix", "C_PBE_REFERENCE_GATE"),
     ("calculation", "scf"),
@@ -131,23 +131,23 @@ def render_input(
         raise ValueError(f"unsupported mode: {mode}")
     if mode == "fixed" and field_dir is not None:
         raise ValueError("fixed mode does not accept field_dir")
-    if mode in {"field", "free"} and (
+    if mode in {"fixed_field", "field", "free"} and (
         type(field_dir) is not int or field_dir not in {0, 1, 2}
     ):
         raise ValueError("field_dir must be an integer 0, 1, or 2")
-    if mode == "field" and restart:
-        raise ValueError("field mode requires restart=False")
+    if mode in {"fixed_field", "field"} and restart:
+        raise ValueError(f"{mode} mode requires restart=False")
     if mode == "free" and not restart:
         raise ValueError("free mode requires restart=True")
 
     values = [
         ("INPUT_PARAMETERS", None),
         *FROZEN_PROTOCOL,
-        ("ocp", "1" if mode == "fixed" else "0"),
+        ("ocp", "1" if mode in {"fixed", "fixed_field"} else "0"),
     ]
-    if mode == "fixed":
+    if mode in {"fixed", "fixed_field"}:
         values.append(("ocp_set", "3*1 19*0 1*1 21*0"))
-    if mode == "field":
+    if mode in {"fixed_field", "field"}:
         values.extend(
             [
                 ("efield_flag", "1"),
@@ -266,9 +266,9 @@ def _allowed_input_keys(
     expected_mode: str, expected_restart: bool
 ) -> frozenset[str]:
     allowed = set(_FROZEN_PROTOCOL_KEYS | _BASE_MODE_KEYS)
-    if expected_mode == "fixed":
+    if expected_mode in {"fixed", "fixed_field"}:
         allowed.add("ocp_set")
-    elif expected_mode == "field":
+    if expected_mode in {"fixed_field", "field"}:
         allowed.update(_FIELD_ONLY_KEYS)
     if expected_restart:
         allowed.update(_RESTART_ONLY_KEYS)
@@ -298,35 +298,41 @@ def _validate_phase_input(
         raise ValueError(f"unsupported expected_mode: {expected_mode}")
     _validate_frozen_protocol(values)
 
-    if expected_mode == "field":
+    if expected_mode in {"fixed_field", "field"}:
         if expected_restart:
-            raise ValueError("field phase cannot use restart input")
+            raise ValueError(f"{expected_mode} phase cannot use restart input")
         if (
             type(expected_field_dir) is not int
             or expected_field_dir not in {0, 1, 2}
         ):
-            raise ValueError("field phase requires expected_field_dir 0, 1, or 2")
+            raise ValueError(
+                f"{expected_mode} phase requires expected_field_dir 0, 1, or 2"
+            )
     else:
         if expected_field_dir is not None:
-            raise ValueError("expected_field_dir is only valid for field phases")
+            raise ValueError(
+                "expected_field_dir is only valid for field-bearing phases"
+            )
         if expected_mode == "free" and not expected_restart:
             raise ValueError("free phase requires expected_restart=True")
     _validate_restart_input(values, expected_restart)
     _validate_input_key_whitelist(values, expected_mode, expected_restart)
 
     ocp = _require_integer_input(values, "ocp")
-    if expected_mode == "fixed":
+    if expected_mode in {"fixed", "fixed_field"}:
         if ocp != 1:
-            raise ValueError("fixed phase requires ocp=1")
+            raise ValueError(f"{expected_mode} phase requires ocp=1")
         if values.get("ocp_set") != "3*1 19*0 1*1 21*0":
-            raise ValueError("fixed phase has missing or unexpected ocp_set")
+            raise ValueError(
+                f"{expected_mode} phase has missing or unexpected ocp_set"
+            )
     else:
         if ocp != 0:
             raise ValueError(f"{expected_mode} phase requires ocp=0")
         if "ocp_set" in values:
             raise ValueError(f"{expected_mode} phase must not contain ocp_set")
 
-    if expected_mode == "field":
+    if expected_mode in {"fixed_field", "field"}:
         field_contract = {
             "efield_flag": 1,
             "dip_cor_flag": 0,
@@ -335,7 +341,7 @@ def _validate_phase_input(
         for key, expected in field_contract.items():
             if _require_integer_input(values, key) != expected:
                 raise ValueError(
-                    f"field phase requires {key}={expected}"
+                    f"{expected_mode} phase requires {key}={expected}"
                 )
         float_contract = {
             "efield_pos_max": 0.8,
@@ -345,7 +351,7 @@ def _validate_phase_input(
         for key, expected in float_contract.items():
             if _require_float_input(values, key) != expected:
                 raise ValueError(
-                    f"field phase requires {key}={expected:.16g}"
+                    f"{expected_mode} phase requires {key}={expected:.16g}"
                 )
         return
 
