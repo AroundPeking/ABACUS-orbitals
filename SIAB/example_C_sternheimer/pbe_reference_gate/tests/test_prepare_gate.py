@@ -20,7 +20,7 @@ from prepare_gate import BRANCHES, prepare_branch
 
 
 EXPECTED_BRANCHES = {
-    "fixed": ("fixed", None),
+    "fixed": ("fixed_field", 0),
     "dir0": ("field", 0),
     "dir1": ("field", 1),
     "dir2": ("field", 2),
@@ -65,7 +65,7 @@ class PrepareGateTests(unittest.TestCase):
             pseudo=self.pseudo,
             orbital=self.orbital,
         )
-        staged = prepared / "fixed_cold" / name
+        staged = prepared / "fixed_field_seed" / name
         content = staged.read_bytes()
         self.assertIn(original_token, content)
         staged.write_bytes(content.replace(original_token, replacement_token))
@@ -93,7 +93,9 @@ class PrepareGateTests(unittest.TestCase):
         for branch, (mode, field_dir) in EXPECTED_BRANCHES.items():
             with self.subTest(branch=branch):
                 branch_root = self.prepare(branch)
-                expected_phase = "fixed_cold" if branch == "fixed" else "field_seed"
+                expected_phase = (
+                    "fixed_field_seed" if branch == "fixed" else "field_seed"
+                )
 
                 self.assertEqual(branch_root, self.root / "runs" / branch)
                 self.assertEqual(
@@ -112,14 +114,25 @@ class PrepareGateTests(unittest.TestCase):
                     },
                 )
                 input_text = (phase / "INPUT").read_text()
-                self.assertIn(f"ocp {'1' if mode == 'fixed' else '0'}\n", input_text)
-                if mode == "field":
+                self.assertEqual(
+                    input_text,
+                    prepare_gate.render_input(
+                        mode=mode,
+                        field_dir=field_dir,
+                        restart=False,
+                    ),
+                )
+                self.assertIn(
+                    f"ocp {'1' if mode == 'fixed_field' else '0'}\n",
+                    input_text,
+                )
+                if mode in {"fixed_field", "field"}:
                     self.assertIn(f"efield_dir {field_dir}\n", input_text)
                 else:
                     self.assertNotIn("efield_dir", input_text)
 
     def test_stru_is_exact_twenty_angstrom_centered_carbon_cell(self):
-        phase = self.prepare() / "fixed_cold"
+        phase = self.prepare() / "fixed_field_seed"
         text = (phase / "STRU").read_text()
 
         self.assertIn(
@@ -146,7 +159,7 @@ class PrepareGateTests(unittest.TestCase):
         self.assertEqual((phase / "KPT").read_text(), EXPECTED_KPT)
 
     def test_assets_are_real_copies_and_survive_source_removal(self):
-        phase = self.prepare() / "fixed_cold"
+        phase = self.prepare() / "fixed_field_seed"
         pseudo_copy = phase / self.pseudo.name
         orbital_copy = phase / self.orbital.name
 
@@ -422,7 +435,7 @@ class PrepareGateTests(unittest.TestCase):
                 )
                 provenance_path = prepared / "BRANCH_PROVENANCE.json"
                 provenance = json.loads(provenance_path.read_text())
-                staged = prepared / "fixed_cold" / source.name
+                staged = prepared / "fixed_field_seed" / source.name
                 staged.write_bytes(f"tampered-{label}\n".encode())
                 phase_record = provenance["phase"]["files"][source.name]
                 phase_record["sha256"] = sha256(staged)
@@ -757,7 +770,13 @@ class PrepareGateCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(
-            (self.root / "runs" / "fixed" / "fixed_cold" / "STRU").is_file()
+            (
+                self.root
+                / "runs"
+                / "fixed"
+                / "fixed_field_seed"
+                / "STRU"
+            ).is_file()
         )
 
     def test_direct_cli_renders_fixed_restart(self):

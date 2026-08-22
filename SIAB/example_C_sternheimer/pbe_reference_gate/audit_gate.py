@@ -51,7 +51,7 @@ RESTART_CHAIN_NOTE = (
 )
 RESTART_FILES = ("wfs1_nao.txt", "wfs2_nao.txt", "chgs1.cube", "chgs2.cube")
 BRANCH_PHASES = {
-    "fixed": ("fixed_cold", "fixed_restart"),
+    "fixed": ("fixed_field_seed", "fixed_zero_restart"),
     "dir0": ("field_seed", "free_restart1", "free_restart2"),
     "dir1": ("field_seed", "free_restart1", "free_restart2"),
     "dir2": ("field_seed", "free_restart1", "free_restart2"),
@@ -79,8 +79,8 @@ class PhaseSpec:
 
 
 PHASES = (
-    PhaseSpec("runs/fixed/fixed_cold", "fixed", False),
-    PhaseSpec("runs/fixed/fixed_restart", "fixed", True),
+    PhaseSpec("runs/fixed/fixed_field_seed", "fixed_field", False, 0),
+    PhaseSpec("runs/fixed/fixed_zero_restart", "fixed", True),
     PhaseSpec("runs/dir0/field_seed", "field", False, 0),
     PhaseSpec("runs/dir0/free_restart1", "free", True),
     PhaseSpec("runs/dir0/free_restart2", "free", True),
@@ -711,6 +711,8 @@ def _phase_spec(branch: str, phase: str) -> PhaseSpec:
 def _field_direction(branch: str, spec: PhaseSpec) -> int | None:
     if spec.mode == "fixed":
         return None
+    if spec.field_dir is not None:
+        return spec.field_dir
     return int(branch[-1])
 
 
@@ -1733,6 +1735,11 @@ def audit_gate(root: str | Path) -> dict[str, object]:
     if not root_path.is_dir():
         raise ValueError(f"gate root does not exist: {root_path}")
 
+    for stale_name in ("fixed_cold", "fixed_restart"):
+        stale_path = root_path / "runs" / "fixed" / stale_name
+        if os.path.lexists(stale_path):
+            raise ValueError(f"stale fixed phase directory exists: {stale_path}")
+
     phases = {
         spec.relative: audit_phase(
             root_path / spec.relative,
@@ -1742,9 +1749,12 @@ def audit_gate(root: str | Path) -> dict[str, object]:
         )
         for spec in PHASES
     }
-    fixed_cold = phases["runs/fixed/fixed_cold"]
-    fixed_restart = phases["runs/fixed/fixed_restart"]
-    fixed_drift = abs(fixed_restart.energy_ha - fixed_cold.energy_ha) * HA_TO_KCAL_MOL
+    fixed_field_seed = phases["runs/fixed/fixed_field_seed"]
+    fixed_zero_restart = phases["runs/fixed/fixed_zero_restart"]
+    fixed_drift = (
+        abs(fixed_zero_restart.energy_ha - fixed_field_seed.energy_ha)
+        * HA_TO_KCAL_MOL
+    )
     free_energies = {
         direction: phases[f"runs/dir{direction}/free_restart2"].energy_ha
         for direction in range(3)
@@ -1758,7 +1768,7 @@ def audit_gate(root: str | Path) -> dict[str, object]:
         for direction in range(3)
     }
     comparison = compare_zero_field_results(
-        fixed_energy_ha=fixed_restart.energy_ha,
+        fixed_energy_ha=fixed_zero_restart.energy_ha,
         free_energies_ha=free_energies,
         fixed_drift_kcal=fixed_drift,
         free_drifts_kcal=free_drifts,

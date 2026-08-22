@@ -34,7 +34,7 @@ SPIN2_OCCUPATIONS = (1.0,) + (0.0,) * 21
 def input_text(mode, *, restart=None, field_dir=None):
     if restart is None:
         restart = mode == "free"
-    if field_dir is None and mode in {"field", "free"}:
+    if field_dir is None and mode in {"fixed_field", "field", "free"}:
         field_dir = 0
     return render_input(mode=mode, restart=restart, field_dir=field_dir)
 
@@ -135,6 +135,23 @@ def replace_input_value(path, key, value):
 
 
 class PhaseAuditTests(unittest.TestCase):
+    def test_fixed_branch_phase_map_is_exact(self):
+        self.assertEqual(
+            audit_gate_module.BRANCH_PHASES["fixed"],
+            ("fixed_field_seed", "fixed_zero_restart"),
+        )
+        self.assertEqual(
+            audit_gate_module.PHASES[:2],
+            (
+                audit_gate_module.PhaseSpec(
+                    "runs/fixed/fixed_field_seed", "fixed_field", False, 0
+                ),
+                audit_gate_module.PhaseSpec(
+                    "runs/fixed/fixed_zero_restart", "fixed", True
+                ),
+            ),
+        )
+
     def test_constants_are_frozen(self):
         self.assertEqual(HA_TO_KCAL_MOL, 627.5094740631)
         self.assertEqual(INTEGER_TOL, 1e-10)
@@ -214,6 +231,7 @@ class PhaseAuditTests(unittest.TestCase):
         cases = (
             ("fixed", False, None),
             ("fixed", True, None),
+            ("fixed_field", False, 0),
             ("field", False, 1),
             ("free", True, None),
         )
@@ -223,7 +241,7 @@ class PhaseAuditTests(unittest.TestCase):
                     case = Path(tmp) / mode
                     render_field_dir = (
                         expected_field_dir
-                        if mode == "field"
+                        if mode in {"fixed_field", "field"}
                         else (2 if mode == "free" else None)
                     )
                     write_phase(
@@ -244,6 +262,7 @@ class PhaseAuditTests(unittest.TestCase):
         cases = (
             ("fixed", False, None),
             ("fixed", True, None),
+            ("fixed_field", False, 0),
             ("field", False, 1),
             ("free", True, None),
         )
@@ -255,7 +274,7 @@ class PhaseAuditTests(unittest.TestCase):
                         case = Path(tmp) / mode
                         render_field_dir = (
                             expected_field_dir
-                            if mode == "field"
+                            if mode in {"fixed_field", "field"}
                             else (2 if mode == "free" else None)
                         )
                         write_phase(
@@ -625,10 +644,12 @@ class GateComparisonTests(unittest.TestCase):
 class AuditCliTests(unittest.TestCase):
     def populate_gate(self, root):
         energies = {
-            "runs/fixed/fixed_cold": (
-                "fixed", ENERGY_EV + 1e-7, False, None
+            "runs/fixed/fixed_field_seed": (
+                "fixed_field", ENERGY_EV + 1e-7, False, 0
             ),
-            "runs/fixed/fixed_restart": ("fixed", ENERGY_EV, True, None),
+            "runs/fixed/fixed_zero_restart": (
+                "fixed", ENERGY_EV, True, None
+            ),
         }
         for direction in range(3):
             energies[f"runs/dir{direction}/field_seed"] = (
@@ -648,6 +669,29 @@ class AuditCliTests(unittest.TestCase):
                 restart=restart,
                 field_dir=field_dir,
             )
+
+    def test_cli_rejects_stale_fixed_phase_directories(self):
+        for stale_name in ("fixed_cold", "fixed_restart"):
+            with self.subTest(stale_name=stale_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self.populate_gate(root)
+                    (root / "runs" / "fixed" / stale_name).mkdir()
+
+                    completed = subprocess.run(
+                        [
+                            sys.executable,
+                            str(ROOT / "audit_gate.py"),
+                            "--root",
+                            str(root),
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("stale fixed phase", completed.stderr)
 
     def test_cli_writes_complete_atomic_summaries(self):
         with tempfile.TemporaryDirectory() as tmp:

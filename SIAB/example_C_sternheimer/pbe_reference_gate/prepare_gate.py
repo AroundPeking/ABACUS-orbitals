@@ -21,13 +21,16 @@ else:
 
 
 BRANCHES = {
-    "fixed": ("fixed", None),
+    "fixed": ("fixed_field", 0),
     "dir0": ("field", 0),
     "dir1": ("field", 1),
     "dir2": ("field", 2),
 }
 
-_PHASE_NAMES = {"fixed": "fixed_cold", "field": "field_seed"}
+_PHASE_NAMES = {
+    "fixed_field": "fixed_field_seed",
+    "field": "field_seed",
+}
 _RESERVED_ASSET_NAMES = frozenset({"INPUT", "STRU", "KPT", "BRANCH_PROVENANCE.json"})
 _SAFE_ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]*$")
 _BOX_ANGSTROM = 20.0
