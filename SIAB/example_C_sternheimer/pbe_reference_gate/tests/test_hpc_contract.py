@@ -79,6 +79,22 @@ class ResourceProfileTests(unittest.TestCase):
         )
         self.assertEqual(completed.stderr, "")
 
+    def test_shell_command_rejects_unknown_profile_cleanly(self):
+        completed = subprocess.run(
+            [sys.executable, str(RESOURCE_PROFILES), "shell", "automatic"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, "")
+        self.assertIn("unknown C PBE gate profile", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
+        lines = completed.stderr.splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith("usage:"))
+        self.assertIn("resource_profiles.py: error:", lines[1])
+
 
 class HpcStaticContractTests(unittest.TestCase):
     def test_runtime_sources_remain_python37_compatible(self):

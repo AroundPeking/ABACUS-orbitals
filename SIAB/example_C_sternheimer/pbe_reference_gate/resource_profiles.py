@@ -63,7 +63,10 @@ def _main():
     if arguments.command != "shell":
         parser.error("a command is required")
 
-    profile = get_resource_profile(arguments.name)
+    try:
+        profile = get_resource_profile(arguments.name)
+    except ValueError as error:
+        parser.error(str(error))
     print("|".join(str(profile[field]) for field in _PROFILE_FIELDS))
 
 
