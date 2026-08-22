@@ -13,6 +13,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "run_pbe_branch.slurm"
+COMMON_RUNNER = ROOT / "run_pbe_branch_common.sh"
+SERVER66_RUNNER = ROOT / "run_pbe_branch_server66.slurm"
+SERVER66_ENVIRONMENT = ROOT / "server66_runtime_env.sh"
 SUBMITTER = ROOT / "submit_pbe_gate.sh"
 README = ROOT / "README.md"
 sys.path.insert(0, str(ROOT))
@@ -98,49 +101,83 @@ class ResourceProfileTests(unittest.TestCase):
 
 class HpcStaticContractTests(unittest.TestCase):
     def test_runtime_sources_remain_python37_compatible(self):
-        for path in (ROOT / "audit_gate.py", ROOT / "submit_pbe_gate.sh"):
+        for path in (
+            ROOT / "audit_gate.py",
+            ROOT / "resource_profiles.py",
+            ROOT / "submit_pbe_gate.sh",
+            COMMON_RUNNER,
+        ):
             self.assertNotIn("missing_ok=True", path.read_text())
 
-    def test_normal_full_node_array_contract(self):
+    def test_df_dcu_entrypoint_has_exact_resource_shape_and_is_thin(self):
         text = RUNNER.read_text()
+        directives = [
+            line
+            for line in text.splitlines()
+            if line.startswith("#SBATCH ")
+        ]
+        self.assertEqual(
+            directives,
+            [
+                "#SBATCH --partition=normal",
+                "#SBATCH --array=0-3",
+                "#SBATCH --nodes=1",
+                "#SBATCH --ntasks=1",
+                "#SBATCH --ntasks-per-node=1",
+                "#SBATCH --cpus-per-task=30",
+                "#SBATCH --mem=110610M",
+                "#SBATCH --time=24:00:00",
+                "#SBATCH --no-requeue",
+                "#SBATCH --exclusive",
+            ],
+        )
         for value in (
-            "#SBATCH --partition=normal",
-            "#SBATCH --array=0-3",
-            "#SBATCH --nodes=1",
-            "#SBATCH --ntasks=1",
-            "#SBATCH --ntasks-per-node=1",
-            "#SBATCH --cpus-per-task=30",
-            "#SBATCH --mem=110610M",
-            "#SBATCH --time=24:00:00",
-            "#SBATCH --no-requeue",
-            "#SBATCH --exclusive",
-            "set -euo pipefail",
-            "export OMP_NUM_THREADS=30",
-            "export MKL_NUM_THREADS=30",
-            "export OPENBLAS_NUM_THREADS=30",
-            '"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"',
+            "export C_PBE_GATE_PROFILE=df_dcu",
+            'export C_PBE_GATE_ENTRYPOINT="${BASH_SOURCE[0]}"',
+            'source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/run_pbe_branch_common.sh"',
         ):
             self.assertIn(value, text)
-        self.assertNotIn("debug", text.lower())
+        self.assertNotIn("prepare_branch_once", text)
+        self.assertNotIn("mpirun", text)
 
-    def test_runtime_environment_is_sourced_before_mpirun_resolution(self):
-        text = RUNNER.read_text()
-        source_index = text.index('source "$ABACUS_ENV_REAL"')
-        mpirun_index = text.index('command -v -- mpirun')
-        launch_index = text.index('"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"')
-        self.assertLess(source_index, mpirun_index)
-        self.assertLess(mpirun_index, launch_index)
+    def test_server66_entrypoint_has_exact_resource_shape_and_is_thin(self):
+        text = SERVER66_RUNNER.read_text()
+        directives = [
+            line
+            for line in text.splitlines()
+            if line.startswith("#SBATCH ")
+        ]
+        self.assertEqual(
+            directives,
+            [
+                "#SBATCH --partition=640",
+                "#SBATCH --array=0-3",
+                "#SBATCH --nodes=1",
+                "#SBATCH --ntasks=1",
+                "#SBATCH --ntasks-per-node=1",
+                "#SBATCH --cpus-per-task=48",
+                "#SBATCH --mem=180000M",
+                "#SBATCH --time=24:00:00",
+                "#SBATCH --no-requeue",
+            ],
+        )
+        self.assertNotIn("#SBATCH --exclusive", text)
         for value in (
-            "ABACUS_ENV_SCRIPT",
-            "export OMP_NUM_THREADS=30",
-            "export MKL_NUM_THREADS=30",
-            "export OPENBLAS_NUM_THREADS=30",
+            "export C_PBE_GATE_PROFILE=server66",
+            'export C_PBE_GATE_ENTRYPOINT="${BASH_SOURCE[0]}"',
+            'source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/run_pbe_branch_common.sh"',
         ):
-            self.assertIn(value, text[source_index:])
+            self.assertIn(value, text)
+        self.assertNotIn("prepare_branch_once", text)
+        self.assertNotIn("mpirun", text)
 
-    def test_runner_checks_inputs_and_restart_semantics(self):
-        text = RUNNER.read_text()
+    def test_common_runner_owns_the_runtime_contract(self):
+        text = COMMON_RUNNER.read_text()
         for value in (
+            "resource_profiles.py",
+            "C_PBE_GATE_PROFILE",
+            "C_PBE_GATE_ENTRYPOINT",
+            '"$RESOURCE_PROFILES_REAL" shell "$C_PBE_GATE_PROFILE"',
             "GATE_ROOT",
             "ABACUS_ARTIFACT",
             "PSEUDO_ASSET",
@@ -158,11 +195,108 @@ class HpcStaticContractTests(unittest.TestCase):
             'grep -q "^init_wfc file$"',
             'grep -q "^init_chg file$"',
             "trap 'record_failure",
+            '"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"',
         ):
             self.assertIn(value, text)
         self.assertIn('"$GATE_ROOT"/runs/.*.prepare.lock', text)
         self.assertIn(".task4-prepare.guard", text)
         self.assertIn("SLURM_ARRAY_JOB_ID", text)
+
+    def test_runtime_environment_is_sourced_before_mpirun_resolution(self):
+        text = COMMON_RUNNER.read_text()
+        source_index = text.index('source "$ABACUS_ENV_REAL"')
+        mpirun_index = text.index('command -v -- mpirun')
+        launch_index = text.index('"$MPIRUN_REAL" -np 1 -ppn 1 "$ABACUS_REAL"')
+        self.assertLess(source_index, mpirun_index)
+        self.assertLess(mpirun_index, launch_index)
+        self.assertEqual(
+            [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip().startswith("source ")
+            ],
+            ['source "$ABACUS_ENV_REAL"'],
+        )
+        for value in (
+            "ABACUS_ENV_SCRIPT",
+            "export OMP_NUM_THREADS=$PROFILE_CPUS_PER_TASK",
+            "export MKL_NUM_THREADS=$PROFILE_CPUS_PER_TASK",
+            "export OPENBLAS_NUM_THREADS=$PROFILE_CPUS_PER_TASK",
+        ):
+            self.assertIn(value, text[source_index:])
+
+    def test_server66_environment_is_minimal_and_credential_free(self):
+        text = SERVER66_ENVIRONMENT.read_text()
+        self.assertEqual(
+            text.splitlines(),
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                "source /etc/profile.d/modules.sh",
+                "module purge",
+                "module load gcc10.2",
+                "module load intel20u4",
+                'export LD_LIBRARY_PATH="/home/apps/gcc10.2/lib64:/home/apps/gcc10.2/lib:/home/apps/intel20u4/lib/intel64_lin${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"',
+            ],
+        )
+        lowered = text.lower()
+        for forbidden in (
+            "/home/ghj/.bashrc",
+            "api_key",
+            "apikey",
+            "token",
+            "conda",
+            "alias ",
+            "/home/ghj/",
+            "cuda",
+            "pythonpath",
+        ):
+            self.assertNotIn(forbidden, lowered)
+
+    def test_common_runner_resolves_every_executed_or_hashed_file(self):
+        text = COMMON_RUNNER.read_text()
+        for value in (
+            "RESOURCE_PROFILES_REAL=$(resolve_regular",
+            "ENTRYPOINT_REAL=$(resolve_regular",
+            "COMMON_RUNNER_REAL=$(resolve_regular",
+            "PYTHON_REAL=$(resolve_regular",
+            "ABACUS_ENV_REAL=$(resolve_regular",
+            "ABACUS_REAL=$(resolve_regular",
+            "PSEUDO_REAL=$(resolve_regular",
+            "ORBITAL_REAL=$(resolve_regular",
+            "MPIRUN_REAL=$(resolve_regular",
+        ):
+            self.assertIn(value, text)
+
+    def test_common_runner_passes_complete_runtime_chain_to_auditor(self):
+        text = COMMON_RUNNER.read_text()
+        for value in (
+            '--gate-profile "$C_PBE_GATE_PROFILE"',
+            '--resource-profiles "$RESOURCE_PROFILES_REAL"',
+            '--entrypoint "$ENTRYPOINT_REAL"',
+            '--common-runner "$COMMON_RUNNER_REAL"',
+            '--abacus "$ABACUS_REAL"',
+            '--environment-script "$ABACUS_ENV_REAL"',
+            '--mpirun "$MPIRUN_REAL"',
+        ):
+            self.assertIn(value, text)
+
+    def test_df_dcu_directives_remain_debug_free(self):
+        text = RUNNER.read_text()
+        for value in (
+            "#SBATCH --partition=normal",
+            "#SBATCH --array=0-3",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --cpus-per-task=30",
+            "#SBATCH --mem=110610M",
+            "#SBATCH --time=24:00:00",
+            "#SBATCH --no-requeue",
+            "#SBATCH --exclusive",
+        ):
+            self.assertIn(value, text)
+        self.assertNotIn("debug", text.lower())
 
 
 class RuntimeFileContractTests(unittest.TestCase):
@@ -189,22 +323,27 @@ class RuntimeFileContractTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _scheduler_fixture():
+    def _scheduler_fixture(profile_name="df_dcu"):
+        profile = get_resource_profile(profile_name)
         raw = (
-            "JobId=9100 ArrayJobId=9001 ArrayTaskId=0 Partition=normal "
-            "NumNodes=1 NumCPUs=30 NumTasks=1 CPUs/Task=30 "
-            "MinMemoryNode=110610M TimeLimit=1-00:00:00 "
-            "OverSubscribe=NO\n"
+            "JobId=9100 ArrayJobId=9001 ArrayTaskId=0 "
+            f"Partition={profile['partition']} NumNodes={profile['nodes']} "
+            f"NumCPUs={profile['cpus_per_task']} NumTasks={profile['ntasks']} "
+            f"CPUs/Task={profile['cpus_per_task']} "
+            f"MinMemoryNode={profile['memory_mb']}M "
+            f"TimeLimit={profile['time_limit']} "
+            f"OverSubscribe={profile['over_subscribe']}\n"
         )
         environment = {
-            "SLURM_JOB_PARTITION": "normal",
+            "C_PBE_GATE_PROFILE": profile_name,
+            "SLURM_JOB_PARTITION": profile["partition"],
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_ARRAY_TASK_COUNT": "4",
-            "SLURM_CPUS_PER_TASK": "30",
-            "SLURM_NTASKS": "1",
-            "SLURM_JOB_NUM_NODES": "1",
+            "SLURM_CPUS_PER_TASK": str(profile["cpus_per_task"]),
+            "SLURM_NTASKS": str(profile["ntasks"]),
+            "SLURM_JOB_NUM_NODES": str(profile["nodes"]),
             "SLURM_TASKS_PER_NODE": "1",
-            "SLURM_MEM_PER_NODE": "110610",
+            "SLURM_MEM_PER_NODE": str(profile["memory_mb"]),
             "SLURM_JOB_ID": "9100",
             "SLURM_ARRAY_JOB_ID": "9001",
         }
@@ -305,6 +444,77 @@ class RuntimeFileContractTests(unittest.TestCase):
             scheduler["observed"]["scontrol_sha256"],
             audit_gate._sha256_bytes(raw.encode("utf-8")),
         )
+        self.assertEqual(scheduler["profile"], "df_dcu")
+        self.assertEqual(scheduler["time_limit"], "1-00:00:00")
+        self.assertEqual(scheduler["over_subscribe"], "NO")
+
+    def test_scheduler_record_accepts_exact_server66_evidence(self):
+        raw, environment = self._scheduler_fixture("server66")
+        fields = audit_gate._parse_scontrol_fields(raw)
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+            audit_gate, "_query_scheduler", return_value=(fields, raw)
+        ):
+            scheduler = audit_gate._scheduler_record("fixed")
+        self.assertEqual(scheduler["profile"], "server66")
+        self.assertEqual(scheduler["partition"], "640")
+        self.assertEqual(scheduler["cpus_per_task"], 48)
+        self.assertEqual(scheduler["memory_mb"], 180000)
+        self.assertEqual(scheduler["time_limit"], "1-00:00:00")
+        self.assertEqual(scheduler["over_subscribe"], "OK")
+        self.assertEqual(scheduler["observed"]["over_subscribe"], "OK")
+
+    def test_scheduler_record_requires_an_explicit_known_profile(self):
+        raw, environment = self._scheduler_fixture()
+        fields = audit_gate._parse_scontrol_fields(raw)
+        for profile_name in ("", "automatic"):
+            with self.subTest(profile=profile_name), mock.patch.dict(
+                os.environ,
+                dict(environment, C_PBE_GATE_PROFILE=profile_name),
+                clear=False,
+            ), mock.patch.object(
+                audit_gate, "_query_scheduler", return_value=(fields, raw)
+            ):
+                with self.assertRaisesRegex(ValueError, "C_PBE_GATE_PROFILE"):
+                    audit_gate._scheduler_record("fixed")
+
+    def test_scheduler_record_rejects_cross_profile_environment_and_scontrol(self):
+        df_raw, df_environment = self._scheduler_fixture("df_dcu")
+        server_raw, server_environment = self._scheduler_fixture("server66")
+        cases = (
+            ("df profile with server environment", df_raw, server_environment),
+            ("server profile with df environment", server_raw, df_environment),
+            (
+                "df profile with server scontrol",
+                server_raw,
+                dict(df_environment, C_PBE_GATE_PROFILE="df_dcu"),
+            ),
+            (
+                "server profile with df scontrol",
+                df_raw,
+                dict(server_environment, C_PBE_GATE_PROFILE="server66"),
+            ),
+        )
+        for label, raw, environment in cases:
+            with self.subTest(label=label), mock.patch.dict(
+                os.environ, environment, clear=False
+            ), mock.patch.object(
+                audit_gate,
+                "_query_scheduler",
+                return_value=(audit_gate._parse_scontrol_fields(raw), raw),
+            ):
+                with self.assertRaisesRegex(ValueError, "Slurm|scontrol|observed"):
+                    audit_gate._scheduler_record("fixed")
+
+    def test_scheduler_validator_rejects_cross_profile_record(self):
+        raw, environment = self._scheduler_fixture("server66")
+        fields = audit_gate._parse_scontrol_fields(raw)
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+            audit_gate, "_query_scheduler", return_value=(fields, raw)
+        ):
+            scheduler = audit_gate._scheduler_record("fixed")
+        scheduler["profile"] = "df_dcu"
+        with self.assertRaisesRegex(ValueError, "profile|partition"):
+            audit_gate._validate_scheduler_record(scheduler, "fixed")
 
     def test_scheduler_validator_rejects_tampered_raw_scontrol_evidence(self):
         raw, environment = self._scheduler_fixture()
@@ -336,9 +546,9 @@ class FakeHpcEndToEndTests(unittest.TestCase):
         cls.fake_mpirun.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "[[ ${OMP_NUM_THREADS:-} == 30 ]]\n"
-            "[[ ${MKL_NUM_THREADS:-} == 30 ]]\n"
-            "[[ ${OPENBLAS_NUM_THREADS:-} == 30 ]]\n"
+            "[[ ${OMP_NUM_THREADS:-} == ${SLURM_CPUS_PER_TASK:-} ]]\n"
+            "[[ ${MKL_NUM_THREADS:-} == ${SLURM_CPUS_PER_TASK:-} ]]\n"
+            "[[ ${OPENBLAS_NUM_THREADS:-} == ${SLURM_CPUS_PER_TASK:-} ]]\n"
             "[[ $1 == -np && $2 == 1 && $3 == -ppn && $4 == 1 ]]\n"
             "shift 4\n"
             'exec "$@"\n'
@@ -350,11 +560,13 @@ class FakeHpcEndToEndTests(unittest.TestCase):
             "[[ $1 == show && $2 == job ]]\n"
             "printf '%s\\n' \"JobId=${SLURM_JOB_ID} "
             "ArrayJobId=${SLURM_ARRAY_JOB_ID} ArrayTaskId=${SLURM_ARRAY_TASK_ID} "
-            "Partition=${FAKE_SCONTROL_PARTITION:-normal} NumNodes=1 NumCPUs=30 "
-            "NumTasks=1 CPUs/Task=30 NtasksPerN:B:S:C=1:0:*:* "
-            "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-110610M} "
+            "Partition=${FAKE_SCONTROL_PARTITION:-${SLURM_JOB_PARTITION}} "
+            "NumNodes=${SLURM_JOB_NUM_NODES} NumCPUs=${SLURM_CPUS_PER_TASK} "
+            "NumTasks=${SLURM_NTASKS} CPUs/Task=${SLURM_CPUS_PER_TASK} "
+            "NtasksPerN:B:S:C=1:0:*:* "
+            "MinMemoryNode=${FAKE_SCONTROL_MEMORY:-${SLURM_MEM_PER_NODE}M} "
             "TimeLimit=${FAKE_SCONTROL_TIME_LIMIT:-1-00:00:00} "
-            "OverSubscribe=${FAKE_SCONTROL_OVER_SUBSCRIBE:-NO}\"\n"
+            "OverSubscribe=${FAKE_SCONTROL_OVER_SUBSCRIBE}\"\n"
         )
         cls.fake_abacus = cls.bin_dir / "abacus"
         cls.fake_abacus.write_text(cls._fake_abacus_text())
@@ -446,8 +658,10 @@ for spin in (1, 2):
         fail_phase=None,
         pseudo=None,
         orbital=None,
+        profile_name="df_dcu",
         overrides=None,
     ):
+        profile = get_resource_profile(profile_name)
         environment = os.environ.copy()
         environment.update(
             {
@@ -458,16 +672,17 @@ for spin in (1, 2):
                 "PSEUDO_ASSET": str(pseudo or cls.pseudo),
                 "ORBITAL_ASSET": str(orbital or cls.orbital),
                 "PYTHON_EXE": sys.executable,
-                "SLURM_JOB_PARTITION": "normal",
+                "SLURM_JOB_PARTITION": profile["partition"],
                 "SLURM_ARRAY_TASK_ID": str(task),
                 "SLURM_ARRAY_TASK_COUNT": "4",
-                "SLURM_CPUS_PER_TASK": "30",
-                "SLURM_NTASKS": "1",
-                "SLURM_JOB_NUM_NODES": "1",
+                "SLURM_CPUS_PER_TASK": str(profile["cpus_per_task"]),
+                "SLURM_NTASKS": str(profile["ntasks"]),
+                "SLURM_JOB_NUM_NODES": str(profile["nodes"]),
                 "SLURM_TASKS_PER_NODE": "1",
-                "SLURM_MEM_PER_NODE": "110610",
+                "SLURM_MEM_PER_NODE": str(profile["memory_mb"]),
                 "SLURM_JOB_ID": str(9100 + task),
                 "SLURM_ARRAY_JOB_ID": "9001",
+                "FAKE_SCONTROL_OVER_SUBSCRIBE": profile["over_subscribe"],
             }
         )
         if fail_phase is not None:
@@ -485,6 +700,8 @@ for spin in (1, 2):
         fail_phase=None,
         pseudo=None,
         orbital=None,
+        runner=RUNNER,
+        profile_name="df_dcu",
         overrides=None,
     ):
         environment = cls._task_environment(
@@ -493,10 +710,11 @@ for spin in (1, 2):
             fail_phase=fail_phase,
             pseudo=pseudo,
             orbital=orbital,
+            profile_name=profile_name,
             overrides=overrides,
         )
         return subprocess.run(
-            ["bash", str(RUNNER)],
+            ["bash", str(runner)],
             check=False,
             capture_output=True,
             text=True,
@@ -533,6 +751,19 @@ for spin in (1, 2):
             summary["restart_chain_evidence"]["mpirun"]["absolute_path"],
             str(self.fake_mpirun),
         )
+        self.assertEqual(summary["restart_chain_evidence"]["gate_profile"], "df_dcu")
+        self.assertEqual(
+            summary["restart_chain_evidence"]["resource_profiles"]["absolute_path"],
+            str(RESOURCE_PROFILES),
+        )
+        self.assertEqual(
+            summary["restart_chain_evidence"]["entrypoint"]["absolute_path"],
+            str(RUNNER),
+        )
+        self.assertEqual(
+            summary["restart_chain_evidence"]["common_runner"]["absolute_path"],
+            str(COMMON_RUNNER),
+        )
 
     def test_runtime_environment_is_actually_sourced(self):
         self.assertTrue(self.environment_marker.is_file())
@@ -550,6 +781,17 @@ for spin in (1, 2):
         self.assertEqual(restart_manifest["status"], "VERIFIED")
         self.assertEqual(branch_manifest["status"], "BRANCH_COMPLETE")
         for manifest in (phase_manifest, branch_manifest):
+            self.assertEqual(manifest["gate_profile"], "df_dcu")
+            self.assertEqual(
+                manifest["resource_profiles"]["absolute_path"],
+                str(RESOURCE_PROFILES),
+            )
+            self.assertEqual(
+                manifest["entrypoint"]["absolute_path"], str(RUNNER)
+            )
+            self.assertEqual(
+                manifest["common_runner"]["absolute_path"], str(COMMON_RUNNER)
+            )
             self.assertEqual(
                 manifest["environment_script"]["absolute_path"],
                 str(self.fake_environment),
@@ -558,6 +800,11 @@ for spin in (1, 2):
                 manifest["mpirun"]["absolute_path"], str(self.fake_mpirun)
             )
         self.assertEqual(phase_manifest["scheduler"]["partition"], "normal")
+        self.assertEqual(phase_manifest["scheduler"]["profile"], "df_dcu")
+        self.assertEqual(
+            phase_manifest["scheduler"]["time_limit"], "1-00:00:00"
+        )
+        self.assertEqual(phase_manifest["scheduler"]["over_subscribe"], "NO")
         self.assertEqual(phase_manifest["scheduler"]["cpus_per_task"], 30)
         self.assertEqual(phase_manifest["scheduler"]["ntasks"], 1)
         self.assertEqual(
@@ -694,6 +941,18 @@ for spin in (1, 2):
                     {"memory_raw": None}
                 ),
             ),
+            "runtime profile": lambda root: self._mutate_json(
+                root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
+                lambda data: data.update({"gate_profile": "server66"}),
+            ),
+            "entrypoint hash": lambda root: self._mutate_json(
+                root / "runs/dir1/free_restart2/PHASE_COMPLETE.json",
+                lambda data: data["entrypoint"].update({"sha256": "0" * 64}),
+            ),
+            "common runner hash": lambda root: self._mutate_json(
+                root / "runs/dir1/BRANCH_COMPLETE.json",
+                lambda data: data["common_runner"].update({"sha256": "0" * 64}),
+            ),
             "preparation provenance": lambda root: self._mutate_json(
                 root / "runs/dir1/BRANCH_PROVENANCE.json",
                 lambda data: data.update({"tampered_after_prepare": True}),
@@ -731,6 +990,16 @@ for spin in (1, 2):
         finally:
             self.fake_mpirun.write_bytes(original)
             self.fake_mpirun.chmod(mode)
+
+    def test_audit_rehashes_profile_entrypoint_and_common_runner(self):
+        for path in (RESOURCE_PROFILES, RUNNER, COMMON_RUNNER):
+            with self.subTest(path=path.name):
+                original = path.read_bytes()
+                try:
+                    path.write_bytes(original + b"# tampered\n")
+                    self.assert_not_passed(self.completed_gate)
+                finally:
+                    path.write_bytes(original)
 
     def test_global_audit_rejects_mpirun_mismatch_across_branches(self):
         alternate_bin = self.base / f"mpi-{next(tempfile._get_candidate_names())}"
@@ -774,6 +1043,35 @@ for spin in (1, 2):
         shutil.rmtree(root / "runs/dir1")
         shutil.copytree(alternate_root / "runs/dir1", root / "runs/dir1")
         self.assert_not_passed(root)
+
+    def test_global_audit_rejects_profile_and_entrypoint_mismatch_across_branches(self):
+        alternate_root = self.base / (
+            f"server66-profile-{next(tempfile._get_candidate_names())}"
+        )
+        completed = self._run_task(
+            alternate_root,
+            2,
+            runner=SERVER66_RUNNER,
+            profile_name="server66",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        alternate_run = json.loads(
+            (
+                alternate_root / "runs/dir1/BRANCH_RUN_PROVENANCE.json"
+            ).read_text()
+        )
+        self.assertEqual(alternate_run["gate_profile"], "server66")
+        self.assertEqual(
+            alternate_run["entrypoint"]["absolute_path"], str(SERVER66_RUNNER)
+        )
+        self.assertEqual(
+            alternate_run["common_runner"]["absolute_path"], str(COMMON_RUNNER)
+        )
+        root = self.copy_gate()
+        shutil.rmtree(root / "runs/dir1")
+        shutil.copytree(alternate_root / "runs/dir1", root / "runs/dir1")
+        with self.assertRaisesRegex(ValueError, "profile|entrypoint"):
+            audit_gate.audit_gate(root)
 
     @staticmethod
     def _mutate_json(path, mutate):
@@ -967,6 +1265,7 @@ for spin in (1, 2):
         )
         environment = {
             "PATH": f"{self.bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "C_PBE_GATE_PROFILE": "df_dcu",
             "SLURM_JOB_PARTITION": "normal",
             "SLURM_ARRAY_TASK_ID": "0",
             "SLURM_ARRAY_TASK_COUNT": "4",
@@ -977,13 +1276,17 @@ for spin in (1, 2):
             "SLURM_MEM_PER_NODE": "110610",
             "SLURM_JOB_ID": "9003",
             "SLURM_ARRAY_JOB_ID": "9003",
+            "FAKE_SCONTROL_OVER_SUBSCRIBE": "NO",
         }
         with mock.patch.dict(os.environ, environment, clear=False):
             audit_gate.initialize_branch_run(
                 root,
                 "fixed",
-                self.fake_abacus,
+                "df_dcu",
+                RESOURCE_PROFILES,
                 RUNNER,
+                COMMON_RUNNER,
+                self.fake_abacus,
                 self.fake_environment,
                 self.fake_mpirun,
             )

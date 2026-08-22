@@ -28,6 +28,7 @@ if __package__:
         render_input,
     )
     from . import prepare_gate
+    from .resource_profiles import get_resource_profile
 else:
     from gate_contract import (
         FROZEN_PROTOCOL,
@@ -38,6 +39,7 @@ else:
         render_input,
     )
     import prepare_gate
+    from resource_profiles import get_resource_profile
 
 
 AUTHORITATIVE_RESULT = "RESULT_SUMMARY.json"
@@ -48,25 +50,12 @@ RESTART_CHAIN_NOTE = (
     "provenance must be verified by the Task4 runner before production use."
 )
 RESTART_FILES = ("wfs1_nao.txt", "wfs2_nao.txt", "chgs1.cube", "chgs2.cube")
-RESOURCE_CONTRACT = {
-    "partition": "normal",
-    "nodes": 1,
-    "ntasks": 1,
-    "tasks_per_node": 1,
-    "cpus_per_task": 30,
-    "memory_mb": 110610,
-    "time_limit": "24:00:00",
-    "exclusive": True,
-}
-SLURM_22_EXCLUSIVE_TOKEN = "NO"
 BRANCH_PHASES = {
     "fixed": ("fixed_cold", "fixed_restart"),
     "dir0": ("field_seed", "free_restart1", "free_restart2"),
     "dir1": ("field_seed", "free_restart1", "free_restart2"),
     "dir2": ("field_seed", "free_restart1", "free_restart2"),
 }
-
-
 @dataclass(frozen=True)
 class PhaseSpec:
     relative: str
@@ -243,6 +232,16 @@ def _positive_job_environment(name: str) -> str:
     return value
 
 
+def _selected_resource_profile() -> dict[str, object]:
+    name = os.environ.get("C_PBE_GATE_PROFILE")
+    if not name:
+        raise ValueError("C_PBE_GATE_PROFILE must explicitly name a resource profile")
+    try:
+        return get_resource_profile(name)
+    except ValueError as exc:
+        raise ValueError(f"C_PBE_GATE_PROFILE is invalid: {name}") from exc
+
+
 def _parse_scontrol_fields(output: str) -> dict[str, str]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     if len(lines) != 1:
@@ -315,6 +314,34 @@ def _slurm_duration_seconds(value: str) -> int:
     return ((days * 24 + hours) * 60 + minutes) * 60 + seconds
 
 
+def _normalized_slurm_duration(value: str) -> str:
+    total = _slurm_duration_seconds(value)
+    days, remainder = divmod(total, 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes, seconds = divmod(remainder, 60)
+    if days:
+        return f"{days}-{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _scheduler_contract(profile: dict[str, object]) -> dict[str, object]:
+    nodes = profile["nodes"]
+    ntasks = profile["ntasks"]
+    if type(nodes) is not int or type(ntasks) is not int or ntasks % nodes != 0:
+        raise ValueError("resource profile has invalid task topology")
+    return {
+        "profile": profile["name"],
+        "partition": profile["partition"],
+        "nodes": nodes,
+        "ntasks": ntasks,
+        "tasks_per_node": ntasks // nodes,
+        "cpus_per_task": profile["cpus_per_task"],
+        "memory_mb": profile["memory_mb"],
+        "time_limit": _normalized_slurm_duration(profile["time_limit"]),
+        "over_subscribe": profile["over_subscribe"],
+    }
+
+
 def _query_scheduler(job_id: str) -> tuple[dict[str, str], str]:
     try:
         completed = subprocess.run(
@@ -332,11 +359,13 @@ def _query_scheduler(job_id: str) -> tuple[dict[str, str], str]:
 
 
 def _scheduler_record(branch: str) -> dict[str, object]:
+    profile = _selected_resource_profile()
+    contract = _scheduler_contract(profile)
     job_id = _positive_job_environment("SLURM_JOB_ID")
     array_job_id = _positive_job_environment("SLURM_ARRAY_JOB_ID")
     partition = os.environ.get("SLURM_JOB_PARTITION")
-    if partition != RESOURCE_CONTRACT["partition"]:
-        raise ValueError("Slurm partition must be normal")
+    if partition != contract["partition"]:
+        raise ValueError(f"Slurm partition must be {contract['partition']}")
     task_id = (
         _positive_int_environment("SLURM_ARRAY_TASK_ID")
         if os.environ.get("SLURM_ARRAY_TASK_ID") != "0"
@@ -347,18 +376,27 @@ def _scheduler_record(branch: str) -> dict[str, object]:
         raise ValueError(f"array task {task_id} does not map to branch {branch}")
     if _positive_int_environment("SLURM_ARRAY_TASK_COUNT") != 4:
         raise ValueError("Slurm array must contain exactly four tasks")
-    if _positive_int_environment("SLURM_CPUS_PER_TASK") != 30:
-        raise ValueError("SLURM_CPUS_PER_TASK must equal 30")
-    if _positive_int_environment("SLURM_NTASKS") != 1:
-        raise ValueError("SLURM_NTASKS must equal 1")
-    if _positive_int_environment("SLURM_JOB_NUM_NODES") != 1:
-        raise ValueError("SLURM_JOB_NUM_NODES must equal 1")
+    if _positive_int_environment("SLURM_CPUS_PER_TASK") != contract["cpus_per_task"]:
+        raise ValueError(
+            f"SLURM_CPUS_PER_TASK must equal {contract['cpus_per_task']}"
+        )
+    if _positive_int_environment("SLURM_NTASKS") != contract["ntasks"]:
+        raise ValueError(f"SLURM_NTASKS must equal {contract['ntasks']}")
+    if _positive_int_environment("SLURM_JOB_NUM_NODES") != contract["nodes"]:
+        raise ValueError(f"SLURM_JOB_NUM_NODES must equal {contract['nodes']}")
     tasks_per_node = os.environ.get("SLURM_TASKS_PER_NODE", "")
-    match = re.fullmatch(r"1(?:\(x1\))?", tasks_per_node)
+    match = re.fullmatch(
+        rf"{contract['tasks_per_node']}(?:\(x{contract['nodes']}\))?",
+        tasks_per_node,
+    )
     if match is None:
-        raise ValueError("SLURM_TASKS_PER_NODE must equal 1")
-    if _positive_int_environment("SLURM_MEM_PER_NODE") != 110610:
-        raise ValueError("SLURM_MEM_PER_NODE must equal 110610")
+        raise ValueError(
+            f"SLURM_TASKS_PER_NODE must equal {contract['tasks_per_node']}"
+        )
+    if _positive_int_environment("SLURM_MEM_PER_NODE") != contract["memory_mb"]:
+        raise ValueError(
+            f"SLURM_MEM_PER_NODE must equal {contract['memory_mb']}"
+        )
     fields, raw_scontrol = _query_scheduler(job_id)
     observed_job_id = fields["JobId"]
     if observed_job_id not in {job_id, f"{array_job_id}_{task_id}"}:
@@ -374,8 +412,6 @@ def _scheduler_record(branch: str) -> dict[str, object]:
     observed_cpus_per_task = _scontrol_positive_int(fields, "CPUs/Task")
     memory_raw, observed_memory = _scontrol_memory(fields)
     time_limit_raw = fields["TimeLimit"]
-    observed_time_seconds = _slurm_duration_seconds(time_limit_raw)
-    observed_exclusive = fields["OverSubscribe"] == SLURM_22_EXCLUSIVE_TOKEN
     observed_values = {
         "partition": observed_partition,
         "nodes": observed_nodes,
@@ -383,16 +419,20 @@ def _scheduler_record(branch: str) -> dict[str, object]:
         "tasks_per_node": observed_ntasks // observed_nodes,
         "cpus_per_task": observed_cpus_per_task,
         "memory_mb": observed_memory,
-        "time_limit": "24:00:00" if observed_time_seconds == 86400 else time_limit_raw,
-        "exclusive": observed_exclusive,
+        "time_limit": _normalized_slurm_duration(time_limit_raw),
+        "over_subscribe": fields["OverSubscribe"],
     }
-    if observed_cpus != 30:
-        raise ValueError("scontrol NumCPUs must equal 30")
-    for key, expected in RESOURCE_CONTRACT.items():
+    if observed_cpus != contract["cpus_per_task"]:
+        raise ValueError(
+            f"scontrol NumCPUs must equal {contract['cpus_per_task']}"
+        )
+    for key, expected in contract.items():
+        if key == "profile":
+            continue
         if observed_values[key] != expected:
             raise ValueError(f"observed Slurm {key} must equal {expected}")
     return {
-        **observed_values,
+        **contract,
         "array_task_id": task_id,
         "array_task_count": 4,
         "job_id": job_id,
@@ -418,8 +458,13 @@ def _scheduler_record(branch: str) -> dict[str, object]:
 def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{branch} scheduler evidence is not an object")
+    profile_name = value.get("profile")
+    try:
+        profile = get_resource_profile(profile_name)
+    except ValueError as exc:
+        raise ValueError(f"{branch} scheduler evidence has invalid profile") from exc
     expected = {
-        **RESOURCE_CONTRACT,
+        **_scheduler_contract(profile),
         "array_task_id": tuple(BRANCH_PHASES).index(branch),
         "array_task_count": 4,
     }
@@ -501,8 +546,9 @@ def _validate_scheduler_record(value: object, branch: str) -> dict[str, object]:
         or observed["num_tasks"] != value["ntasks"]
         or observed["cpus_per_task"] != value["cpus_per_task"]
         or _memory_megabytes(observed["memory_raw"]) != value["memory_mb"]
-        or _slurm_duration_seconds(observed["time_limit_raw"]) != 86400
-        or observed["over_subscribe"] != SLURM_22_EXCLUSIVE_TOKEN
+        or _normalized_slurm_duration(observed["time_limit_raw"])
+        != value["time_limit"]
+        or observed["over_subscribe"] != value["over_subscribe"]
         or not isinstance(observed["scontrol_sha256"], str)
         or re.fullmatch(r"[0-9a-f]{64}", observed["scontrol_sha256"]) is None
     ):
@@ -757,27 +803,49 @@ def _validate_phase_controls(
 def initialize_branch_run(
     root: str | Path,
     branch: str,
+    gate_profile: str,
+    resource_profiles: str | Path,
+    entrypoint: str | Path,
+    common_runner: str | Path,
     abacus: str | Path,
-    runner: str | Path,
     environment_script: str | Path,
     mpirun: str | Path,
 ) -> dict[str, object]:
     root_path = Path(root).expanduser().absolute()
     branch_root, _ = _branch_provenance(root_path, branch)
+    try:
+        get_resource_profile(gate_profile)
+    except ValueError as exc:
+        raise ValueError(f"invalid C PBE gate runtime profile: {gate_profile}") from exc
+    if os.environ.get("C_PBE_GATE_PROFILE") != gate_profile:
+        raise ValueError("runner profile differs from C_PBE_GATE_PROFILE")
+    _, resource_profiles_record = _canonical_file(
+        resource_profiles, "resource profile module", executable=False
+    )
+    _, entrypoint_record = _canonical_file(
+        entrypoint, "selected Slurm entrypoint", executable=False
+    )
+    _, common_runner_record = _canonical_file(
+        common_runner, "common Task4 runner", executable=False
+    )
     _, executable = _canonical_file(abacus, "ABACUS executable", executable=True)
-    _, runner_record = _canonical_file(runner, "Task4 runner", executable=False)
     _, environment_record = _canonical_file(
         environment_script, "ABACUS environment script", executable=False
     )
     _, mpirun_record = _canonical_file(mpirun, "mpirun executable", executable=True)
     scheduler = _scheduler_record(branch)
+    if scheduler["profile"] != gate_profile:
+        raise ValueError("scheduler profile differs from the runner profile")
     provenance = {
         "schema": "c-pbe-reference-gate-run",
         "version": 1,
         "status": "RUN_PROVENANCE",
         "branch": branch,
+        "gate_profile": gate_profile,
+        "resource_profiles": resource_profiles_record,
+        "entrypoint": entrypoint_record,
+        "common_runner": common_runner_record,
         "executable": executable,
-        "runner": runner_record,
         "environment_script": environment_record,
         "mpirun": mpirun_record,
         "scheduler": scheduler,
@@ -805,40 +873,45 @@ def _run_provenance(root: Path, branch: str) -> tuple[Path, dict[str, object]]:
         or value.get("branch") != branch
     ):
         raise ValueError(f"{branch} run provenance identity is invalid")
-    _validate_scheduler_record(value.get("scheduler"), branch)
-    executable = value.get("executable")
-    runner = value.get("runner")
-    environment_script = value.get("environment_script")
-    mpirun = value.get("mpirun")
-    if any(
-        not isinstance(record, dict)
-        for record in (executable, runner, environment_script, mpirun)
-    ):
+    scheduler = _validate_scheduler_record(value.get("scheduler"), branch)
+    if value.get("gate_profile") != scheduler["profile"]:
+        raise ValueError(f"{branch} run and scheduler profiles differ")
+    records = {
+        "resource_profiles": (
+            value.get("resource_profiles"),
+            "recorded resource profile module",
+            False,
+        ),
+        "entrypoint": (
+            value.get("entrypoint"),
+            "recorded Slurm entrypoint",
+            False,
+        ),
+        "common_runner": (
+            value.get("common_runner"),
+            "recorded common runner",
+            False,
+        ),
+        "executable": (
+            value.get("executable"),
+            "recorded ABACUS executable",
+            True,
+        ),
+        "environment_script": (
+            value.get("environment_script"),
+            "recorded ABACUS environment script",
+            False,
+        ),
+        "mpirun": (value.get("mpirun"), "recorded mpirun executable", True),
+    }
+    if any(not isinstance(record[0], dict) for record in records.values()):
         raise ValueError(f"{branch} run provenance lacks binary records")
-    _, current_executable = _canonical_file(
-        executable.get("absolute_path", ""),
-        "recorded ABACUS executable",
-        executable=True,
-    )
-    _, current_runner = _canonical_file(
-        runner.get("absolute_path", ""), "recorded Task4 runner"
-    )
-    _, current_environment = _canonical_file(
-        environment_script.get("absolute_path", ""),
-        "recorded ABACUS environment script",
-    )
-    _, current_mpirun = _canonical_file(
-        mpirun.get("absolute_path", ""),
-        "recorded mpirun executable",
-        executable=True,
-    )
-    if (
-        current_executable != executable
-        or current_runner != runner
-        or current_environment != environment_script
-        or current_mpirun != mpirun
-    ):
-        raise ValueError(f"{branch} recorded binary hash no longer matches")
+    for name, (record, label, executable) in records.items():
+        _, current = _canonical_file(
+            record.get("absolute_path", ""), label, executable=executable
+        )
+        if current != record:
+            raise ValueError(f"{branch} recorded {name} hash no longer matches")
     current_preparation_hash = _sha256_bytes(
         _read_regular(
             branch_root / "BRANCH_PROVENANCE.json",
@@ -1281,8 +1354,11 @@ def complete_phase(
         "ended_utc": ended_utc,
         "wall_seconds": float(wall_seconds),
         "scheduler": run["scheduler"],
+        "gate_profile": run["gate_profile"],
+        "resource_profiles": run["resource_profiles"],
+        "entrypoint": run["entrypoint"],
+        "common_runner": run["common_runner"],
         "executable": run["executable"],
-        "runner": run["runner"],
         "environment_script": run["environment_script"],
         "mpirun": run["mpirun"],
         "controls": controls,
@@ -1339,8 +1415,11 @@ def _verify_phase_evidence(
         raise ValueError(f"{branch}/{phase} phase manifest identity is invalid")
     if (
         manifest.get("scheduler") != run["scheduler"]
+        or manifest.get("gate_profile") != run["gate_profile"]
+        or manifest.get("resource_profiles") != run["resource_profiles"]
+        or manifest.get("entrypoint") != run["entrypoint"]
+        or manifest.get("common_runner") != run["common_runner"]
         or manifest.get("executable") != run["executable"]
-        or manifest.get("runner") != run["runner"]
         or manifest.get("environment_script") != run["environment_script"]
         or manifest.get("mpirun") != run["mpirun"]
     ):
@@ -1480,8 +1559,11 @@ def complete_branch(
         "phase_order": list(BRANCH_PHASES[branch]),
         "phase_complete_sha256": phase_hashes,
         "restart_provenance_sha256": restart_hashes,
+        "gate_profile": run["gate_profile"],
+        "resource_profiles": run["resource_profiles"],
+        "entrypoint": run["entrypoint"],
+        "common_runner": run["common_runner"],
         "executable": run["executable"],
-        "runner": run["runner"],
         "environment_script": run["environment_script"],
         "mpirun": run["mpirun"],
         "scheduler": run["scheduler"],
@@ -1532,8 +1614,11 @@ def _verify_execution_evidence(
         raise ValueError("Task4 execution evidence is incomplete")
 
     branch_summaries = {}
+    gate_profiles = []
+    resource_profile_records = []
+    entrypoint_records = []
+    common_runner_records = []
     executable_records = []
-    runner_records = []
     environment_records = []
     mpirun_records = []
     array_job_ids = []
@@ -1542,8 +1627,11 @@ def _verify_execution_evidence(
         _, preparation = _branch_provenance(root, branch)
         preparation_signatures.append(_preparation_signature(preparation, branch))
         branch_root, run = _run_provenance(root, branch)
+        gate_profiles.append(run["gate_profile"])
+        resource_profile_records.append(run["resource_profiles"])
+        entrypoint_records.append(run["entrypoint"])
+        common_runner_records.append(run["common_runner"])
         executable_records.append(run["executable"])
-        runner_records.append(run["runner"])
         environment_records.append(run["environment_script"])
         mpirun_records.append(run["mpirun"])
         array_job_ids.append(run["scheduler"]["array_job_id"])
@@ -1559,8 +1647,11 @@ def _verify_execution_evidence(
             or complete.get("branch") != branch
             or complete.get("phase_order") != list(phases)
             or complete.get("scheduler") != run["scheduler"]
+            or complete.get("gate_profile") != run["gate_profile"]
+            or complete.get("resource_profiles") != run["resource_profiles"]
+            or complete.get("entrypoint") != run["entrypoint"]
+            or complete.get("common_runner") != run["common_runner"]
             or complete.get("executable") != run["executable"]
-            or complete.get("runner") != run["runner"]
             or complete.get("environment_script") != run["environment_script"]
             or complete.get("mpirun") != run["mpirun"]
         ):
@@ -1617,10 +1708,21 @@ def _verify_execution_evidence(
             "wall_seconds": complete["wall_seconds"],
             "scheduler": complete["scheduler"],
         }
+    if any(profile != gate_profiles[0] for profile in gate_profiles[1:]):
+        raise ValueError("C PBE gate profile differs across branches")
+    if any(
+        record != resource_profile_records[0]
+        for record in resource_profile_records[1:]
+    ):
+        raise ValueError("resource profile provenance differs across branches")
+    if any(record != entrypoint_records[0] for record in entrypoint_records[1:]):
+        raise ValueError("Slurm entrypoint provenance differs across branches")
+    if any(
+        record != common_runner_records[0] for record in common_runner_records[1:]
+    ):
+        raise ValueError("common runner provenance differs across branches")
     if any(record != executable_records[0] for record in executable_records[1:]):
         raise ValueError("ABACUS executable provenance differs across branches")
-    if any(record != runner_records[0] for record in runner_records[1:]):
-        raise ValueError("Task4 runner provenance differs across branches")
     if any(record != environment_records[0] for record in environment_records[1:]):
         raise ValueError("ABACUS environment provenance differs across branches")
     if any(record != mpirun_records[0] for record in mpirun_records[1:]):
@@ -1637,8 +1739,11 @@ def _verify_execution_evidence(
     return {
         "status": "RESTART_CHAIN_VERIFIED",
         "branches": branch_summaries,
+        "gate_profile": gate_profiles[0],
+        "resource_profiles": resource_profile_records[0],
+        "entrypoint": entrypoint_records[0],
+        "common_runner": common_runner_records[0],
         "executable": executable_records[0],
-        "runner": runner_records[0],
         "environment_script": environment_records[0],
         "mpirun": mpirun_records[0],
         "preparation": preparation_signatures[0],
@@ -1850,8 +1955,11 @@ def _runner_parser() -> argparse.ArgumentParser:
     initialize = subparsers.add_parser("runner-init")
     initialize.add_argument("--root", required=True)
     initialize.add_argument("--branch", required=True, choices=BRANCH_PHASES)
+    initialize.add_argument("--gate-profile", required=True)
+    initialize.add_argument("--resource-profiles", required=True)
+    initialize.add_argument("--entrypoint", required=True)
+    initialize.add_argument("--common-runner", required=True)
     initialize.add_argument("--abacus", required=True)
-    initialize.add_argument("--runner", required=True)
     initialize.add_argument("--environment-script", required=True)
     initialize.add_argument("--mpirun", required=True)
 
@@ -1893,8 +2001,11 @@ def _runner_main(argv: list[str]) -> int:
             result = initialize_branch_run(
                 arguments.root,
                 arguments.branch,
+                arguments.gate_profile,
+                arguments.resource_profiles,
+                arguments.entrypoint,
+                arguments.common_runner,
                 arguments.abacus,
-                arguments.runner,
                 arguments.environment_script,
                 arguments.mpirun,
             )
