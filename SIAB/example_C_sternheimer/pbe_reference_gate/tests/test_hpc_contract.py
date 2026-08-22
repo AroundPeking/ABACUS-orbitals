@@ -1746,8 +1746,18 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "must not use `ALL`",
             "21709225",
             "server66 preflight",
-            "GATE_PROFILE=df_dcu ./submit_pbe_gate.sh",
-            "GATE_PROFILE=server66 ./submit_pbe_gate.sh",
+            "git archive",
+            "SOURCE_COMMIT.txt",
+            "SOURCE_ARCHIVE.sha256",
+            "Ran 169 tests",
+            "BASH_SYNTAX.txt",
+            "PY_COMPILE.txt",
+            "SBATCH_TEST_ONLY.txt",
+            "PREFLIGHT_EVIDENCE.sha256",
+            "PREFLIGHT_PASSED",
+            "sbatch --test-only",
+            "GATE_PROFILE=df_dcu \"$GATE_DIR/submit_pbe_gate.sh\"",
+            "GATE_PROFILE=server66 \"$GATE_DIR/submit_pbe_gate.sh\"",
             "scheduler completion is not a physical pass",
             "global audit",
             "PBE_GATE_PASSED",
@@ -1759,39 +1769,78 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             text,
             r"21709225[^\n]*only after[^\n]*server66 preflight[^\n]*pass",
         )
-
-    def test_readme_server66_example_is_complete_and_bound_to_artifacts(self):
-        text = README.read_text()
-        self.assertIn("For server66,", text)
-        server66_section = text.split("For server66,", 1)[1]
-        match = re.search(
-            r"```bash\n(?P<block>.*?)\n```",
-            server66_section,
-            re.DOTALL,
+        self.assertIn(
+            "If any preflight command fails, leave df_dcu job `21709225` untouched.",
+            text,
         )
-        self.assertIsNotNone(match, "missing server66 submission code block")
-        block = match.group("block")
+        self.assertRegex(
+            text,
+            r"(?s)`PREFLIGHT_PASSED`.*before running `scancel 21709225`",
+        )
+        self.assertRegex(
+            text,
+            r"only the login-node global audit\s+can create `PBE_GATE_PASSED`",
+        )
 
+    def test_readme_profile_examples_are_executable_and_bound_to_artifacts(self):
+        text = README.read_text()
+        blocks = {}
+        for profile in ("df_dcu", "server66"):
+            marker = f"For {profile},"
+            self.assertIn(marker, text)
+            section = text.split(marker, 1)[1]
+            match = re.search(
+                r"```bash\n(?P<block>.*?)\n```",
+                section,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"missing {profile} submission code block")
+            block = match.group("block")
+            blocks[profile] = block
+            syntax = subprocess.run(
+                ["bash", "-n"],
+                input=block,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(syntax.returncode, 0, syntax.stderr)
+            self.assertNotRegex(block, r"<[^>\n]+>")
+            self.assertNotRegex(block, r"(?m)^export SOURCE_COMMIT=")
+            self.assertIn(
+                ': "${SOURCE_COMMIT:?SOURCE_COMMIT must be exported by the staging step}"',
+                block,
+            )
+            self.assertIn(
+                '[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {',
+                block,
+            )
+            self.assertIn("export SOURCE_COMMIT", block)
+            self.assertIn(
+                f'GATE_PROFILE={profile} "$GATE_DIR/submit_pbe_gate.sh"',
+                block,
+            )
+
+        self.assertIn(
+            'export GATE_ROOT="/work1/ghj/c-atom-pbe-equivalence-${SOURCE_COMMIT:0:12}"',
+            blocks["df_dcu"],
+        )
+        self.assertIn(
+            'export GATE_ROOT="/home/ghj/abacus/260822/'
+            'c-atom-pbe-equivalence-server66-${SOURCE_COMMIT:0:12}"',
+            blocks["server66"],
+        )
         for line in (
-            "export GATE_ROOT='/home/ghj/abacus/260822/"
-            "c-atom-pbe-equivalence-server66-<source-hash>'",
             "export ABACUS_ARTIFACT=/home/ghj/abacus/260809/"
             "sternheimer-solid-delta/artifacts/abacus-407979/abacus",
-            'export ABACUS_ENV_SCRIPT="$GATE_ROOT/source/server66_runtime_env.sh"',
+            'export ABACUS_ENV_SCRIPT="$GATE_DIR/server66_runtime_env.sh"',
             'export PSEUDO_SOURCE="$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf"',
             'export ORBITAL_SOURCE="$GATE_ROOT/assets/'
             'C_gga_10au_100Ry_3s3p2d.orb"',
             "export PYTHON_EXE=/home/ghj/app/miniconda3/bin/python3",
-            "export SOURCE_COMMIT='<exact-40-hex-source-commit>'",
-            "GATE_PROFILE=server66 ./submit_pbe_gate.sh",
         ):
-            self.assertIn(line, block)
+            self.assertIn(line, blocks["server66"])
 
-        self.assertIn(
-            "staging must replace every angle-bracket placeholder before submission",
-            text,
-        )
-        self.assertIn("must not be submitted literally", text)
         self.assertRegex(
             text,
             r"\| `/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/"
@@ -1808,6 +1857,11 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "submit_pbe_gate.sh",
         ):
             self.assertIn(source, text)
+        self.assertIn(
+            "The submitter records the declared `SOURCE_COMMIT`; the staging and "
+            "preflight evidence proves its association with the extracted archive.",
+            text,
+        )
 
     def _assert_profile_submission(self, profile_name, entrypoint):
         completed = self._run_submitter(GATE_PROFILE=profile_name)

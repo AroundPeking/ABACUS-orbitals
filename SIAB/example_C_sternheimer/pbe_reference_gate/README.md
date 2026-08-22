@@ -66,42 +66,54 @@ The server66 preflight and formal run must use these immutable artifacts:
 | Artifact | Canonical path after staging | SHA256 |
 | --- | --- | --- |
 | ABACUS | `/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/abacus-407979/abacus` | `27722d5e3e5cf2c94d00ac9489152b7ea00adcf51a8b8bb3a8eed3d8d094c279` |
-| C SG15 pseudopotential | `<immutable-root>/assets/C_ONCV_PBE-1.0.upf` | `e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99` |
-| C TZDP-10au orbital | `<immutable-root>/assets/C_gga_10au_100Ry_3s3p2d.orb` | `7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d` |
+| C SG15 pseudopotential | `$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf` | `e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99` |
+| C TZDP-10au orbital | `$GATE_ROOT/assets/C_gga_10au_100Ry_3s3p2d.orb` | `7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d` |
 
-The staging step packages this directory as a standalone source archive.  That archive
-does not require `.git`; `SOURCE_COMMIT` is the exact 40-character lowercase
-Git commit used to create it and is supplied explicitly by the staging step.
+The staging step runs `git archive "$SOURCE_COMMIT"` to create a standalone source archive and extracts the gate
+directory into the immutable root.  It also writes `SOURCE_COMMIT.txt` and the
+archive checksum to `SOURCE_ARCHIVE.sha256`.  The extracted archive does not require `.git`.
+The submitter records the declared `SOURCE_COMMIT`; the staging and preflight evidence proves its association with the extracted archive.
 
 For df_dcu, set the profile and canonical paths explicitly:
 
 ```bash
-export GATE_ROOT=/work1/ghj/c-atom-pbe-equivalence-20260821
+: "${SOURCE_COMMIT:?SOURCE_COMMIT must be exported by the staging step}"
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'invalid SOURCE_COMMIT: %s\n' "$SOURCE_COMMIT" >&2
+    exit 2
+}
+export SOURCE_COMMIT
+export GATE_ROOT="/work1/ghj/c-atom-pbe-equivalence-${SOURCE_COMMIT:0:12}"
+export GATE_DIR="$GATE_ROOT/source"
 export ABACUS_ARTIFACT=/work1/ghj/delta-st-unified-abacus-20260817/artifacts/build-21661442/abacus_3p
 export ABACUS_ENV_SCRIPT=/public/home/ghj/app/src/env_60_245_intel2021.sh
-export PSEUDO_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_ONCV_PBE-1.0.upf
-export ORBITAL_SOURCE=/work1/ghj/open-shell-fixed-occupation-20260820/assets/C_gga_10au_100Ry_3s3p2d.orb
+export PSEUDO_SOURCE="$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf"
+export ORBITAL_SOURCE="$GATE_ROOT/assets/C_gga_10au_100Ry_3s3p2d.orb"
 export PYTHON_EXE=/public/home/ghj/.conda/envs/ds092/bin/python
-export SOURCE_COMMIT=0123456789abcdef0123456789abcdef01234567
 
-GATE_PROFILE=df_dcu ./submit_pbe_gate.sh
+GATE_PROFILE=df_dcu "$GATE_DIR/submit_pbe_gate.sh"
 ```
 
-For server66, set its own canonical root, executable, environment script,
-assets, Python executable, and source commit, then submit explicitly:
-The staging must replace every angle-bracket placeholder before submission;
-placeholders must not be submitted literally.
+For server66, the staging shell must export the exact source commit before
+running this block.  The root name is then derived from that commit, so the
+command contains no dummy provenance value.
 
 ```bash
-export GATE_ROOT='/home/ghj/abacus/260822/c-atom-pbe-equivalence-server66-<source-hash>'
+: "${SOURCE_COMMIT:?SOURCE_COMMIT must be exported by the staging step}"
+[[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'invalid SOURCE_COMMIT: %s\n' "$SOURCE_COMMIT" >&2
+    exit 2
+}
+export SOURCE_COMMIT
+export GATE_ROOT="/home/ghj/abacus/260822/c-atom-pbe-equivalence-server66-${SOURCE_COMMIT:0:12}"
+export GATE_DIR="$GATE_ROOT/source"
 export ABACUS_ARTIFACT=/home/ghj/abacus/260809/sternheimer-solid-delta/artifacts/abacus-407979/abacus
-export ABACUS_ENV_SCRIPT="$GATE_ROOT/source/server66_runtime_env.sh"
+export ABACUS_ENV_SCRIPT="$GATE_DIR/server66_runtime_env.sh"
 export PSEUDO_SOURCE="$GATE_ROOT/assets/C_ONCV_PBE-1.0.upf"
 export ORBITAL_SOURCE="$GATE_ROOT/assets/C_gga_10au_100Ry_3s3p2d.orb"
 export PYTHON_EXE=/home/ghj/app/miniconda3/bin/python3
-export SOURCE_COMMIT='<exact-40-hex-source-commit>'
 
-GATE_PROFILE=server66 ./submit_pbe_gate.sh
+GATE_PROFILE=server66 "$GATE_DIR/submit_pbe_gate.sh"
 ```
 
 Successful submission creates immutable `SUBMITTED_JOB_ID.txt` and atomic
@@ -127,11 +139,34 @@ The `sbatch --export` value is an exact allowlist containing only
 unrelated login-shell variables, credentials, and agent sockets are not part of
 the batch environment contract.
 
+### Server66 preflight and migration
+
+The complete server66 preflight is a durable gate, not a verbal check.  Under
+the immutable root it must:
+
+1. compare the source archive with `SOURCE_ARCHIVE.sha256`, compare
+   `SOURCE_COMMIT.txt` with the exported `SOURCE_COMMIT`, and verify the exact
+   ABACUS, pseudopotential, orbital, and environment-script hashes;
+2. run the complete gate suite and retain output ending in `Ran 169 tests`;
+3. retain successful shell and Python checks as `BASH_SYNTAX.txt` and
+   `PY_COMPILE.txt`;
+4. run the exact server66 array shape through `sbatch --test-only` and retain
+   its output as `SBATCH_TEST_ONLY.txt`; and
+5. hash all preflight records into `PREFLIGHT_EVIDENCE.sha256`, then create
+   `PREFLIGHT_PASSED` atomically only when every preceding command succeeds.
+
+The exact `sbatch --test-only` command uses partition `640`, array `0-3`, one
+node and rank, 48 CPUs, 180000 MB, 24 hours, the exact export allowlist, and
+`run_pbe_branch_server66.slurm`.  A scheduler test-only acceptance does not
+submit the array.
+
 For the approved migration, cancel df_dcu job 21709225 only after the complete server66 preflight has passed.
-Before cancellation, recheck that the df_dcu job is still pending
-with zero elapsed time and has produced no physical output.  Preserve its
-immutable root and provenance, and submit the new server66 formal root exactly
-once.
+If any preflight command fails, leave df_dcu job `21709225` untouched.  Require
+the durable `PREFLIGHT_PASSED` marker before running `scancel 21709225`, then
+recheck that the df_dcu job is still pending with zero elapsed time and verify
+that it has produced no physical output.  Preserve its immutable root and
+provenance, confirm accounting state `CANCELLED`, and submit the new server66
+formal root exactly once.
 
 ## Post-completion audit
 
@@ -144,7 +179,7 @@ login node; postprocessing does not need a compute allocation:
 
 Inspect both `RESULT_SUMMARY.json` and `RESULT_SUMMARY.txt`.
 
-A scheduler completion is not a physical pass.  Only the login-node global audit
+A scheduler completion is not a physical pass; only the login-node global audit
 can create `PBE_GATE_PASSED` after all branches have left the scheduler and all
 physical and provenance checks have passed.
 
