@@ -446,3 +446,32 @@ HPC suite passes 176 tests and closes all 11 phase, restart, scheduler, and
 runtime provenance records.  A formal server66 calculation still requires a
 new documentation-complete source commit, a new commit-derived immutable root,
 a full preflight, duplicate checks, and exactly one new array submission.
+
+## Formal replacement result
+
+The documentation-complete source commit
+`7527d03bb1875cea04e9a3ec415060276d8a5ea7` passed a fresh server66 preflight
+with 176 tests, shell and Python checks, exact source/artifact hashes, and an
+accepted `sbatch --test-only` resource shape.  The preflight and duplicate
+checks found no root, claim, active task, or accounting record for stable job
+name `c_pbe_gate_507c214ec6a7`.
+
+Exactly one formal four-task array was then submitted as job `410668` under
+`/home/ghj/abacus/260822/c-atom-pbe-equivalence-server66-7527d03bb187`.
+All four task records reached `COMPLETED` with exit code `0:0`; elapsed times
+were 1:37, 2:14, 2:11, and 2:25 for `fixed`, `dir0`, `dir1`, and `dir2`.
+Every one of the 11 SCF phases converged with exact 3 up / 1 down integer
+occupations and complete restart-load evidence.
+
+The login-node global audit returned `PBE_GATE_PASSED` and
+`RESTART_CHAIN_VERIFIED`.  The fixed zero-field energy is
+`-147.4773363622957 eV`.  Its difference from the three final free-route
+energies is at most `1.252331571777177e-13 Ha`; the largest free/free spread is
+`1.394440118929197e-13 Ha`.  The fixed seed-to-zero-restart drift is
+`3.256647533451255e-5 kcal/mol`, below the frozen `0.001 kcal/mol` threshold.
+The complete result is recorded in
+`SIAB/example_C_sternheimer/pbe_reference_gate/results/PBE_GATE_RESULT.md`.
+
+The C PBE reference gate is therefore complete.  A separate C Delta-ST plan
+is now authorized; this result does not itself establish a Delta-ST or RPA
+response.
