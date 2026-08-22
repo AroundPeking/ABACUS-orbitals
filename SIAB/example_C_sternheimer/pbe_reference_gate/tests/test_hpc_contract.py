@@ -1502,6 +1502,8 @@ class SubmissionContractTests(unittest.TestCase):
         self.bin_dir.mkdir()
         self.scheduler_log = self.base / "scheduler.log"
         self.sbatch_count = self.base / "sbatch.count"
+        self.batch_environment = self.base / "batch-environment.txt"
+        self.tamper_marker = self.base / "source-tampered"
         self._write_fake_command(
             "squeue",
             r'''#!/usr/bin/env bash
@@ -1522,6 +1524,10 @@ if [[ ${FAKE_CREATE_BRANCH_AFTER_CLAIM:-0} == 1 \
     mkdir -p "$GATE_ROOT/runs/fixed"
     printf 'injected after claim\n' >"$GATE_ROOT/runs/fixed/BRANCH_PROVENANCE.json"
 fi
+if [[ -n ${FAKE_TAMPER_SOURCE:-} && ! -e $FAKE_TAMPER_MARKER ]]; then
+    printf '\n# replaced after submitter resolution\n' >>"$FAKE_TAMPER_SOURCE"
+    : >"$FAKE_TAMPER_MARKER"
+fi
 printf '%s' "${FAKE_SACCT_OUTPUT:-}"
 ''',
         )
@@ -1530,6 +1536,19 @@ printf '%s' "${FAKE_SACCT_OUTPUT:-}"
             r'''#!/usr/bin/env bash
 set -euo pipefail
 printf 'sbatch %s\n' "$*" >>"$FAKE_SCHEDULER_LOG"
+export_map=
+for argument in "$@"; do
+    case "$argument" in
+        --export=*) export_map=${argument#--export=} ;;
+    esac
+done
+[[ -n $export_map ]] || exit 42
+IFS=',' read -r -a exported_environment <<<"$export_map"
+env -i "${exported_environment[@]}" \
+    SLURM_JOB_ID=4242 \
+    SLURM_ARRAY_JOB_ID=4242 \
+    SLURM_ARRAY_TASK_ID=0 \
+    /usr/bin/env >"$FAKE_BATCH_ENVIRONMENT"
 if [[ ${FAKE_REQUIRE_DURABLE_RECEIPT:-0} == 1 ]]; then
     claim="$GATE_ROOT/.submission-claim"
     if [[ ! -f $claim/SBATCH_RECEIPT.txt || -L $claim/SBATCH_RECEIPT.txt \
@@ -1572,9 +1591,14 @@ exit "${FAKE_SBATCH_EXIT:-0}"
 
     def _environment(self, **overrides):
         environment = os.environ.copy()
+        unrelated_bin = self.base / "unrelated-application/bin"
         environment.update(
             {
-                "PATH": f"{self.bin_dir}{os.pathsep}{environment['PATH']}",
+                "PATH": (
+                    f"{self.bin_dir}{os.pathsep}{unrelated_bin}"
+                    f"{os.pathsep}{environment['PATH']}"
+                ),
+                "GATE_PROFILE": "df_dcu",
                 "GATE_ROOT": str(self.gate_root),
                 "ABACUS_ARTIFACT": str(self.abacus),
                 "ABACUS_ENV_SCRIPT": str(self.environment_script),
@@ -1584,6 +1608,20 @@ exit "${FAKE_SBATCH_EXIT:-0}"
                 "SOURCE_COMMIT": self.source_commit,
                 "FAKE_SCHEDULER_LOG": str(self.scheduler_log),
                 "FAKE_SBATCH_COUNT": str(self.sbatch_count),
+                "FAKE_BATCH_ENVIRONMENT": str(self.batch_environment),
+                "FAKE_TAMPER_MARKER": str(self.tamper_marker),
+                "OPENAI_API_KEY": "fake-api-key-must-not-enter-batch",
+                "GITHUB_TOKEN": "fake-token-must-not-enter-batch",
+                "SSH_AUTH_SOCK": "/tmp/fake-agent-socket-must-not-enter-batch",
+                "SSH_AGENT_PID": "987654",
+                "CONDA_PREFIX": "/opt/fake-conda-must-not-enter-batch",
+                "CONDA_DEFAULT_ENV": "fake-conda-environment",
+                "UNRELATED_APPLICATION_HOME": (
+                    "/opt/unrelated-application-must-not-enter-batch"
+                ),
+                "C_PBE_GATE_PROFILE": "ambient-profile-must-not-win",
+                "HOSTNAME": "server66-host-hint-must-not-select-profile",
+                "SLURM_CLUSTER_NAME": "server66-cluster-hint-must-not-select-profile",
             }
         )
         environment.update({key: str(value) for key, value in overrides.items()})
@@ -1603,6 +1641,12 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             return 0
         return int(self.sbatch_count.read_text().strip())
 
+    def _recorded_batch_environment(self):
+        return dict(
+            line.split("=", 1)
+            for line in self.batch_environment.read_text().splitlines()
+        )
+
     def test_submitter_static_contract(self):
         text = SUBMITTER.read_text()
         for value in (
@@ -1613,6 +1657,7 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "ORBITAL_SOURCE",
             "PYTHON_EXE",
             "SOURCE_COMMIT",
+            "GATE_PROFILE",
             "SUBMITTED_JOB_ID.txt",
             "SUBMISSION_PROVENANCE.json",
             "squeue",
@@ -1622,10 +1667,18 @@ exit "${FAKE_SBATCH_EXIT:-0}"
             "PSEUDO_ASSET",
             "ORBITAL_ASSET",
             "run_pbe_branch.slurm",
+            "run_pbe_branch_server66.slurm",
+            "run_pbe_branch_common.sh",
+            "resource_profiles.py",
+            "C_PBE_GATE_PROFILE",
+            "C_PBE_GATE_ENTRYPOINT",
+            "C_PBE_GATE_COMMON_RUNNER",
         ):
             self.assertIn(value, text)
         self.assertNotIn("--dependency", text)
         self.assertNotIn("git -C", text)
+        self.assertNotIn("hostname", text.lower())
+        self.assertNotIn('EXPORT_MAP="ALL,', text)
 
     def test_readme_documents_physical_and_operational_gate(self):
         text = README.read_text()
@@ -1652,8 +1705,8 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         ):
             self.assertIn(value, text)
 
-    def test_submits_one_array_and_records_immutable_provenance(self):
-        completed = self._run_submitter()
+    def _assert_profile_submission(self, profile_name, entrypoint):
+        completed = self._run_submitter(GATE_PROFILE=profile_name)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(self._submission_count(), 1)
         self.assertEqual(
@@ -1665,31 +1718,220 @@ exit "${FAKE_SBATCH_EXIT:-0}"
         self.assertEqual(provenance["status"], "SUBMITTED")
         self.assertEqual(provenance["job_id"], "4242")
         self.assertEqual(provenance["source_commit"], self.source_commit)
+        self.assertEqual(provenance["gate_profile"], profile_name)
+
+        python = str(Path(sys.executable).resolve())
+        receipt = self.gate_root / ".submission-claim/SBATCH_RECEIPT.txt"
+        resolved_paths = {
+            "gate_root": self.gate_root,
+            "resource_profiles": RESOURCE_PROFILES,
+            "entrypoint": entrypoint,
+            "common_runner": COMMON_RUNNER,
+            "python_exe": python,
+            "gate_contract": GATE_CONTRACT_SOURCE,
+            "prepare_gate": PREPARE_SOURCE,
+            "audit_gate": AUDIT_SOURCE,
+            "submitter": SUBMITTER,
+            "abacus_artifact": self.abacus,
+            "abacus_env_script": self.environment_script,
+            "pseudo_source": self.pseudo,
+            "orbital_source": self.orbital,
+            "receipt": receipt,
+        }
         self.assertEqual(
-            provenance["resolved_paths"]["gate_root"], str(self.gate_root)
+            provenance["resolved_paths"],
+            {name: str(path) for name, path in resolved_paths.items()},
         )
-        for name in (
-            "abacus",
-            "abacus_env_script",
-            "pseudo",
-            "orbital",
-            "gate_contract",
-            "prepare_gate",
-            "audit_gate",
-            "runner",
-            "submitter",
-        ):
+
+        file_paths = {
+            "resource_profiles": RESOURCE_PROFILES,
+            "entrypoint": entrypoint,
+            "common_runner": COMMON_RUNNER,
+            "python": python,
+            "gate_contract": GATE_CONTRACT_SOURCE,
+            "prepare_gate": PREPARE_SOURCE,
+            "audit_gate": AUDIT_SOURCE,
+            "submitter": SUBMITTER,
+            "abacus": self.abacus,
+            "abacus_env_script": self.environment_script,
+            "pseudo": self.pseudo,
+            "orbital": self.orbital,
+            "receipt": receipt,
+        }
+        self.assertEqual(set(provenance["files"]), set(file_paths))
+        for name, path in file_paths.items():
             record = provenance["files"][name]
+            self.assertEqual(record["path"], str(path))
             self.assertGreater(record["size"], 0)
             self.assertRegex(record["sha256"], r"^[0-9a-f]{64}$")
+
+        exported_environment = {
+            "GATE_ROOT": str(self.gate_root),
+            "ABACUS_ARTIFACT": str(self.abacus),
+            "ABACUS_ENV_SCRIPT": str(self.environment_script),
+            "PSEUDO_ASSET": str(self.pseudo),
+            "ORBITAL_ASSET": str(self.orbital),
+            "PYTHON_EXE": python,
+            "C_PBE_GATE_PROFILE": profile_name,
+            "C_PBE_GATE_ENTRYPOINT": str(entrypoint),
+            "C_PBE_GATE_COMMON_RUNNER": str(COMMON_RUNNER),
+        }
+        self.assertEqual(provenance["runner_environment"], exported_environment)
+        export_map = ",".join(
+            f"{name}={value}" for name, value in exported_environment.items()
+        )
+        self.assertEqual(
+            provenance["command"],
+            [
+                "sbatch",
+                "--parsable",
+                f"--job-name={provenance['job_name']}",
+                "--array=0-3",
+                f"--export={export_map}",
+                str(entrypoint),
+            ],
+        )
+
         log = self.scheduler_log.read_text()
         self.assertEqual(log.count("sbatch "), 1)
-        self.assertIn("--array=0-3", log)
-        self.assertIn(f"GATE_ROOT={self.gate_root}", log)
-        self.assertIn(f"ABACUS_ENV_SCRIPT={self.environment_script}", log)
-        self.assertIn(f"PSEUDO_ASSET={self.pseudo}", log)
-        self.assertIn(f"ORBITAL_ASSET={self.orbital}", log)
+        self.assertIn(f"--export={export_map}", log)
+        self.assertIn(f" {entrypoint}", log)
         self.assertNotIn("--dependency", log)
+        self.assertNotIn("ALL,", log)
+
+        batch_environment = self._recorded_batch_environment()
+        scheduler_environment = {
+            "SLURM_JOB_ID": "4242",
+            "SLURM_ARRAY_JOB_ID": "4242",
+            "SLURM_ARRAY_TASK_ID": "0",
+        }
+        self.assertEqual(
+            batch_environment,
+            dict(exported_environment, **scheduler_environment),
+        )
+        sensitive_values = (
+            "fake-api-key-must-not-enter-batch",
+            "fake-token-must-not-enter-batch",
+            "/tmp/fake-agent-socket-must-not-enter-batch",
+            "/opt/fake-conda-must-not-enter-batch",
+            "fake-conda-environment",
+            "/opt/unrelated-application-must-not-enter-batch",
+            "ambient-profile-must-not-win",
+            "server66-host-hint-must-not-select-profile",
+            "server66-cluster-hint-must-not-select-profile",
+            str(self.base / "unrelated-application/bin"),
+        )
+        command_text = "\n".join(provenance["command"])
+        batch_text = self.batch_environment.read_text()
+        for value in sensitive_values:
+            self.assertNotIn(value, command_text)
+            self.assertNotIn(value, batch_text)
+
+    def test_df_dcu_submission_records_exact_profile_and_environment(self):
+        self._assert_profile_submission("df_dcu", RUNNER)
+
+    def test_server66_submission_records_exact_profile_and_environment(self):
+        self._assert_profile_submission("server66", SERVER66_RUNNER)
+
+    def test_missing_or_unknown_profile_stops_before_claim_and_sbatch(self):
+        for index, (label, profile_name) in enumerate(
+            (("missing", ""), ("unknown", "automatic"))
+        ):
+            with self.subTest(label=label):
+                gate_root = self.base / f"profile-{index}"
+                completed = self._run_submitter(
+                    GATE_ROOT=gate_root,
+                    GATE_PROFILE=profile_name,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("GATE_PROFILE", completed.stderr)
+                self.assertFalse((gate_root / ".submission-claim").exists())
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_replaced_runtime_source_stops_before_claim_and_sbatch(self):
+        for index, (profile_name, relative) in enumerate(
+            (
+                ("df_dcu", "resource_profiles.py"),
+                ("df_dcu", "run_pbe_branch.slurm"),
+                ("server66", "run_pbe_branch_server66.slurm"),
+                ("df_dcu", "run_pbe_branch_common.sh"),
+            )
+        ):
+            with self.subTest(profile=profile_name, source=relative):
+                archive = self.base / f"tamper-{index}/pbe_reference_gate"
+                shutil.copytree(ROOT, archive)
+                gate_root = self.base / f"tamper-gate-{index}"
+                tamper_marker = self.base / f"tamper-marker-{index}"
+                completed = self._run_submitter(
+                    script=archive / SUBMITTER.name,
+                    GATE_PROFILE=profile_name,
+                    GATE_ROOT=gate_root,
+                    FAKE_TAMPER_SOURCE=archive / relative,
+                    FAKE_TAMPER_MARKER=tamper_marker,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("changed after resolution", completed.stderr)
+                self.assertFalse((gate_root / ".submission-claim").exists())
+        self.assertEqual(self._submission_count(), 0)
+
+    def test_all_exported_paths_reject_commas_or_newlines_before_claim(self):
+        comma_abacus = self.assets / "abacus,invalid"
+        shutil.copy2(self.abacus, comma_abacus)
+        comma_environment = self.assets / "environment,invalid.sh"
+        shutil.copy2(self.environment_script, comma_environment)
+        comma_pseudo = self.assets / "pseudo,invalid.upf"
+        shutil.copy2(self.pseudo, comma_pseudo)
+        newline_orbital = self.assets / "orbital\ninvalid.orb"
+        shutil.copy2(self.orbital, newline_orbital)
+        comma_python = self.assets / "python,invalid"
+        comma_python.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f"exec {shlex.quote(sys.executable)} \"$@\"\n"
+        )
+        comma_python.chmod(comma_python.stat().st_mode | stat.S_IXUSR)
+        comma_archive = self.base / "archive,invalid/pbe_reference_gate"
+        shutil.copytree(ROOT, comma_archive)
+
+        cases = (
+            ("gate root", SUBMITTER, {"GATE_ROOT": self.base / "gate,invalid"}),
+            (
+                "executable",
+                SUBMITTER,
+                {"ABACUS_ARTIFACT": comma_abacus},
+            ),
+            (
+                "environment",
+                SUBMITTER,
+                {"ABACUS_ENV_SCRIPT": comma_environment},
+            ),
+            ("pseudo", SUBMITTER, {"PSEUDO_SOURCE": comma_pseudo}),
+            ("orbital", SUBMITTER, {"ORBITAL_SOURCE": newline_orbital}),
+            ("python", SUBMITTER, {"PYTHON_EXE": comma_python}),
+            (
+                "entrypoint and common runner",
+                comma_archive / SUBMITTER.name,
+                {},
+            ),
+        )
+        for index, (label, script, overrides) in enumerate(cases):
+            with self.subTest(label=label):
+                gate_root = overrides.get(
+                    "GATE_ROOT", self.base / f"invalid-export-{index}"
+                )
+                completed = self._run_submitter(
+                    script=script,
+                    GATE_ROOT=gate_root,
+                    **{
+                        name: value
+                        for name, value in overrides.items()
+                        if name != "GATE_ROOT"
+                    },
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("commas or newlines", completed.stderr)
+                self.assertFalse((gate_root / ".submission-claim").exists())
+        self.assertEqual(self._submission_count(), 0)
 
     def test_python_and_source_commit_are_required_and_validated(self):
         cases = (

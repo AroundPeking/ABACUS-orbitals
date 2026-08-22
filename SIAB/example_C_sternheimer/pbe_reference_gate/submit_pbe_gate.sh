@@ -3,10 +3,13 @@
 set -euo pipefail
 
 MODULE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+RESOURCE_PROFILES="$MODULE_DIR/resource_profiles.py"
 GATE_CONTRACT="$MODULE_DIR/gate_contract.py"
 PREPARE_GATE="$MODULE_DIR/prepare_gate.py"
 AUDIT_GATE="$MODULE_DIR/audit_gate.py"
-RUNNER="$MODULE_DIR/run_pbe_branch.slurm"
+COMMON_RUNNER="$MODULE_DIR/run_pbe_branch_common.sh"
+DF_DCU_ENTRYPOINT="$MODULE_DIR/run_pbe_branch.slurm"
+SERVER66_ENTRYPOINT="$MODULE_DIR/run_pbe_branch_server66.slurm"
 SUBMITTER="$MODULE_DIR/submit_pbe_gate.sh"
 
 fail() {
@@ -20,11 +23,17 @@ require_environment() {
 }
 
 for required in \
-    GATE_ROOT ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_SOURCE ORBITAL_SOURCE \
-    PYTHON_EXE SOURCE_COMMIT
+    GATE_PROFILE GATE_ROOT ABACUS_ARTIFACT ABACUS_ENV_SCRIPT PSEUDO_SOURCE \
+    ORBITAL_SOURCE PYTHON_EXE SOURCE_COMMIT
 do
     require_environment "$required"
 done
+
+case "$GATE_PROFILE" in
+    df_dcu) ENTRYPOINT=$DF_DCU_ENTRYPOINT ;;
+    server66) ENTRYPOINT=$SERVER66_ENTRYPOINT ;;
+    *) fail "unknown GATE_PROFILE: $GATE_PROFILE; expected df_dcu or server66" ;;
+esac
 
 [[ $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]] \
     || fail "SOURCE_COMMIT must be exactly 40 lowercase hexadecimal characters"
@@ -90,24 +99,86 @@ print(resolved)
 PY
 }
 
+source_identity() {
+    "$PYTHON_REAL" - "$1" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+flags = os.O_RDONLY
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(str(path), flags)
+try:
+    before = os.fstat(descriptor)
+    if not stat.S_ISREG(before.st_mode) or before.st_size == 0:
+        raise SystemExit("pinned source is no longer a nonempty regular file: {}".format(path))
+    digest = hashlib.sha256()
+    while True:
+        block = os.read(descriptor, 1024 * 1024)
+        if not block:
+            break
+        digest.update(block)
+    after = os.fstat(descriptor)
+finally:
+    os.close(descriptor)
+fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns")
+if any(getattr(before, field) != getattr(after, field) for field in fields):
+    raise SystemExit("pinned source changed while it was being read: {}".format(path))
+print(
+    "{}:{}:{}:{}:{}:{}".format(
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_size,
+        after.st_mtime_ns,
+        digest.hexdigest(),
+    )
+)
+PY
+}
+
+verify_pinned_sources() {
+    local index current
+    for ((index = 0; index < ${#PINNED_SOURCE_PATHS[@]}; index++)); do
+        current=$(source_identity "${PINNED_SOURCE_PATHS[index]}") \
+            || fail "${PINNED_SOURCE_KINDS[index]} changed after resolution"
+        [[ $current == "${PINNED_SOURCE_IDENTITIES[index]}" ]] \
+            || fail "${PINNED_SOURCE_KINDS[index]} changed after resolution"
+    done
+}
+
 PYTHON_REAL=$(resolve_regular "$PYTHON_COMMAND" PYTHON_EXE 1 1)
 ABACUS_REAL=$(resolve_regular "$ABACUS_ARTIFACT" ABACUS_ARTIFACT 1)
 ABACUS_ENV_REAL=$(resolve_regular "$ABACUS_ENV_SCRIPT" ABACUS_ENV_SCRIPT 0)
 PSEUDO_REAL=$(resolve_regular "$PSEUDO_SOURCE" PSEUDO_SOURCE 0)
 ORBITAL_REAL=$(resolve_regular "$ORBITAL_SOURCE" ORBITAL_SOURCE 0)
+RESOURCE_PROFILES_REAL=$(resolve_regular "$RESOURCE_PROFILES" resource_profiles.py 0)
 GATE_CONTRACT_REAL=$(resolve_regular "$GATE_CONTRACT" gate_contract.py 0)
 PREPARE_GATE_REAL=$(resolve_regular "$PREPARE_GATE" prepare_gate.py 0)
 AUDIT_GATE_REAL=$(resolve_regular "$AUDIT_GATE" audit_gate.py 0)
-RUNNER_REAL=$(resolve_regular "$RUNNER" run_pbe_branch.slurm 0)
+ENTRYPOINT_REAL=$(resolve_regular "$ENTRYPOINT" selected-entrypoint 0)
+COMMON_RUNNER_REAL=$(resolve_regular "$COMMON_RUNNER" run_pbe_branch_common.sh 0)
 SUBMITTER_REAL=$(resolve_regular "$SUBMITTER" submit_pbe_gate.sh 0)
 GATE_ROOT_REAL=$(resolve_gate_root "$GATE_ROOT")
 
 for value in \
     "$GATE_ROOT_REAL" "$ABACUS_REAL" "$ABACUS_ENV_REAL" "$PSEUDO_REAL" \
-    "$ORBITAL_REAL" "$PYTHON_REAL"
+    "$ORBITAL_REAL" "$PYTHON_REAL" "$GATE_PROFILE" "$ENTRYPOINT_REAL" \
+    "$COMMON_RUNNER_REAL"
 do
     [[ $value != *','* && $value != *$'\n'* && $value != *$'\r'* ]] \
         || fail "resolved export paths must not contain commas or newlines: $value"
+done
+
+PINNED_SOURCE_KINDS=(resource_profiles.py selected-entrypoint run_pbe_branch_common.sh)
+PINNED_SOURCE_PATHS=("$RESOURCE_PROFILES_REAL" "$ENTRYPOINT_REAL" "$COMMON_RUNNER_REAL")
+PINNED_SOURCE_IDENTITIES=()
+for pinned_source in "${PINNED_SOURCE_PATHS[@]}"; do
+    PINNED_SOURCE_IDENTITIES+=("$(source_identity "$pinned_source")")
 done
 
 JOB_NAME=$(
@@ -248,6 +319,7 @@ PY
 fi
 
 query_scheduler job-name "$JOB_NAME" "$QUERY_DIR/preclaim"
+verify_pinned_sources
 check_formal_evidence 0
 
 CLAIM="$GATE_ROOT_REAL/.submission-claim"
@@ -307,16 +379,17 @@ write_json_noreplace "$CLAIM/SUBMISSION_CLAIM.json" CLAIMED \
     "exclusive submission claim acquired before sbatch" "$CLAIM_TOKEN"
 
 query_scheduler job-name "$JOB_NAME" "$CLAIM/pre_submit_scheduler"
+verify_pinned_sources
 check_formal_evidence 1 "$CLAIM_TOKEN"
 
-EXPORT_MAP="ALL,GATE_ROOT=$GATE_ROOT_REAL,ABACUS_ARTIFACT=$ABACUS_REAL,ABACUS_ENV_SCRIPT=$ABACUS_ENV_REAL,PSEUDO_ASSET=$PSEUDO_REAL,ORBITAL_ASSET=$ORBITAL_REAL,PYTHON_EXE=$PYTHON_REAL"
+EXPORT_MAP="GATE_ROOT=$GATE_ROOT_REAL,ABACUS_ARTIFACT=$ABACUS_REAL,ABACUS_ENV_SCRIPT=$ABACUS_ENV_REAL,PSEUDO_ASSET=$PSEUDO_REAL,ORBITAL_ASSET=$ORBITAL_REAL,PYTHON_EXE=$PYTHON_REAL,C_PBE_GATE_PROFILE=$GATE_PROFILE,C_PBE_GATE_ENTRYPOINT=$ENTRYPOINT_REAL,C_PBE_GATE_COMMON_RUNNER=$COMMON_RUNNER_REAL"
 SBATCH_COMMAND=(
     sbatch
     --parsable
     "--job-name=$JOB_NAME"
     --array=0-3
     "--export=$EXPORT_MAP"
-    "$RUNNER_REAL"
+    "$ENTRYPOINT_REAL"
 )
 RECEIPT="$CLAIM/SBATCH_RECEIPT.txt"
 SBATCH_STDERR="$CLAIM/SBATCH_STDERR.txt"
@@ -406,10 +479,11 @@ PROVENANCE_TEMP="$CLAIM/SUBMISSION_PROVENANCE.json"
 JOB_ID_TEMP="$CLAIM/SUBMITTED_JOB_ID.txt"
 
 "$PYTHON_REAL" - \
-    "$PROVENANCE_TEMP" "$JOB_ID_TEMP" "$GATE_ROOT_REAL" "$ABACUS_REAL" \
-    "$ABACUS_ENV_REAL" "$PSEUDO_REAL" "$ORBITAL_REAL" "$PYTHON_REAL" \
-    "$GATE_CONTRACT_REAL" \
-    "$PREPARE_GATE_REAL" "$AUDIT_GATE_REAL" "$RUNNER_REAL" "$SUBMITTER_REAL" \
+    "$PROVENANCE_TEMP" "$JOB_ID_TEMP" "$GATE_PROFILE" "$GATE_ROOT_REAL" \
+    "$RESOURCE_PROFILES_REAL" "$ENTRYPOINT_REAL" "$COMMON_RUNNER_REAL" \
+    "$PYTHON_REAL" "$GATE_CONTRACT_REAL" "$PREPARE_GATE_REAL" \
+    "$AUDIT_GATE_REAL" "$SUBMITTER_REAL" "$ABACUS_REAL" \
+    "$ABACUS_ENV_REAL" "$PSEUDO_REAL" "$ORBITAL_REAL" \
     "$RECEIPT" "$SOURCE_COMMIT" "$JOB_ID" "$JOB_NAME" \
     "$SUBMITTED_AT_UTC" "${SBATCH_COMMAND[@]}" <<'PY'
 import hashlib
@@ -421,17 +495,20 @@ from pathlib import Path
 (
     provenance_path,
     job_id_path,
+    gate_profile,
     gate_root,
-    abacus,
-    abacus_env_script,
-    pseudo,
-    orbital,
+    resource_profiles,
+    entrypoint,
+    common_runner,
     python,
     gate_contract,
     prepare_gate,
     audit_gate,
-    runner,
     submitter,
+    abacus,
+    abacus_env_script,
+    pseudo,
+    orbital,
     receipt,
     source_commit,
     job_id,
@@ -454,21 +531,25 @@ payload = {
     "status": "SUBMITTED",
     "job_id": job_id,
     "job_name": job_name,
+    "gate_profile": gate_profile,
     "submitted_at_utc": submitted_at,
     "source_commit": source_commit,
     "command": command,
     "resolved_paths": {
         "gate_root": gate_root,
-        "abacus_artifact": abacus,
-        "abacus_env_script": abacus_env_script,
-        "pseudo_source": pseudo,
-        "orbital_source": orbital,
+        "resource_profiles": resource_profiles,
+        "entrypoint": entrypoint,
+        "common_runner": common_runner,
         "python_exe": python,
         "gate_contract": gate_contract,
         "prepare_gate": prepare_gate,
         "audit_gate": audit_gate,
-        "runner": runner,
         "submitter": submitter,
+        "abacus_artifact": abacus,
+        "abacus_env_script": abacus_env_script,
+        "pseudo_source": pseudo,
+        "orbital_source": orbital,
+        "receipt": receipt,
     },
     "runner_environment": {
         "GATE_ROOT": gate_root,
@@ -477,19 +558,24 @@ payload = {
         "PSEUDO_ASSET": pseudo,
         "ORBITAL_ASSET": orbital,
         "PYTHON_EXE": python,
+        "C_PBE_GATE_PROFILE": gate_profile,
+        "C_PBE_GATE_ENTRYPOINT": entrypoint,
+        "C_PBE_GATE_COMMON_RUNNER": common_runner,
     },
     "files": {
-        "abacus": file_record(abacus),
-        "abacus_env_script": file_record(abacus_env_script),
-        "pseudo": file_record(pseudo),
-        "orbital": file_record(orbital),
+        "resource_profiles": file_record(resource_profiles),
+        "entrypoint": file_record(entrypoint),
+        "common_runner": file_record(common_runner),
         "python": file_record(python),
         "gate_contract": file_record(gate_contract),
         "prepare_gate": file_record(prepare_gate),
         "audit_gate": file_record(audit_gate),
-        "runner": file_record(runner),
         "submitter": file_record(submitter),
-        "sbatch_receipt": file_record(receipt),
+        "abacus": file_record(abacus),
+        "abacus_env_script": file_record(abacus_env_script),
+        "pseudo": file_record(pseudo),
+        "orbital": file_record(orbital),
+        "receipt": file_record(receipt),
     },
 }
 
