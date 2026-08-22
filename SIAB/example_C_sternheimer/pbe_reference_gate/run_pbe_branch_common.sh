@@ -419,9 +419,9 @@ prepare_restart() {
 }
 
 if [[ $BRANCH == fixed ]]; then
-    run_phase fixed_cold
-    prepare_restart fixed_cold fixed_restart
-    run_phase fixed_restart
+    run_phase fixed_field_seed
+    prepare_restart fixed_field_seed fixed_zero_restart
+    run_phase fixed_zero_restart
 else
     run_phase field_seed
     prepare_restart field_seed free_restart1

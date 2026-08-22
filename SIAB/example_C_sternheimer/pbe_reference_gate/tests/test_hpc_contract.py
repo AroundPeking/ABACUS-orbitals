@@ -212,6 +212,16 @@ class HpcStaticContractTests(unittest.TestCase):
         self.assertIn(".task4-prepare.guard", text)
         self.assertIn("SLURM_ARRAY_JOB_ID", text)
 
+        fixed_steps = (
+            "run_phase fixed_field_seed",
+            "prepare_restart fixed_field_seed fixed_zero_restart",
+            "run_phase fixed_zero_restart",
+        )
+        fixed_indices = [text.index(step) for step in fixed_steps]
+        self.assertEqual(fixed_indices, sorted(fixed_indices))
+        self.assertNotIn("run_phase fixed_cold", text)
+        self.assertNotIn("prepare_restart fixed_cold fixed_restart", text)
+
     def test_runtime_environment_is_sourced_before_mpirun_resolution(self):
         text = COMMON_RUNNER.read_text()
         source_index = text.index('source "$ABACUS_ENV_REAL"')
@@ -718,7 +728,7 @@ out.mkdir(exist_ok=True)
 branch = phase.parent.name
 direction = int(branch[-1]) if branch.startswith("dir") else 0
 energy = -147.4676776027294 + direction * 1.0e-8
-if phase.name in {"fixed_cold", "field_seed", "free_restart1"}:
+if phase.name in {"fixed_field_seed", "field_seed", "free_restart1"}:
     energy += 1.0e-9
 
 log = []
@@ -855,6 +865,22 @@ for spin in (1, 2):
             "RESTART_CHAIN_VERIFIED",
         )
         self.assertEqual(len(summary["phases"]), 11)
+        self.assertEqual(
+            set(summary["phases"]),
+            {
+                "runs/fixed/fixed_field_seed",
+                "runs/fixed/fixed_zero_restart",
+                *{
+                    f"runs/dir{direction}/{phase}"
+                    for direction in range(3)
+                    for phase in (
+                        "field_seed",
+                        "free_restart1",
+                        "free_restart2",
+                    )
+                },
+            },
+        )
         self.assertEqual(
             summary["restart_chain_evidence"]["environment_script"][
                 "absolute_path"
@@ -1021,13 +1047,13 @@ for spin in (1, 2):
 
     def test_planned_restart_rejects_tampered_destination_before_launch(self):
         root = self.base / f"planned-{next(tempfile._get_candidate_names())}"
-        completed = self._run_task(root, 0, fail_phase="fixed_restart")
+        completed = self._run_task(root, 0, fail_phase="fixed_zero_restart")
         self.assertNotEqual(completed.returncode, 0)
-        phase = root / "runs/fixed/fixed_restart"
+        phase = root / "runs/fixed/fixed_zero_restart"
         (phase / "OUT.C_PBE_REFERENCE_GATE/wfs1_nao.txt").write_text("tampered\n")
         with self.assertRaisesRegex(ValueError, "destination.*wfs1_nao"):
             audit_gate._verify_restart_provenance(
-                root, "fixed", "fixed_restart", require_verified=False
+                root, "fixed", "fixed_zero_restart", require_verified=False
             )
 
     def test_restart_manifest_paths_are_verified_not_trusted(self):
@@ -1351,7 +1377,7 @@ for spin in (1, 2):
         path.write_text(json.dumps(data, sort_keys=True) + "\n")
 
     def test_existing_branch_is_rejected_without_overwrite(self):
-        marker = self.completed_gate / "runs/fixed/fixed_cold/INPUT"
+        marker = self.completed_gate / "runs/fixed/fixed_field_seed/INPUT"
         before = marker.read_bytes()
         completed = self._run_task(self.completed_gate, 0)
         self.assertNotEqual(completed.returncode, 0)
@@ -1359,7 +1385,7 @@ for spin in (1, 2):
 
     def test_failed_abacus_does_not_publish_branch_complete(self):
         root = self.base / f"failed-{next(tempfile._get_candidate_names())}"
-        completed = self._run_task(root, 0, fail_phase="fixed_restart")
+        completed = self._run_task(root, 0, fail_phase="fixed_zero_restart")
         self.assertNotEqual(completed.returncode, 0)
         branch = root / "runs/fixed"
         self.assertFalse((branch / "BRANCH_COMPLETE.json").exists())
@@ -1565,12 +1591,12 @@ for spin in (1, 2):
                 self.fake_environment,
                 self.fake_mpirun,
             )
-        stru = branch / "fixed_cold/STRU"
+        stru = branch / "fixed_field_seed/STRU"
         stru.write_text(
             stru.read_text().replace("37.79452249150619", "18.89726124575309")
         )
         with self.assertRaisesRegex(ValueError, "preparation provenance"):
-            audit_gate.preflight_phase(root, "fixed", "fixed_cold")
+            audit_gate.preflight_phase(root, "fixed", "fixed_field_seed")
 
 
 class SubmissionContractTests(unittest.TestCase):
