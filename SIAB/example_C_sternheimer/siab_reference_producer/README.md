@@ -23,6 +23,13 @@ The physical contract follows the successful H workflow:
   The partition permits an unlimited wall time, which is requested explicitly
   because the 15040 response equations may approach a one-day limit.
 
+The df production wrapper is pinned to ABACUS commit `8cf890e8c`, which
+restores the streamed full-Coulomb-whitened auxiliary perturbations used by
+the SIAB Sternheimer equations.  The raw auxiliary potentials are sampled in
+1024-point grid chunks and transformed as
+`V_tilde(r) = V_raw(r) W`; they are not stored as a dense raw-channel by grid
+array.
+
 `prepare_siab_reference.py` refuses an unpassed or tampered response source and
 creates a new immutable target directory.  Restart wavefunctions and densities
 are read from the response manifest's original zero-field PBE phase, not from
