@@ -1,0 +1,32 @@
+# C atomic SIAB Sternheimer reference producer
+
+This producer starts only after the C fixed-occupation and weak-field/free
+routes pass both the zero-order PBE and full Delta-ST response gates.  It uses
+the accepted, field-free fixed-occupation restart because the two routes have
+already been shown to represent the same triplet state and the same response.
+
+The physical contract follows the successful H workflow:
+
+- 20-Angstrom centered atom, 30 Ry, explicit `135^3` grid and FD8;
+- neutral triplet C with integer `3 up / 1 down` occupation;
+- 16 fixed GreenX frequencies;
+- 10-au spherical-Bessel primitives through `l=4` at 100 Ry;
+- explicit C TZDP-derived ABFS generated with PCA threshold `1e-4`;
+- `exx_pca_threshold=10` in ABACUS, so the explicit ABFS is not truncated a
+  second time;
+- SIAB Coulomb whitening threshold `1e-10`, matching the H target producer;
+- solver tolerance `1e-6` and one frequency MPI rank per node.
+
+`prepare_siab_reference.py` refuses an unpassed or tampered response source and
+creates a new immutable target directory.  The submitter first runs a one-node
+ABFS/whitening diagnostic in an isolated copy, then launches the 16-node SIAB
+producer only after that diagnostic passes.  A completed producer must contain
+`sternheimer_matrix.dat`, a successful all-converged status, the ABFS channel
+map, Coulomb-whitening diagnostics and a SHA256 completion manifest.
+
+The atomic target is a pipeline gate, not the final transferable C training
+set.  Once it is accepted, optimization freezes the C DZP core
+(`1s,2s,1p,2p,1d`) and first varies the remaining TZDP shells
+(`3s,3p,2d`).  The formal basis training and validation must then add C-C
+bonding environments and held-out diamond volumes before any solid-state RPA
+claim is accepted.

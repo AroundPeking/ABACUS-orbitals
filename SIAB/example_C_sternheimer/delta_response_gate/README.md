@@ -77,10 +77,13 @@ and a recovery uses a new campaign root.
 
 ## Current status
 
-The PBE zero-field gate has passed.  Frequency generation, immutable staging,
-server resource contracts, reader-v1 matrix reconstruction and the physical
-audit have focused unit coverage.  The first production submission was
-cancelled before start after a pre-run source audit found that its post-run
-checks mixed periodic and molecular report field names.  No response equation
-was run.  The production Delta-ST comparison is not accepted until a corrected
-immutable campaign finishes on server 66 and the audit passes.
+The corrected immutable campaign has passed on server 66.  Both branches solve
+2832 equations (4 occupied states, 118 response channels and 6 frequencies),
+and every equation converges at the `1e-6` solver tolerance.  The maximum
+relative differences are `3.32e-16` for the full Coulomb matrix, `6.91e-8` for
+the symmetrized-response eigenvalue spectrum and `8.26e-11` for the LibRPA
+trace-log integrand.  The final correlation energies are
+`-0.1909343500936 Ha` and `-0.1909343500925 Ha`; their difference is
+`6.90e-10 kcal/mol`.  The gate status is therefore
+`DELTA_RESPONSE_GATE_PASSED`, and the field-free fixed branch is accepted as
+the atomic C SIAB source state.
