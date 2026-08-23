@@ -113,6 +113,26 @@ class HpcContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
 
+    def test_df_recovery_requires_completed_precompute_and_cancelled_formal_job(self):
+        text = self.read("submit_siab_reference_df_recovery.sh")
+        for token in (
+            "runtime_gate_failed",
+            'pilot["abacus_exit_code"] == 124',
+            'pilot["completed_equations"] == 0',
+            "channel_workers_ready",
+            "STERNHEIMER_CHI0_FAILURE_rank*.dat",
+            "CANCELLED",
+            "00:00:00",
+            ".submission-claim-df-recovery",
+            "DF_REFERENCE_RECOVERY_JOB_ID.txt",
+            "squeue",
+            "sacct",
+            "sbatch --test-only",
+            "run_siab_reference_df.slurm",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
 
 if __name__ == "__main__":
     unittest.main()

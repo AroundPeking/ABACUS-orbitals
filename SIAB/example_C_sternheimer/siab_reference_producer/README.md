@@ -28,6 +28,14 @@ and 40 OpenMP threads per node, 190000 MB per node and an exclusive allocation.
 This gives one rank per GreenX frequency while `global_equation` remains the
 authoritative work layout; the physical equation set is unchanged.
 
+If the 30-minute pilot reaches `channel_workers_ready` on all 16 ranks but
+finishes no complete low-frequency channel batch, do not submit a longer pilot
+that repeats the full precompute.  After cancelling the dependency-blocked
+formal job at zero elapsed time, `submit_siab_reference_df_recovery.sh` audits
+the pilot progress and submits exactly one unlimited formal producer.  It
+refuses a failed precompute, any Sternheimer failure file, a non-cancelled
+original formal job, or an existing recovery receipt.
+
 The df production wrapper is pinned to ABACUS commit `8cf890e8c`, which
 restores the streamed full-Coulomb-whitened auxiliary perturbations used by
 the SIAB Sternheimer equations.  The raw auxiliary potentials are sampled in
