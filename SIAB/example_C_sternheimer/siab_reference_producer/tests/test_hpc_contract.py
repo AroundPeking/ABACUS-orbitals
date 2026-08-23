@@ -19,7 +19,7 @@ class HpcContractTests(unittest.TestCase):
             "#SBATCH --ntasks-per-node=1",
             "#SBATCH --cpus-per-task=48",
             "#SBATCH --mem=180000M",
-            "#SBATCH --time=1-00:00:00",
+            "#SBATCH --time=UNLIMITED",
             "#SBATCH --exclusive",
             "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
             "ABACUS_STERNHEIMER_FD_ST_MAX_ITER=300",

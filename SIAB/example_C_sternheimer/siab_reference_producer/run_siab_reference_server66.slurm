@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=48
 #SBATCH --mem=180000M
-#SBATCH --time=1-00:00:00
+#SBATCH --time=UNLIMITED
 #SBATCH --exclusive
 
 set -euo pipefail

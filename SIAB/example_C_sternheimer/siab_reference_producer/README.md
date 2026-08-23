@@ -20,6 +20,8 @@ The physical contract follows the successful H workflow:
   the 16 frequencies across ten ranks; some ranks process two frequencies.
   `sternheimer_mpi_layout=global_equation` is explicit: the default grouped
   layout would incorrectly require the rank count to be a multiple of 16.
+  The partition permits an unlimited wall time, which is requested explicitly
+  because the 15040 response equations may approach a one-day limit.
 
 `prepare_siab_reference.py` refuses an unpassed or tampered response source and
 creates a new immutable target directory.  Restart wavefunctions and densities
