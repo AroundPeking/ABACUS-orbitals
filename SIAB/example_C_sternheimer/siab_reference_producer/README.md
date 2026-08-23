@@ -25,8 +25,10 @@ The physical contract follows the successful H workflow:
 
 The df production lane uses the normal `p1` partition: 16 nodes, one MPI rank
 and 40 OpenMP threads per node, 190000 MB per node and an exclusive allocation.
-This gives one rank per GreenX frequency while `global_equation` remains the
-authoritative work layout; the physical equation set is unchanged.
+The 16 ranks do not own one frequency each: `global_equation` distributes the
+complete `(spin, frequency, occupied state, auxiliary channel)` equation set
+across every rank so that the expensive low-frequency work is shared.  The
+physical equation set is unchanged.
 
 If the 30-minute pilot reaches `channel_workers_ready` on all 16 ranks but
 finishes no complete low-frequency channel batch, do not submit a longer pilot

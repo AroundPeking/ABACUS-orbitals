@@ -54,7 +54,7 @@ class HpcContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
 
-    def test_df_runner_uses_one_frequency_rank_per_p1_node_and_explicit_batch_environment(self):
+    def test_df_runner_uses_sixteen_global_ranks_and_explicit_batch_environment(self):
         text = self.read("run_siab_reference_df.slurm")
         required = (
             "#SBATCH --partition=p1",
