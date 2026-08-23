@@ -54,6 +54,62 @@ class HpcContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
 
+    def test_df_runner_uses_full_9242_nodes_and_explicit_batch_environment(self):
+        text = self.read("run_siab_reference_df.slurm")
+        required = (
+            "#SBATCH --partition=9242",
+            "#SBATCH --nodes=10",
+            "#SBATCH --ntasks=10",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --cpus-per-task=96",
+            "#SBATCH --mem=378000M",
+            "#SBATCH --time=UNLIMITED",
+            "#SBATCH --exclusive",
+            "module load oneapi/2024.2",
+            "I_MPI_FABRICS=shm:ofi",
+            "ABACUS_STERNHEIMER_CHANNEL_THREADS=96",
+            "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
+            'mpirun -ppn 1 -np "$SLURM_NTASKS"',
+            "SIAB_REFERENCE_COMPLETE.json",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+        self.assertNotIn("source ~/.bashrc", text)
+        self.assertNotIn("--partition=debug", text)
+
+    def test_df_pilot_preserves_full_physics_and_writes_runtime_evidence(self):
+        text = self.read("run_siab_reference_pilot_df.slurm")
+        for token in (
+            "#SBATCH --partition=9242",
+            "#SBATCH --nodes=10",
+            "#SBATCH --cpus-per-task=96",
+            "timeout --signal=TERM --kill-after=120s 30m",
+            "STERNHEIMER_SIAB_PROGRESS_rank*.dat",
+            "SIAB_REFERENCE_PILOT.json",
+            "sternheimer_nfreq[[:space:]]+16",
+            "sternheimer_mpi_layout[[:space:]]+global_equation",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
+    def test_df_submitter_has_observable_duplicate_guard_and_test_only_mode(self):
+        text = self.read("submit_siab_reference_df.sh")
+        for token in (
+            "squeue",
+            "sacct",
+            ".submission-claim-df",
+            "DF_DIAG_JOB_ID.txt",
+            "DF_PILOT_JOB_ID.txt",
+            "DF_REFERENCE_JOB_ID.txt",
+            "sbatch --test-only",
+            "run_siab_abfs_diag_df.slurm",
+            "run_siab_reference_pilot_df.slurm",
+            "run_siab_reference_df.slurm",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, text)
+
 
 if __name__ == "__main__":
     unittest.main()
