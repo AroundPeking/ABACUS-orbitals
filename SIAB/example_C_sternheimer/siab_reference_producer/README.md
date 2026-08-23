@@ -15,13 +15,18 @@ The physical contract follows the successful H workflow:
 - `exx_pca_threshold=10` in ABACUS, so the explicit ABFS is not truncated a
   second time;
 - SIAB Coulomb whitening threshold `1e-10`, matching the H target producer;
-- solver tolerance `1e-6`, ten nodes and one MPI rank per node.  Server 66's
+- solver tolerance `1e-6`.  Server 66's
   `640` partition contains ten nodes, so the global-equation scheduler assigns
   the 16 frequencies across ten ranks; some ranks process two frequencies.
   `sternheimer_mpi_layout=global_equation` is explicit: the default grouped
   layout would incorrectly require the rank count to be a multiple of 16.
   The partition permits an unlimited wall time, which is requested explicitly
   because the 15040 response equations may approach a one-day limit.
+
+The df production lane uses the normal `p1` partition: 16 nodes, one MPI rank
+and 40 OpenMP threads per node, 190000 MB per node and an exclusive allocation.
+This gives one rank per GreenX frequency while `global_equation` remains the
+authoritative work layout; the physical equation set is unchanged.
 
 The df production wrapper is pinned to ABACUS commit `8cf890e8c`, which
 restores the streamed full-Coulomb-whitened auxiliary perturbations used by

@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --partition=9242
+#SBATCH --partition=p1
 #SBATCH --job-name=c_siab_abfs_diag_df
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=96
-#SBATCH --mem=378000M
+#SBATCH --cpus-per-task=40
+#SBATCH --mem=190000M
 #SBATCH --time=02:00:00
 #SBATCH --exclusive
 
@@ -16,9 +16,9 @@ abacus=${ABACUS_EXE:?}
 expected_abacus_sha=${ABACUS_SHA256:?}
 diag=$root/abfs_diag_df
 
-test "${SLURM_JOB_PARTITION:?}" = 9242
+test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NNODES:?}" -eq 1
-test "${SLURM_CPUS_PER_TASK:?}" -eq 96
+test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test ! -e "$diag"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 mkdir "$diag"

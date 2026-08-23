@@ -54,20 +54,20 @@ class HpcContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
 
-    def test_df_runner_uses_full_9242_nodes_and_explicit_batch_environment(self):
+    def test_df_runner_uses_one_frequency_rank_per_p1_node_and_explicit_batch_environment(self):
         text = self.read("run_siab_reference_df.slurm")
         required = (
-            "#SBATCH --partition=9242",
-            "#SBATCH --nodes=10",
-            "#SBATCH --ntasks=10",
+            "#SBATCH --partition=p1",
+            "#SBATCH --nodes=16",
+            "#SBATCH --ntasks=16",
             "#SBATCH --ntasks-per-node=1",
-            "#SBATCH --cpus-per-task=96",
-            "#SBATCH --mem=378000M",
+            "#SBATCH --cpus-per-task=40",
+            "#SBATCH --mem=190000M",
             "#SBATCH --time=UNLIMITED",
             "#SBATCH --exclusive",
             "module load oneapi/2024.2",
             "I_MPI_FABRICS=shm:ofi",
-            "ABACUS_STERNHEIMER_CHANNEL_THREADS=96",
+            "ABACUS_STERNHEIMER_CHANNEL_THREADS=40",
             "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
             "8cf890e8c09cc4d09bf8aca246158f5fca27d7f1",
             'mpirun -ppn 1 -np "$SLURM_NTASKS"',
@@ -82,14 +82,16 @@ class HpcContractTests(unittest.TestCase):
     def test_df_pilot_preserves_full_physics_and_writes_runtime_evidence(self):
         text = self.read("run_siab_reference_pilot_df.slurm")
         for token in (
-            "#SBATCH --partition=9242",
-            "#SBATCH --nodes=10",
-            "#SBATCH --cpus-per-task=96",
+            "#SBATCH --partition=p1",
+            "#SBATCH --nodes=16",
+            "#SBATCH --cpus-per-task=40",
             "timeout --signal=TERM --kill-after=120s 30m",
             "STERNHEIMER_SIAB_PROGRESS_rank*.dat",
             "SIAB_REFERENCE_PILOT.json",
             "sternheimer_nfreq[[:space:]]+16",
             "sternheimer_mpi_layout[[:space:]]+global_equation",
+            '"mpi_ranks": 16',
+            '"omp_threads_per_rank": 40',
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)

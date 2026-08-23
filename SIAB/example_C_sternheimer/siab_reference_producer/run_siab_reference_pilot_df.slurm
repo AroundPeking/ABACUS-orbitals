@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --partition=9242
+#SBATCH --partition=p1
 #SBATCH --job-name=c_siab_pilot_df
-#SBATCH --nodes=10
-#SBATCH --ntasks=10
+#SBATCH --nodes=16
+#SBATCH --ntasks=16
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=96
-#SBATCH --mem=378000M
+#SBATCH --cpus-per-task=40
+#SBATCH --mem=190000M
 #SBATCH --time=00:45:00
 #SBATCH --exclusive
 
@@ -17,10 +17,10 @@ expected_abacus_sha=${ABACUS_SHA256:?}
 expected_total_equations=${SIAB_REFERENCE_TOTAL_EQUATIONS:-15040}
 pilot=$root/pilot_df
 
-test "${SLURM_JOB_PARTITION:?}" = 9242
-test "${SLURM_NNODES:?}" -eq 10
-test "${SLURM_NTASKS:?}" -eq 10
-test "${SLURM_CPUS_PER_TASK:?}" -eq 96
+test "${SLURM_JOB_PARTITION:?}" = p1
+test "${SLURM_NNODES:?}" -eq 16
+test "${SLURM_NTASKS:?}" -eq 16
+test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test ! -e "$pilot"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 grep -Eq '^sternheimer_nfreq[[:space:]]+16$' "$root/INPUT"
@@ -46,7 +46,7 @@ export MKL_DYNAMIC=FALSE
 export I_MPI_FABRICS=shm:ofi
 export I_MPI_PIN=1
 export I_MPI_PIN_DOMAIN=omp
-export ABACUS_STERNHEIMER_CHANNEL_THREADS=96
+export ABACUS_STERNHEIMER_CHANNEL_THREADS=40
 export ABACUS_STERNHEIMER_FD_ST_FREQ_RANK_SHIFT=1
 export ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6
 export ABACUS_STERNHEIMER_FD_ST_MAX_ITER=300
@@ -94,8 +94,8 @@ payload = {
     "status": "runtime_gate_passed" if passed else "runtime_gate_failed",
     "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
     "abacus_exit_code": abacus_exit,
-    "mpi_ranks": 10,
-    "omp_threads_per_rank": 96,
+    "mpi_ranks": 16,
+    "omp_threads_per_rank": 40,
     "completed_equations": len(equations),
     "observed_elapsed_seconds": max_elapsed,
     "aggregate_equations_per_second": throughput,
