@@ -24,6 +24,11 @@ producer only after that diagnostic passes.  A completed producer must contain
 `sternheimer_matrix.dat`, a successful all-converged status, the ABFS channel
 map, Coulomb-whitening diagnostics and a SHA256 completion manifest.
 
+`generate_frequency_grid.py` creates the 16-point GreenX grid from the accepted
+field-free fixed-occupation `eig_occ.txt`.  The field/free equivalence has
+already been established by the six-frequency response gate, so the production
+target does not mix two slightly different numerical transition windows.
+
 The atomic target is a pipeline gate, not the final transferable C training
 set.  Once it is accepted, optimization freezes the C DZP core
 (`1s,2s,1p,2p,1d`) and first varies the remaining TZDP shells
