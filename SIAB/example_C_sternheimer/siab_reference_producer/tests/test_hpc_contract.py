@@ -69,7 +69,7 @@ class HpcContractTests(unittest.TestCase):
             "I_MPI_FABRICS=shm:ofi",
             "ABACUS_STERNHEIMER_CHANNEL_THREADS=40",
             "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
-            "0f6eeb37eb8ff98df34d1caa1474d334506910c5",
+            "3a70edd241ced1ec598a37050cd3fe9dc2134b26",
             'mpirun -ppn 1 -np "$SLURM_NTASKS"',
             "SIAB_REFERENCE_COMPLETE.json",
         )

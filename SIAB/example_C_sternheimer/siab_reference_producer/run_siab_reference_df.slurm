@@ -27,7 +27,7 @@ test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test -x "$abacus"
 test -s "$root/PREPARATION_MANIFEST.json"
 test ! -e "$root/SIAB_REFERENCE_COMPLETE.json"
-test "$abacus_source_commit" = 0f6eeb37eb8ff98df34d1caa1474d334506910c5
+test "$abacus_source_commit" = 3a70edd241ced1ec598a37050cd3fe9dc2134b26
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 
 grep -Eq '^out_sternheimer_librpa[[:space:]]+0$' "$root/INPUT"
