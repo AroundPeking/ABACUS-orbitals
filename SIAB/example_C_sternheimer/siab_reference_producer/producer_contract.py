@@ -52,6 +52,7 @@ SIAB_PROTOCOL = (
     ("sternheimer_frequency_grid_file", "fixed_frequency_grid_nfreq16.dat"),
     ("sternheimer_frequency_mpi", "1"),
     ("sternheimer_channel_mpi", "1"),
+    ("sternheimer_mpi_layout", "global_equation"),
     ("sternheimer_delta", "1"),
     ("sternheimer_fd_order", "8"),
     ("sternheimer_delta_max_states", "0"),

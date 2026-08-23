@@ -37,6 +37,7 @@ class ProducerContractTests(unittest.TestCase):
             "sternheimer_frequency_grid_file fixed_frequency_grid_nfreq16.dat\n",
             "sternheimer_frequency_mpi 1\n",
             "sternheimer_channel_mpi 1\n",
+            "sternheimer_mpi_layout global_equation\n",
             "sternheimer_delta 1\n",
             "sternheimer_fd_order 8\n",
             "sternheimer_delta_max_states 0\n",

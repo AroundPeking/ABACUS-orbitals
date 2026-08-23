@@ -24,6 +24,8 @@ class HpcContractTests(unittest.TestCase):
             "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
             "ABACUS_STERNHEIMER_FD_ST_MAX_ITER=300",
             'mpirun -np "$SLURM_NTASKS" -ppn 1',
+            "sternheimer_mpi_layout",
+            "global_equation",
             "sternheimer_matrix.dat",
             "STERNHEIMER_SIAB_STATUS.dat",
             "STERNHEIMER_SIAB_MEMORY.dat",
@@ -47,6 +49,7 @@ class HpcContractTests(unittest.TestCase):
             "sbatch --test-only",
             "ABACUS_STERNHEIMER_FD_ST_ABFS_DIAG_ONLY=1",
             "SIAB_REFERENCE_SOURCE_COMMIT",
+            "sternheimer_mpi_layout[[:space:]]+global_equation",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)

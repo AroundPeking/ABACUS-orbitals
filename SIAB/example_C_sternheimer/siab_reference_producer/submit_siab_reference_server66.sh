@@ -10,6 +10,7 @@ test -s "$source_dir/run_siab_reference_server66.slurm"
 test ! -e "$root/DIAG_JOB_ID.txt"
 test ! -e "$root/SIAB_REFERENCE_JOB_ID.txt"
 test ! -e "$root/.submission-claim"
+grep -Eq '^sternheimer_mpi_layout[[:space:]]+global_equation$' "$root/INPUT"
 
 campaign_id=$(printf '%s' "$root" | sha256sum | cut -c1-10)
 diag_name=csd_${campaign_id}

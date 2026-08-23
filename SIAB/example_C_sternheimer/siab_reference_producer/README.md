@@ -18,6 +18,8 @@ The physical contract follows the successful H workflow:
 - solver tolerance `1e-6`, ten nodes and one MPI rank per node.  Server 66's
   `640` partition contains ten nodes, so the global-equation scheduler assigns
   the 16 frequencies across ten ranks; some ranks process two frequencies.
+  `sternheimer_mpi_layout=global_equation` is explicit: the default grouped
+  layout would incorrectly require the rank count to be a multiple of 16.
 
 `prepare_siab_reference.py` refuses an unpassed or tampered response source and
 creates a new immutable target directory.  Restart wavefunctions and densities
