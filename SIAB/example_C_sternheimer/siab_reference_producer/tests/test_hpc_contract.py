@@ -14,8 +14,8 @@ class HpcContractTests(unittest.TestCase):
         text = self.read("run_siab_reference_server66.slurm")
         required = (
             "#SBATCH --partition=640",
-            "#SBATCH --nodes=16",
-            "#SBATCH --ntasks=16",
+            "#SBATCH --nodes=10",
+            "#SBATCH --ntasks=10",
             "#SBATCH --ntasks-per-node=1",
             "#SBATCH --cpus-per-task=48",
             "#SBATCH --mem=180000M",

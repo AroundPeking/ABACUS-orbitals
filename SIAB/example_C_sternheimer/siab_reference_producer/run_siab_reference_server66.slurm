@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --partition=640
 #SBATCH --job-name=c_siab_reference
-#SBATCH --nodes=16
-#SBATCH --ntasks=16
+#SBATCH --nodes=10
+#SBATCH --ntasks=10
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=48
 #SBATCH --mem=180000M
@@ -18,8 +18,8 @@ runtime_env=${ABACUS_ENV_SCRIPT:?}
 source_commit=${SIAB_REFERENCE_SOURCE_COMMIT:?}
 
 test "${SLURM_JOB_PARTITION:?}" = 640
-test "${SLURM_NNODES:?}" -eq 16
-test "${SLURM_NTASKS:?}" -eq 16
+test "${SLURM_NNODES:?}" -eq 10
+test "${SLURM_NTASKS:?}" -eq 10
 test "${SLURM_NTASKS_PER_NODE:?}" -eq 1
 test "${SLURM_CPUS_PER_TASK:?}" -eq 48
 test -x "$abacus"

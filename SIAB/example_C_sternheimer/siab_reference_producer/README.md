@@ -15,14 +15,16 @@ The physical contract follows the successful H workflow:
 - `exx_pca_threshold=10` in ABACUS, so the explicit ABFS is not truncated a
   second time;
 - SIAB Coulomb whitening threshold `1e-10`, matching the H target producer;
-- solver tolerance `1e-6` and one frequency MPI rank per node.
+- solver tolerance `1e-6`, ten nodes and one MPI rank per node.  Server 66's
+  `640` partition contains ten nodes, so the global-equation scheduler assigns
+  the 16 frequencies across ten ranks; some ranks process two frequencies.
 
 `prepare_siab_reference.py` refuses an unpassed or tampered response source and
 creates a new immutable target directory.  Restart wavefunctions and densities
 are read from the response manifest's original zero-field PBE phase, not from
 the response output directory: the latter may be rewritten when Delta-ST runs.
 The submitter first runs a one-node
-ABFS/whitening diagnostic in an isolated copy, then launches the 16-node SIAB
+ABFS/whitening diagnostic in an isolated copy, then launches the 10-node SIAB
 producer only after that diagnostic passes.  A completed producer must contain
 `sternheimer_matrix.dat`, a successful all-converged status, the ABFS channel
 map, Coulomb-whitening diagnostics and a SHA256 completion manifest.
