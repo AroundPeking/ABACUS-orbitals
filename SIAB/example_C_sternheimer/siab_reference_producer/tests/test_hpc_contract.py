@@ -54,12 +54,12 @@ class HpcContractTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, text)
 
-    def test_df_runner_uses_sixteen_global_ranks_and_explicit_batch_environment(self):
+    def test_df_runner_uses_ten_global_ranks_and_explicit_batch_environment(self):
         text = self.read("run_siab_reference_df.slurm")
         required = (
             "#SBATCH --partition=p1",
-            "#SBATCH --nodes=16",
-            "#SBATCH --ntasks=16",
+            "#SBATCH --nodes=10",
+            "#SBATCH --ntasks=10",
             "#SBATCH --ntasks-per-node=1",
             "#SBATCH --cpus-per-task=40",
             "#SBATCH --mem=190000M",
@@ -69,7 +69,7 @@ class HpcContractTests(unittest.TestCase):
             "I_MPI_FABRICS=shm:ofi",
             "ABACUS_STERNHEIMER_CHANNEL_THREADS=40",
             "ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL=1e-6",
-            "8cf890e8c09cc4d09bf8aca246158f5fca27d7f1",
+            "0f6eeb37eb8ff98df34d1caa1474d334506910c5",
             'mpirun -ppn 1 -np "$SLURM_NTASKS"',
             "SIAB_REFERENCE_COMPLETE.json",
         )
@@ -83,14 +83,14 @@ class HpcContractTests(unittest.TestCase):
         text = self.read("run_siab_reference_pilot_df.slurm")
         for token in (
             "#SBATCH --partition=p1",
-            "#SBATCH --nodes=16",
+            "#SBATCH --nodes=10",
             "#SBATCH --cpus-per-task=40",
             "timeout --signal=TERM --kill-after=120s 30m",
             "STERNHEIMER_SIAB_PROGRESS_rank*.dat",
             "SIAB_REFERENCE_PILOT.json",
             "sternheimer_nfreq[[:space:]]+16",
             "sternheimer_mpi_layout[[:space:]]+global_equation",
-            '"mpi_ranks": 16',
+            '"mpi_ranks": 10',
             '"omp_threads_per_rank": 40',
         ):
             with self.subTest(token=token):
@@ -119,6 +119,8 @@ class HpcContractTests(unittest.TestCase):
             "runtime_gate_failed",
             'pilot["abacus_exit_code"] == 124',
             'pilot["completed_equations"] == 0',
+            'pilot["mpi_ranks"] == 10',
+            "assert len(progress) == 10",
             "channel_workers_ready",
             "STERNHEIMER_CHI0_FAILURE_rank*.dat",
             "CANCELLED",

@@ -27,11 +27,11 @@ pilot = json.loads((root / "pilot_df/SIAB_REFERENCE_PILOT.json").read_text(encod
 assert pilot["status"] == "runtime_gate_failed"
 assert pilot["abacus_exit_code"] == 124
 assert pilot["completed_equations"] == 0
-assert pilot["mpi_ranks"] == 16
+assert pilot["mpi_ranks"] == 10
 assert pilot["omp_threads_per_rank"] == 40
 
 progress = sorted((root / "pilot_df").glob("STERNHEIMER_SIAB_PROGRESS_rank*.dat"))
-assert len(progress) == 16
+assert len(progress) == 10
 for path in progress:
     text = path.read_text(encoding="ascii", errors="replace")
     assert "channel_workers_ready" in text

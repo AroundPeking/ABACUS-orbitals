@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --partition=p1
 #SBATCH --job-name=c_siab_reference_df
-#SBATCH --nodes=16
-#SBATCH --ntasks=16
+#SBATCH --nodes=10
+#SBATCH --ntasks=10
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000M
@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+# The 235 whitened channels fit in one wave with 10 ranks at 26 workers/rank.
+
 root=${SIAB_REFERENCE_ROOT:?}
 abacus=${ABACUS_EXE:?}
 expected_abacus_sha=${ABACUS_SHA256:?}
@@ -18,14 +20,14 @@ abacus_source_commit=${ABACUS_SOURCE_COMMIT:?}
 workflow_source_commit=${SIAB_REFERENCE_SOURCE_COMMIT:?}
 
 test "${SLURM_JOB_PARTITION:?}" = p1
-test "${SLURM_NNODES:?}" -eq 16
-test "${SLURM_NTASKS:?}" -eq 16
+test "${SLURM_NNODES:?}" -eq 10
+test "${SLURM_NTASKS:?}" -eq 10
 test "${SLURM_NTASKS_PER_NODE:?}" -eq 1
 test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test -x "$abacus"
 test -s "$root/PREPARATION_MANIFEST.json"
 test ! -e "$root/SIAB_REFERENCE_COMPLETE.json"
-test "$abacus_source_commit" = 8cf890e8c09cc4d09bf8aca246158f5fca27d7f1
+test "$abacus_source_commit" = 0f6eeb37eb8ff98df34d1caa1474d334506910c5
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 
 grep -Eq '^out_sternheimer_librpa[[:space:]]+0$' "$root/INPUT"

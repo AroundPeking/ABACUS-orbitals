@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --partition=p1
 #SBATCH --job-name=c_siab_pilot_df
-#SBATCH --nodes=16
-#SBATCH --ntasks=16
+#SBATCH --nodes=10
+#SBATCH --ntasks=10
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000M
@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+# Match the 10-rank production shape so the runtime gate measures that layout.
+
 root=${SIAB_REFERENCE_ROOT:?}
 abacus=${ABACUS_EXE:?}
 expected_abacus_sha=${ABACUS_SHA256:?}
@@ -18,8 +20,8 @@ expected_total_equations=${SIAB_REFERENCE_TOTAL_EQUATIONS:-15040}
 pilot=$root/pilot_df
 
 test "${SLURM_JOB_PARTITION:?}" = p1
-test "${SLURM_NNODES:?}" -eq 16
-test "${SLURM_NTASKS:?}" -eq 16
+test "${SLURM_NNODES:?}" -eq 10
+test "${SLURM_NTASKS:?}" -eq 10
 test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test ! -e "$pilot"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
@@ -94,7 +96,7 @@ payload = {
     "status": "runtime_gate_passed" if passed else "runtime_gate_failed",
     "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
     "abacus_exit_code": abacus_exit,
-    "mpi_ranks": 16,
+    "mpi_ranks": 10,
     "omp_threads_per_rank": 40,
     "completed_equations": len(equations),
     "observed_elapsed_seconds": max_elapsed,
