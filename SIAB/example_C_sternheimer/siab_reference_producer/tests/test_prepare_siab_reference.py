@@ -22,8 +22,11 @@ class PrepareSiabReferenceTests(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.response = self.base / "response"
         self.case = self.response / "branches/fixed"
-        restart = self.case / "OUT.C_DELTA_RESPONSE_GATE"
-        restart.mkdir(parents=True)
+        response_restart = self.case / "OUT.C_DELTA_RESPONSE_GATE"
+        response_restart.mkdir(parents=True)
+        self.source_phase = self.base / "pbe/runs/fixed/fixed_zero_restart"
+        source_restart = self.source_phase / "OUT.C_PBE_REFERENCE_GATE"
+        source_restart.mkdir(parents=True)
         assets = {
             "STRU": "ATOMIC_SPECIES\nC 12.011 C_ONCV_PBE-1.0.upf\n",
             "KPT": "K_POINTS\n0\nGamma\n1 1 1 0 0 0\n",
@@ -33,14 +36,21 @@ class PrepareSiabReferenceTests(unittest.TestCase):
         }
         for name, content in assets.items():
             (self.case / name).write_text(content, encoding="ascii")
+            if name == "SOURCE_EIG_OCC.txt":
+                (source_restart / "eig_occ.txt").write_text(content, encoding="ascii")
+            else:
+                (self.source_phase / name).write_text(content, encoding="ascii")
         for name in RESTART_NAMES:
-            (restart / name).write_text(f"restart {name}\n", encoding="ascii")
+            (source_restart / name).write_text(f"original restart {name}\n", encoding="ascii")
+            # A completed response run may rewrite these files.  They are not
+            # the immutable zero-field PBE source.
+            (response_restart / name).write_text(f"response rewrite {name}\n", encoding="ascii")
         files = {
             name: {"sha256": sha256(self.case / name), "size": (self.case / name).stat().st_size}
             for name in assets
         }
         restart_files = {
-            name: {"sha256": sha256(restart / name), "size": (restart / name).stat().st_size}
+            name: {"sha256": sha256(source_restart / name), "size": (source_restart / name).stat().st_size}
             for name in RESTART_NAMES
         }
         (self.response / "PREPARATION_MANIFEST.json").write_text(
@@ -50,6 +60,7 @@ class PrepareSiabReferenceTests(unittest.TestCase):
                     "branches": {
                         "fixed": {
                             "source_phase": "runs/fixed/fixed_zero_restart",
+                            "source_phase_absolute": str(self.source_phase),
                             "files": files,
                             "restart_files": restart_files,
                         }
@@ -109,7 +120,7 @@ class PrepareSiabReferenceTests(unittest.TestCase):
             self.assertFalse(path.is_symlink(), name)
         for name in RESTART_NAMES:
             staged = root / "OUT.C_SIAB_REFERENCE" / name
-            source = self.case / "OUT.C_DELTA_RESPONSE_GATE" / name
+            source = self.source_phase / "OUT.C_PBE_REFERENCE_GATE" / name
             self.assertEqual(staged.read_bytes(), source.read_bytes())
 
     def test_refuses_unpassed_response_or_wrong_frequency_count(self):
@@ -132,7 +143,7 @@ class PrepareSiabReferenceTests(unittest.TestCase):
             )
 
     def test_refuses_tampered_source_and_existing_target(self):
-        (self.case / "STRU").write_text("tampered\n", encoding="ascii")
+        (self.source_phase / "STRU").write_text("tampered\n", encoding="ascii")
         with self.assertRaisesRegex(ValueError, "source hash mismatch"):
             prepare_siab_reference(
                 self.base / "tampered", self.response, self.frequency, self.abfs

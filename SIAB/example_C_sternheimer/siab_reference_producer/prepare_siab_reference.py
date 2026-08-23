@@ -105,12 +105,25 @@ def prepare_siab_reference(
     if response_manifest.get("status") != "prepared" or not isinstance(fixed, dict):
         raise ValueError("response preparation manifest lacks the fixed branch")
 
-    source_case = response_gate_root / "branches/fixed"
-    source_restart = source_case / "OUT.C_DELTA_RESPONSE_GATE"
+    source_phase_value = fixed.get("source_phase_absolute")
+    if not isinstance(source_phase_value, str) or not source_phase_value:
+        raise ValueError("response manifest lacks the original PBE source phase")
+    source_phase_path = Path(source_phase_value)
+    if source_phase_path.is_symlink() or not source_phase_path.is_dir():
+        raise ValueError("original PBE source phase must be a real directory")
+    source_phase = source_phase_path.resolve(strict=True)
+    source_restart = source_phase / "OUT.C_PBE_REFERENCE_GATE"
+    if source_restart.is_symlink() or not source_restart.is_dir():
+        raise ValueError("original PBE output must be a real directory")
     file_records = fixed.get("files", {})
     restart_records = fixed.get("restart_files", {})
     for name in SOURCE_NAMES:
-        _require_manifest_hash(source_case / name, file_records.get(name, {}), name)
+        source = (
+            source_restart / "eig_occ.txt"
+            if name == "SOURCE_EIG_OCC.txt"
+            else source_phase / name
+        )
+        _require_manifest_hash(source, file_records.get(name, {}), name)
     for name in RESTART_NAMES:
         _require_manifest_hash(
             source_restart / name, restart_records.get(name, {}), name
@@ -124,12 +137,13 @@ def prepare_siab_reference(
     temporary = Path(tempfile.mkdtemp(prefix=f".{root.name}.tmp-", dir=root.parent))
     try:
         (temporary / "INPUT").write_text(render_siab_input(), encoding="ascii")
-        source_stru = (source_case / "STRU").read_text(encoding="ascii")
+        source_stru = (source_phase / "STRU").read_text(encoding="ascii")
         (temporary / "STRU").write_text(
             render_siab_stru(source_stru, abfs.name), encoding="ascii"
         )
-        for name in SOURCE_NAMES[1:]:
-            shutil.copy2(source_case / name, temporary / name)
+        for name in SOURCE_NAMES[1:-1]:
+            shutil.copy2(source_phase / name, temporary / name)
+        shutil.copy2(source_restart / "eig_occ.txt", temporary / "SOURCE_EIG_OCC.txt")
         shutil.copy2(abfs, temporary / abfs.name)
         shutil.copy2(frequency_grid, temporary / "fixed_frequency_grid_nfreq16.dat")
 
@@ -146,6 +160,7 @@ def prepare_siab_reference(
             "response_manifest_sha256": sha256(manifest_path),
             "source_branch": "fixed",
             "source_phase": fixed.get("source_phase"),
+            "source_phase_absolute": str(source_phase),
             "frequency_count": len(frequencies),
             "frequency_grid": file_record(temporary / "fixed_frequency_grid_nfreq16.dat"),
             "abfs": {"name": abfs.name, **file_record(temporary / abfs.name)},

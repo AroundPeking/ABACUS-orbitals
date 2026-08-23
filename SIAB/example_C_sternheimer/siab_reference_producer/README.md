@@ -18,7 +18,10 @@ The physical contract follows the successful H workflow:
 - solver tolerance `1e-6` and one frequency MPI rank per node.
 
 `prepare_siab_reference.py` refuses an unpassed or tampered response source and
-creates a new immutable target directory.  The submitter first runs a one-node
+creates a new immutable target directory.  Restart wavefunctions and densities
+are read from the response manifest's original zero-field PBE phase, not from
+the response output directory: the latter may be rewritten when Delta-ST runs.
+The submitter first runs a one-node
 ABFS/whitening diagnostic in an isolated copy, then launches the 16-node SIAB
 producer only after that diagnostic passes.  A completed producer must contain
 `sternheimer_matrix.dat`, a successful all-converged status, the ABFS channel
