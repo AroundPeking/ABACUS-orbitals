@@ -33,7 +33,9 @@ class HpcContractTests(unittest.TestCase):
         self.assertNotIn("SOLVER_TOL=1e-8", text)
 
     def test_response_runner_checks_the_full_physical_contract(self):
-        text = self.read("run_response_branch_server66.slurm")
+        runner = self.read("run_response_branch_server66.slurm")
+        finalizer = self.read("finalize_response_branch.py")
+        text = runner + finalizer
         for token in (
             "RESULT_SUMMARY.json",
             "PREPARATION_MANIFEST.json",
@@ -41,25 +43,27 @@ class HpcContractTests(unittest.TestCase):
             "Read NAO wave functions from OUT.C_DELTA_RESPONSE_GATE/wfs2_nao.txt",
             "Read electron density from file: OUT.C_DELTA_RESPONSE_GATE/chgs1.cube",
             "Read electron density from file: OUT.C_DELTA_RESPONSE_GATE/chgs2.cube",
-            "frequency_grid_source file",
-            "sternheimer_fd_order 8",
-            "sternheimer_delta yes",
-            "all_converged yes",
+            '"frequency_grid_source": "file"',
+            '"sternheimer_fd_order": "8"',
+            '"sternheimer_delta": "yes"',
+            '"all_converged": "yes"',
             "max_solver_relative_residual",
-            "ccp_rmesh_times 1",
+            '"ccp_rmesh_times": "1"',
             "occupied_bands",
             "abfs_ccp_fock_alpha_1_singularity_limits",
             "full_coulomb_reader_v1",
             "workflow_source_commit",
-            "v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat",
+            "v1_sternheimer_chi0_iq_1_ifreq_*.dat",
             "v1_coulomb_full_iq_1_rank0.dat",
             "RESPONSE_COMPLETE.json",
+            "finalize_response_branch.py",
         ):
             with self.subTest(token=token):
                 self.assertIn(token, text)
         self.assertNotIn("perturbation_coulomb_kernel full_periodic_poisson", text)
         self.assertNotIn("ccp_rmesh_times_input", text)
         self.assertNotIn("occupied_bands_total", text)
+        self.assertNotIn("convergence has been achieved", runner)
 
     def test_librpa_runner_uses_full_coulomb_and_records_each_frequency(self):
         text = self.read("run_librpa_branch_server66.slurm")

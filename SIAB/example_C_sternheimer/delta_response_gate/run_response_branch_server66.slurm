@@ -34,6 +34,7 @@ test "$(cat "$root/SOURCE_COMMIT.txt")" = "$source_commit"
 test -x "$abacus"
 test -s "$runtime_env"
 test -s "$source_dir/response_contract.py"
+test -s "$source_dir/finalize_response_branch.py"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 
 source "$runtime_env"
@@ -107,104 +108,13 @@ ulimit -s unlimited
 /usr/bin/time -v -o abacus.time \
   mpirun -np "$SLURM_NTASKS" -ppn 1 "$abacus" > abacus.out 2>&1
 
-! grep -q '!!SCF IS NOT CONVERGED!!' abacus.out
-grep -q 'convergence has been achieved' abacus.out
-grep -q 'Read NAO wave functions from OUT.C_DELTA_RESPONSE_GATE/wfs1_nao.txt' abacus.out
-grep -q 'Read NAO wave functions from OUT.C_DELTA_RESPONSE_GATE/wfs2_nao.txt' abacus.out
-report=$(find . -path './OUT.*/STERNHEIMER_CHI0.dat' -type f -print -quit)
-test -n "$report"
-scf_log=${report%/STERNHEIMER_CHI0.dat}/running_scf.log
-grep -q 'Read electron density from file: OUT.C_DELTA_RESPONSE_GATE/chgs1.cube' "$scf_log"
-grep -q 'Read electron density from file: OUT.C_DELTA_RESPONSE_GATE/chgs2.cube' "$scf_log"
-grep -q '^status success$' "$report"
-grep -Eq '^format v1(_partial)?$' "$report"
-grep -q '^frequency_grid_source file$' "$report"
-grep -q '^nfreq 6$' "$report"
-grep -q '^sternheimer_fd_order 8$' "$report"
-grep -q '^sternheimer_delta yes$' "$report"
-grep -q '^pca_threshold 0.0001$' "$report"
-grep -q '^ccp_rmesh_times 1$' "$report"
-grep -q '^sternheimer_frequency_mpi yes$' "$report"
-grep -q '^mpi_ranks 6$' "$report"
-grep -q '^all_converged yes$' "$report"
-grep -q '^max_solver_relative_residual ' "$report"
-
-# Accepted molecular output can be either consolidated or rank-suffixed.
-# v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat
-mapfile -t response_files < <(find . -maxdepth 1 -type f -name 'v1_sternheimer_chi0_iq_1_ifreq_*.dat' | sort)
-test "${#response_files[@]}" -eq 6
-test -s v1_coulomb_full_iq_1_rank0.dat
-for name in stru_out bz_sampling_out basis_out basis_wfc_out basis_aux_out; do
-  test -s "$name"
-done
-
-channels=$(awk '$1=="abfs_channels" {print $2}' "$report")
-occupied=$(awk '$1=="occupied_bands" {print $2}' "$report")
-solved=$(awk '$1=="solved_equations" {print $2}' "$report")
-residual=$(awk '$1=="max_solver_relative_residual" {print $2}' "$report")
-test -n "$channels"
-test "$occupied" -eq 4
-test "$solved" -eq $((6 * occupied * channels))
-"$python" - "$residual" <<'PY'
-import math
-import sys
-value = float(sys.argv[1])
-assert math.isfinite(value) and value <= 1.0e-6
-PY
-
-out_dir=${report%/STERNHEIMER_CHI0.dat}
 export PYTHONPATH=$source_dir${PYTHONPATH:+:$PYTHONPATH}
-"$python" - "$out_dir/eig_occ.txt" <<'PY'
-import sys
-from pathlib import Path
-from response_contract import parse_eig_occ
-record = parse_eig_occ(Path(sys.argv[1]))
-assert record.spin_counts == {1: 3, 2: 1}
-PY
-
-"$python" - "$branch" "$report" "$expected_abacus_sha" "$source_commit" "$residual" \
-  "$channels" "$solved" "${response_files[@]}" <<'PY'
-import hashlib
-import json
-import sys
-from pathlib import Path
-
-branch, report, exe_sha, source_commit, residual, channels, solved, *files = sys.argv[1:]
-def record(path):
-    path = Path(path)
-    return {
-        "path": path.name,
-        "size": path.stat().st_size,
-        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-    }
-
-payload = {
-    "status": "RESPONSE_COMPLETE",
-    "branch": branch,
-    "abacus_sha256": exe_sha,
-    "workflow_source_commit": source_commit,
-    "frequency_grid_source": "file",
-    "nfreq": 6,
-    "finite_difference_order": 8,
-    "sternheimer_delta": True,
-    "virtual_source": "all_ks_bands_implicit_feature_branch",
-    "pca_threshold": 1.0e-4,
-    "perturbation_hartree_kernel": "abfs_ccp_fock_alpha_1_singularity_limits",
-    "response_metric": "full_coulomb_reader_v1",
-    "librpa_coulomb_kernel": "full",
-    "solver_tolerance": 1.0e-6,
-    "max_solver_relative_residual": float(residual),
-    "abfs_channels": int(channels),
-    "solved_equations": int(solved),
-    "report": record(report),
-    "response_files": [record(path) for path in files],
-    "full_coulomb": record("v1_coulomb_full_iq_1_rank0.dat"),
-}
-temporary = Path("RESPONSE_COMPLETE.json.tmp")
-temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="ascii")
-temporary.replace("RESPONSE_COMPLETE.json")
-PY
+"$python" "$source_dir/finalize_response_branch.py" \
+  --root "$root" \
+  --branch "$branch" \
+  --expected-abacus-sha "$expected_abacus_sha" \
+  --producer-source-commit "$source_commit" \
+  --finalizer-source-commit "$source_commit"
 
 rm -f .response-running
 trap - EXIT
-echo "RESPONSE_OK branch=$branch channels=$channels residual=$residual"
