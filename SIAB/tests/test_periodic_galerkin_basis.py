@@ -103,13 +103,17 @@ Left spillage = 0.0
                 expected_nu=(1, 1, 0),
             )
 
-        torch.testing.assert_close(
-            coefficients["C"][0],
-            torch.tensor([[1.0], [2.0]], dtype=torch.float64),
+        self.assertTrue(
+            torch.allclose(
+                coefficients["C"][0],
+                torch.tensor([[1.0], [2.0]], dtype=torch.float64),
+            )
         )
-        torch.testing.assert_close(
-            coefficients["C"][1],
-            torch.tensor([[3.0], [4.0]], dtype=torch.float64),
+        self.assertTrue(
+            torch.allclose(
+                coefficients["C"][1],
+                torch.tensor([[3.0], [4.0]], dtype=torch.float64),
+            )
         )
         self.assertEqual(coefficients["C"][2].shape, (2, 0))
 
