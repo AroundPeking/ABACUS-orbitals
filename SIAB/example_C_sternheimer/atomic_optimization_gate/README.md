@@ -25,3 +25,9 @@ physical objective must combine the atomic target with C-C environments, and
 the final raw SOS result must be checked at held-out C-C separations and
 diamond volumes using `exx_pca_threshold=1e-4`.  The atomic gate alone must not
 be used to select or publish a C basis.
+
+If server66 has no available normal node, the gate may be migrated once to the
+df `p1` partition.  `submit_atomic_gradient_gate_df.sh` requires an immutable
+migration record proving that server66 job `410776` was cancelled with zero
+elapsed time.  The df job uses one exclusive 40-core node and 190000 MB, while
+the matrix, coefficients, optimizer settings and audit remain unchanged.

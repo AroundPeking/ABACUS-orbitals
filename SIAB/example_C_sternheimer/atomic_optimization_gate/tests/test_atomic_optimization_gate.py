@@ -123,6 +123,33 @@ class AtomicOptimizationGateTest(unittest.TestCase):
         self.assertIn("sbatch --test-only", text)
         self.assertIn("sbatch --parsable", text)
 
+    def test_df_job_uses_one_full_p1_node(self):
+        text = (HERE.parent / "run_atomic_gradient_gate_df.slurm").read_text(
+            encoding="ascii"
+        )
+        for marker in (
+            "#SBATCH --partition=p1",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=1",
+            "#SBATCH --cpus-per-task=40",
+            "#SBATCH --mem=190000M",
+            "#SBATCH --exclusive",
+            "#SBATCH --time=UNLIMITED",
+            "export OMP_MAX_ACTIVE_LEVELS=1",
+        ):
+            self.assertIn(marker, text)
+        self.assertNotIn("debug", text.lower())
+
+    def test_df_submitter_requires_zero_elapsed_server66_migration(self):
+        text = (HERE.parent / "submit_atomic_gradient_gate_df.sh").read_text(
+            encoding="ascii"
+        )
+        self.assertIn('grep -qx "server66_job_id=410776"', text)
+        self.assertIn('grep -qx "server66_state=CANCELLED"', text)
+        self.assertIn('grep -qx "server66_elapsed=00:00:00"', text)
+        self.assertIn("sbatch --test-only", text)
+        self.assertIn("sbatch --parsable", text)
+
 
 if __name__ == "__main__":
     unittest.main()
