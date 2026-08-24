@@ -14,13 +14,11 @@ import sys
 HERE = Path(__file__).resolve().parent
 SIAB_DIR = HERE.parents[1]
 OPT_DIR = SIAB_DIR / "opt_orb_pytorch_dpsi"
-H_SELECTION_DIR = SIAB_DIR / "example_H_sternheimer/greedy_response_selection"
 sys.path.insert(0, str(OPT_DIR))
-sys.path.insert(0, str(H_SELECTION_DIR))
 
+from periodic_galerkin_basis import read_periodic_optimizer_coefficients  # noqa: E402
 from periodic_galerkin_campaign import evaluate_periodic_basis_capacity  # noqa: E402
 from periodic_galerkin_data import read_periodic_galerkin_dataset  # noqa: E402
-from response_selection_campaign import read_optimizer_coefficients  # noqa: E402
 
 
 def sha256(path):
@@ -96,11 +94,10 @@ def main(argv=None):
         raise ValueError("evaluation dimensions and tolerances must be positive")
 
     dataset = read_periodic_galerkin_dataset(dataset_path)
-    coefficients = read_optimizer_coefficients(
+    coefficients = read_periodic_optimizer_coefficients(
         coefficient_path,
         element=args.element,
         radial_rows=args.radial_rows,
-        max_l=args.max_l,
         expected_nu=nu,
     )
     report = evaluate_periodic_basis_capacity(
