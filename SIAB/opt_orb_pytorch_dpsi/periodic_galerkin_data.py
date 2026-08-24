@@ -21,6 +21,16 @@ _RY_TO_HA = 0.5
 
 
 @dataclass(frozen=True)
+class PeriodicGalerkinPrimitiveBlock:
+    element: str
+    atom_index: int
+    l: int
+    m: int
+    n_primitive: int
+    offset: int
+
+
+@dataclass(frozen=True)
 class PeriodicGalerkinKPoint:
     source_ik: int
     target_ik: int
@@ -58,6 +68,7 @@ class PeriodicGalerkinDataset:
     coulomb_metric: torch.Tensor
     coulomb_whitening: torch.Tensor
     reference_response: torch.Tensor
+    primitive_blocks: Tuple[PeriodicGalerkinPrimitiveBlock, ...]
     kpoints: Tuple[PeriodicGalerkinKPoint, ...]
 
 
@@ -192,6 +203,53 @@ def _safe_chunk_path(directory, relative_path):
     return path
 
 
+def _read_primitive_blocks(directory, expected_sha256, primitive_count):
+    path = os.path.join(directory, "primitive_blocks.dat")
+    _require(os.path.isfile(path), "periodic Galerkin dataset is missing primitive_blocks.dat")
+    _require(_sha256(path).lower() == expected_sha256.lower(),
+             "periodic Galerkin primitive-block SHA256 mismatch")
+    with open(path, "r", encoding="ascii") as handle:
+        lines = [line.strip() for line in handle if line.strip()]
+    _require(lines and lines[0] == "ABACUS_STERNHEIMER_BASIS_OPT_PRIMITIVES_V1",
+             "invalid periodic Galerkin primitive-block version")
+    blocks = []
+    for line in lines[1:]:
+        if line.startswith("#"):
+            continue
+        fields = line.split()
+        _require(len(fields) == 6, "invalid periodic Galerkin primitive block")
+        block = PeriodicGalerkinPrimitiveBlock(
+            element=fields[0],
+            atom_index=int(fields[1]),
+            l=int(fields[2]),
+            m=int(fields[3]),
+            n_primitive=int(fields[4]),
+            offset=int(fields[5]),
+        )
+        _require(block.element and block.atom_index >= 0 and block.l >= 0
+                 and -block.l <= block.m <= block.l and block.n_primitive > 0
+                 and block.offset >= 0,
+                 "invalid periodic Galerkin primitive block")
+        blocks.append(block)
+    _require(blocks, "periodic Galerkin primitive-block list is empty")
+
+    expected_offset = 0
+    atom_channels = {}
+    for block in blocks:
+        _require(block.offset == expected_offset,
+                 "periodic Galerkin primitive blocks do not continuously cover the mother space")
+        expected_offset += block.n_primitive
+        key = (block.element, block.atom_index, block.l)
+        atom_channels.setdefault(key, []).append(block.m)
+    _require(expected_offset == primitive_count,
+             "periodic Galerkin primitive blocks do not cover primitive_count")
+    for (element, atom_index, l), values in atom_channels.items():
+        del element, atom_index
+        _require(values == list(range(-l, l + 1)),
+                 "periodic Galerkin primitive block has incomplete or disordered m channels")
+    return tuple(blocks)
+
+
 def _read_chunk(directory, entry):
     path = _safe_chunk_path(directory, entry.relative_path)
     _require(os.path.isfile(path), "periodic Galerkin dataset is missing chunk: " + entry.relative_path)
@@ -258,6 +316,9 @@ def read_periodic_galerkin_dataset(directory):
     _require(selected_iq > 0 and selected_iq <= q_count and k_count > 0
              and nfrequency > 0 and primitive_count > 0 and raw_aux >= white_aux > 0,
              "invalid periodic Galerkin dimensions")
+    primitive_blocks = _read_primitive_blocks(
+        directory, provenance["primitive_blocks_sha256"], primitive_count
+    )
     _require(int(_one(scalar, "entry_count")) == len(entries),
              "periodic Galerkin manifest entry count mismatch")
     _require(set(frequencies) == set(range(nfrequency)),
@@ -407,5 +468,6 @@ def read_periodic_galerkin_dataset(directory):
         coulomb_metric=metric,
         coulomb_whitening=whitening,
         reference_response=reference_response,
+        primitive_blocks=primitive_blocks,
         kpoints=tuple(records),
     )

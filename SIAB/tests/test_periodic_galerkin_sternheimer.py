@@ -4,7 +4,11 @@ from dataclasses import replace
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
-from periodic_galerkin_data import PeriodicGalerkinDataset, PeriodicGalerkinKPoint
+from periodic_galerkin_data import (
+    PeriodicGalerkinDataset,
+    PeriodicGalerkinKPoint,
+    PeriodicGalerkinPrimitiveBlock,
+)
 from periodic_galerkin_sternheimer import evaluate_periodic_galerkin_response
 
 
@@ -53,6 +57,9 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
             coulomb_metric=torch.eye(1, dtype=torch.complex128),
             coulomb_whitening=torch.eye(1, dtype=torch.complex128),
             reference_response=torch.tensor([[[response]]], dtype=torch.complex128),
+            primitive_blocks=(
+                PeriodicGalerkinPrimitiveBlock("C", 0, 0, 0, 2, 0),
+            ),
             kpoints=(record,),
         )
         return dataset, delta, response

@@ -27,6 +27,9 @@ class PeriodicGalerkinDataTest(unittest.TestCase):
             self.assertEqual(data.primitive_count, 2)
             self.assertEqual(data.raw_auxiliary_dimension, 1)
             self.assertEqual(data.whitened_auxiliary_rank, 1)
+            self.assertEqual(len(data.primitive_blocks), 1)
+            self.assertEqual(data.primitive_blocks[0].element, "C")
+            self.assertEqual(data.primitive_blocks[0].n_primitive, 2)
             torch.testing.assert_close(
                 data.frequency_ha,
                 torch.tensor([0.25], dtype=torch.float64),
@@ -145,6 +148,12 @@ class PeriodicGalerkinDataTest(unittest.TestCase):
                 f"\t{path}\t{digest}"
             )
 
+        primitive_path = os.path.join(directory, "primitive_blocks.dat")
+        with open(primitive_path, "w", encoding="ascii") as handle:
+            handle.write("ABACUS_STERNHEIMER_BASIS_OPT_PRIMITIVES_V1\n")
+            handle.write("# element atom_index l m n_primitive offset\n")
+            handle.write("C 0 0 0 2 0\n")
+
         manifest = [
             "ABACUS_STERNHEIMER_BASIS_OPT_MANIFEST_V1",
             "abacus_commit " + "1" * 40,
@@ -152,7 +161,7 @@ class PeriodicGalerkinDataTest(unittest.TestCase):
             "orbital_sha256 " + "3" * 64,
             "pseudopotential_sha256 " + "4" * 64,
             "auxiliary_basis_sha256 " + "5" * 64,
-            "primitive_blocks_sha256 " + "7" * 64,
+            "primitive_blocks_sha256 " + self.sha256(primitive_path),
             "physics_hash " + "6" * 64,
             "kernel full_coulomb",
             "q_count 1",
