@@ -1420,6 +1420,70 @@ class MainRoutingTest(unittest.TestCase):
 
             assert_json_finite(rpa_payload)
 
+    def test_projected_pi_json_accepts_generic_family_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entries = []
+            pairs = []
+            audits = []
+            for family in ("C_atom", "C2"):
+                response = root / f"{family}_response.dat"
+                source = root / f"{family}_source.dat"
+                audit_path = root / f"{family}_audit.json"
+                response.write_text(f"{family} response\n")
+                source.write_text(f"{family} source\n")
+                audit_path.write_text(f"{family} audit\n")
+                entries.append(
+                    types.SimpleNamespace(
+                        family=family,
+                        path=response,
+                        source_path=source,
+                        zero_order_audit_path=audit_path,
+                    )
+                )
+                pairs.append(
+                    (
+                        family,
+                        types.SimpleNamespace(
+                            response=types.SimpleNamespace(provenance={}),
+                            source=types.SimpleNamespace(provenance={}),
+                            provenance_warnings=(),
+                        ),
+                    )
+                )
+                audits.append(
+                    (
+                        family,
+                        types.SimpleNamespace(
+                            passed=True,
+                            occupied_state_count=4,
+                            grid=(135, 135, 135),
+                            max_occupation_abs_diff=0.0,
+                            max_occupied_eigenvalue_abs_diff_ha=0.0,
+                            final_total_energy_abs_diff_ha=0.0,
+                            source_file_sha256=(("old_eig_occ", "1" * 64),),
+                        ),
+                    )
+                )
+
+            output = root / "PROJECTED_PI_METADATA.json"
+            siab_main._write_projected_pi_metadata(
+                output,
+                siab_main.LoadedSternheimerTargets(
+                    tuple(entries), (), tuple(pairs), tuple(audits)
+                ),
+                {
+                    "loss_components": PROJECTED_PI_COMPONENTS,
+                    "projected_pi_diagnostics": {
+                        "family_names": ["C_atom", "C2"],
+                        "families": {"C_atom": {}, "C2": {}},
+                    },
+                },
+            )
+
+            payload = json.loads(output.read_text())
+            self.assertEqual(set(payload["inputs"]), {"C_atom", "C2"})
+
     def test_rejects_targets_without_a_physical_family(self):
         target = {
             "path": "ghost.dat",

@@ -59,7 +59,7 @@ def _write_projected_pi_metadata(path, targets, data_transmit):
 	audits = dict(targets.zero_order_audits)
 	entries = {entry.family: entry for entry in targets.entries}
 	inputs = {}
-	for family in ("H", "H2"):
+	for family in (entry.family for entry in targets.entries):
 		entry = entries[family]
 		audit = audits[family]
 		pair = pairs[family]
