@@ -1,0 +1,52 @@
+{
+  "seed": 20260824,
+  "file_list": {
+    "sternheimer": ["REPLACED_BY_RUNNER"]
+  },
+  "element": {
+    "Nt_all": ["C"],
+    "Nu": {"C": [3, 3, 2, 1, 0]}
+  },
+  "weight": {},
+  "optimize": [
+    {
+      "optimizer": "Adam",
+      "kwargs": {"lr": 0.001},
+      "cal_T": false,
+      "norm": "element",
+      "max_steps": 3000
+    }
+  ],
+  "C_init_info": {
+    "init_from_file": true,
+    "C_init_file": "REPLACED_BY_RUNNER",
+    "opt_C_read": false
+  },
+  "V_info": {
+    "init_from_file": true,
+    "same_band": true
+  },
+  "radial": {
+    "Rcut": 10,
+    "dr": 0.01,
+    "Ecut": 100,
+    "smearing_sigma": 0.1
+  },
+  "freeze_orbitals": [
+    {"element": "C", "l": 0, "zeta": 1},
+    {"element": "C", "l": 0, "zeta": 2},
+    {"element": "C", "l": 1, "zeta": 1},
+    {"element": "C", "l": 1, "zeta": 2},
+    {"element": "C", "l": 2, "zeta": 1}
+  ],
+  "loss": {
+    "mode": "st_only",
+    "epsilon": 1e-14,
+    "condition_limit": 1e12,
+    "tau_dft": 0.05,
+    "tau_dpsi": 0.10,
+    "constraint_penalty_dft": 10.0,
+    "constraint_penalty_dpsi": 10.0,
+    "joint_dpsi_weight": 1.0
+  }
+}
