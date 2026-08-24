@@ -13,6 +13,7 @@ from periodic_galerkin_data import (
 from periodic_galerkin_sternheimer import (
     evaluate_periodic_galerkin_mother_response,
     evaluate_periodic_galerkin_response,
+    prepare_periodic_occupied_reference,
 )
 from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
@@ -262,6 +263,35 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
             dense.projected_response[0],
             rtol=1.0e-12,
             atol=1.0e-13,
+        )
+
+    def test_occupied_capture_is_measured_relative_to_the_mother_space(self):
+        dataset, _, expected_response = self.complete_two_level_dataset()
+        scale = 0.9998 ** 0.5
+        record = replace(
+            dataset.kpoints[0],
+            occupied_projection=torch.tensor(
+                [[scale, 0.0]], dtype=torch.complex128
+            ),
+        )
+        dataset = replace(dataset, kpoints=(record,))
+
+        with self.assertRaisesRegex(RuntimeError, "fixed occupied manifold"):
+            evaluate_periodic_galerkin_mother_response(dataset)
+
+        prepared = prepare_periodic_occupied_reference(dataset)
+        mother = evaluate_periodic_galerkin_mother_response(prepared)
+        candidate = evaluate_periodic_galerkin_response(
+            prepared, torch.eye(2, dtype=torch.complex128)
+        )
+
+        self.assertGreater(mother.minimum_occupied_capture, 1.0 - 1.0e-14)
+        self.assertGreater(candidate.minimum_occupied_capture, 1.0 - 1.0e-14)
+        torch.testing.assert_close(
+            candidate.response[0, 0, 0],
+            torch.tensor(expected_response, dtype=torch.complex128),
+            rtol=1.0e-14,
+            atol=1.0e-14,
         )
 
     def test_contracted_coefficient_response_equals_dense_response(self):

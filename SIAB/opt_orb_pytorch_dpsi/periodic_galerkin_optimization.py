@@ -136,7 +136,12 @@ def evaluate_periodic_galerkin_coefficient_response(
             operators.hamiltonian_ha
         ).matmul(lowdin)
         source = operators.source.matmul(lowdin)
-        occupied = operators.occupied_projection.matmul(lowdin)
+        occupied_projection = operators.occupied_projection
+        if record.occupied_projection_normalization is not None:
+            occupied_projection = record.occupied_projection_normalization.matmul(
+                occupied_projection
+            )
+        occupied = occupied_projection.matmul(lowdin)
 
         capture_matrix = occupied.matmul(_adjoint(occupied))
         capture = torch.linalg.eigvalsh(capture_matrix.detach())

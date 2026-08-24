@@ -6,6 +6,7 @@ from periodic_galerkin_basis import build_primitive_to_candidate
 from periodic_galerkin_sternheimer import (
     evaluate_periodic_galerkin_mother_response,
     evaluate_periodic_galerkin_response,
+    prepare_periodic_occupied_reference,
 )
 
 
@@ -60,6 +61,33 @@ def evaluate_periodic_basis_capacity(
         "primitive_count": dataset.primitive_count,
         "capacity_tolerance": float(mother_response_tolerance),
     }
+    try:
+        dataset = prepare_periodic_occupied_reference(
+            dataset,
+            relative_rank_tolerance=relative_rank_tolerance,
+            condition_limit=condition_limit,
+        )
+    except RuntimeError as error:
+        message = str(error)
+        mother.update({"capacity_gate": "FAIL", "error": message})
+        return {
+            "scope": (
+                "periodic Galerkin capacity gate; not an independent SOS or "
+                "Delta-ST energy validation"
+            ),
+            "physics_hash": dataset.physics_hash,
+            "selected_iq": dataset.selected_iq,
+            "qpoint": list(dataset.qpoint),
+            "frequency_ha": [float(value) for value in dataset.frequency_ha],
+            "candidate": {
+                "ao_count": int(candidate_basis.transform.shape[1]),
+                "nu": _coefficient_counts(coefficients),
+                "evaluation_gate": "FAIL",
+                "error": "mother-space occupied reference unavailable: " + message,
+            },
+            "mother": mother,
+            "optimization_allowed": False,
+        }
     try:
         mother_result = evaluate_periodic_galerkin_mother_response(
             dataset,

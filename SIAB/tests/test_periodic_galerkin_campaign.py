@@ -29,6 +29,33 @@ class PeriodicGalerkinCampaignTest(unittest.TestCase):
         self.assertEqual(report["mother"]["minimum_effective_rank"], 2)
         self.assertEqual(report["mother"]["capacity_gate"], "PASS")
 
+    def test_capacity_gate_measures_occupied_capture_relative_to_mother(self):
+        dataset, _, _ = PeriodicGalerkinSternheimerTest().complete_two_level_dataset()
+        scale = 0.9998 ** 0.5
+        record = replace(
+            dataset.kpoints[0],
+            occupied_projection=torch.tensor(
+                [[scale, 0.0]], dtype=torch.complex128
+            ),
+        )
+        dataset = replace(dataset, kpoints=(record,))
+
+        report = evaluate_periodic_basis_capacity(
+            dataset,
+            {"C": [torch.eye(2, dtype=torch.float64)]},
+            mother_response_tolerance=1.0e-10,
+        )
+
+        self.assertEqual(report["mother"]["capacity_gate"], "PASS")
+        self.assertEqual(report["candidate"]["evaluation_gate"], "PASS")
+        self.assertGreater(
+            report["mother"]["minimum_occupied_capture"], 1.0 - 1.0e-14
+        )
+        self.assertGreater(
+            report["candidate"]["minimum_occupied_capture"], 1.0 - 1.0e-14
+        )
+        self.assertTrue(report["optimization_allowed"])
+
     def test_mother_capacity_gate_rejects_incomplete_primitive_space(self):
         dataset, _, _ = PeriodicGalerkinSternheimerTest().complete_two_level_dataset()
         dataset = dataset.__class__(

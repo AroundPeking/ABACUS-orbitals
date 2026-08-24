@@ -1,6 +1,6 @@
 """Fixed-occupied Galerkin Sternheimer response for periodic SIAB bases."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Tuple
 
@@ -112,6 +112,84 @@ def evaluate_periodic_galerkin_mother_response(
     )
 
 
+def prepare_periodic_occupied_reference(
+    dataset,
+    *,
+    relative_rank_tolerance=1.0e-12,
+    condition_limit=1.0e12,
+):
+    """Normalize occupied-capture gates to the finite Bessel mother space.
+
+    The left normalization is invertible within the occupied manifold, so it
+    leaves the occupied span and the Sternheimer virtual projector unchanged.
+    """
+    _validate_dataset(dataset)
+    relative_rank_tolerance = _finite_positive(
+        "relative_rank_tolerance", relative_rank_tolerance
+    )
+    condition_limit = _finite_positive("condition_limit", condition_limit)
+    if relative_rank_tolerance >= 1.0 or condition_limit < 1.0:
+        raise ValueError("occupied-reference tolerances are invalid")
+    prepared = tuple(
+        record.occupied_projection_normalization is not None
+        for record in dataset.kpoints
+    )
+    if all(prepared):
+        return dataset
+    if any(prepared):
+        raise ValueError("periodic dataset has partially prepared occupied references")
+
+    records = []
+    with torch.no_grad():
+        for record in dataset.kpoints:
+            overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(
+                record.overlap
+            )
+            maximum = torch.max(overlap_eigenvalue)
+            if float(maximum) <= 0.0:
+                raise RuntimeError("Bessel mother overlap has no positive direction")
+            retained = overlap_eigenvalue > relative_rank_tolerance * maximum
+            retained_eigenvalue = overlap_eigenvalue[retained]
+            condition = float(maximum / torch.min(retained_eigenvalue))
+            if condition > condition_limit:
+                raise RuntimeError("Bessel mother overlap condition number exceeds limit")
+            lowdin = overlap_eigenvector[:, retained].matmul(
+                torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
+            )
+            occupied = record.occupied_projection.matmul(lowdin)
+            capture = occupied.matmul(_adjoint(occupied))
+            capture = 0.5 * (capture + _adjoint(capture))
+            capture_eigenvalue, capture_eigenvector = torch.linalg.eigh(capture)
+            capture_maximum = torch.max(capture_eigenvalue)
+            if (
+                capture_eigenvalue.numel() != record.occupation.numel()
+                or float(capture_maximum) <= 0.0
+                or bool(
+                    torch.any(
+                        capture_eigenvalue
+                        <= relative_rank_tolerance * capture_maximum
+                    )
+                )
+            ):
+                raise RuntimeError(
+                    "Bessel mother space does not capture the fixed occupied manifold"
+                )
+            if retained_eigenvalue.numel() <= record.occupation.numel():
+                raise RuntimeError("Bessel mother space has no virtual complement")
+            normalization = (
+                capture_eigenvector
+                .matmul(torch.diag(capture_eigenvalue.rsqrt()).to(torch.complex128))
+                .matmul(_adjoint(capture_eigenvector))
+            )
+            records.append(
+                replace(
+                    record,
+                    occupied_projection_normalization=normalization,
+                )
+            )
+    return replace(dataset, kpoints=tuple(records))
+
+
 def _evaluate_periodic_galerkin_response(
     dataset,
     transform,
@@ -145,6 +223,10 @@ def _evaluate_periodic_galerkin_response(
             hamiltonian = _adjoint(transform).matmul(record.hamiltonian_ha).matmul(transform)
             source_candidate = record.source.matmul(transform)
             occupied_candidate = record.occupied_projection.matmul(transform)
+        if record.occupied_projection_normalization is not None:
+            occupied_candidate = record.occupied_projection_normalization.matmul(
+                occupied_candidate
+            )
         overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
         maximum = torch.max(overlap_eigenvalue)
         if float(maximum.detach()) <= 0.0:

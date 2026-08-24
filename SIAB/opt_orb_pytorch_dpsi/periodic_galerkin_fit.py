@@ -9,6 +9,7 @@ from periodic_galerkin_data import PeriodicGalerkinDataset
 from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
 )
+from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,7 @@ def optimize_periodic_galerkin_basis(
     ):
         raise ValueError("optimization step and plateau controls are invalid")
     fixed, variable, parameters = _validate_inputs(datasets, initial, fixed_nu)
+    datasets = tuple(prepare_periodic_occupied_reference(dataset) for dataset in datasets)
     if progress_callback is not None and not callable(progress_callback):
         raise ValueError("progress_callback must be callable")
     _retract_variables(fixed, variable)
