@@ -9,6 +9,7 @@ from periodic_galerkin_basis import (
     build_primitive_to_candidate,
     contract_periodic_candidate_operators,
     read_periodic_optimizer_coefficients,
+    write_periodic_optimizer_coefficients,
 )
 from periodic_galerkin_data import (
     PeriodicGalerkinKPoint,
@@ -177,6 +178,27 @@ Left spillage = 0.0
             contracted.occupied_projection,
             occupied.matmul(dense),
         )
+
+    def test_periodic_coefficient_writer_round_trips_native_format(self):
+        coefficients = {
+            "C": [
+                torch.tensor([[1.0], [2.0]], dtype=torch.float64),
+                torch.empty((2, 0), dtype=torch.float64),
+                torch.tensor([[3.0], [4.0]], dtype=torch.float64),
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ORBITAL_RESULTS.txt"
+            write_periodic_optimizer_coefficients(path, coefficients)
+            restored = read_periodic_optimizer_coefficients(
+                path,
+                element="C",
+                radial_rows=2,
+                expected_nu=(1, 0, 1),
+            )
+
+        for original, recovered in zip(coefficients["C"], restored["C"]):
+            self.assertTrue(torch.equal(original, recovered))
 
 
 if __name__ == "__main__":

@@ -156,6 +156,59 @@ def read_periodic_optimizer_coefficients(
     return {element: channels}
 
 
+def write_periodic_optimizer_coefficients(path, coefficients):
+    """Write finite float64 coefficients in SIAB's native text format."""
+    if not isinstance(coefficients, dict) or not coefficients:
+        raise ValueError("coefficients must be a nonempty dictionary")
+    columns = []
+    for element in sorted(coefficients):
+        if not isinstance(element, str) or not element:
+            raise ValueError("coefficient element must be nonempty")
+        channels = coefficients[element]
+        if not isinstance(channels, (list, tuple)) or not channels:
+            raise ValueError("coefficient channels must be a nonempty sequence")
+        for l, channel in enumerate(channels):
+            if (
+                not isinstance(channel, torch.Tensor)
+                or channel.device.type != "cpu"
+                or channel.dtype != torch.float64
+                or channel.ndim != 2
+                or channel.shape[0] <= 0
+                or not bool(torch.isfinite(channel).all())
+            ):
+                raise ValueError("coefficient channels must be finite CPU float64 matrices")
+            for zeta in range(channel.shape[1]):
+                columns.append((element, l, zeta + 1, channel[:, zeta]))
+    if not columns:
+        raise ValueError("coefficients define no radial orbital")
+
+    output = [
+        "<Coefficient>",
+        "\t {} Total number of radial orbitals.".format(len(columns)),
+    ]
+    for element, l, zeta, column in columns:
+        output.extend(
+            (
+                "\tType\tL\tZeta-Orbital",
+                "\t  {} \t{}\t    {}".format(element, l, zeta),
+            )
+        )
+        output.extend("\t {:.17e}".format(float(value)) for value in column)
+    output.extend(
+        (
+            "</Coefficient>",
+            "<Mkb>",
+            "Left spillage = 0.0000000000e+00",
+            "</Mkb>",
+            "",
+        )
+    )
+    path = Path(path)
+    if path.exists():
+        raise FileExistsError(path)
+    path.write_text("\n".join(output), encoding="ascii")
+
+
 def build_primitive_to_candidate(primitive_blocks, primitive_count, coefficients):
     """Expand element-shared radial coefficients over every atom and m block."""
     if not isinstance(primitive_blocks, tuple) or not primitive_blocks:

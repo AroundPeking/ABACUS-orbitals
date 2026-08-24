@@ -214,17 +214,32 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
             dataset,
             torch.eye(2, dtype=torch.complex128),
         )
-        contracted = evaluate_periodic_galerkin_coefficient_response(
+        coefficient_dense = evaluate_periodic_galerkin_coefficient_response(
             dataset,
             coefficients,
         )
+        coefficient_block = evaluate_periodic_galerkin_coefficient_response(
+            dataset,
+            coefficients,
+            contraction_backend="block",
+        )
 
-        torch.testing.assert_close(contracted.response, dense.response)
+        torch.testing.assert_close(coefficient_dense.response, dense.response)
+        torch.testing.assert_close(coefficient_block.response, dense.response)
         torch.testing.assert_close(
-            contracted.relative_response_error,
+            coefficient_dense.relative_response_error,
             dense.relative_response_error,
         )
-        self.assertEqual(contracted.minimum_candidate_rank, 2)
+        self.assertEqual(coefficient_dense.minimum_candidate_rank, 2)
+
+    def test_rejects_unknown_contraction_backend(self):
+        dataset, _, _ = self.complete_two_level_dataset()
+        with self.assertRaisesRegex(ValueError, "contraction_backend"):
+            evaluate_periodic_galerkin_coefficient_response(
+                dataset,
+                {"C": [torch.eye(2, dtype=torch.float64)]},
+                contraction_backend="sparse",
+            )
 
     def test_contracted_response_preserves_radial_coefficient_gradient(self):
         dataset, _, _ = self.complete_two_level_dataset()
