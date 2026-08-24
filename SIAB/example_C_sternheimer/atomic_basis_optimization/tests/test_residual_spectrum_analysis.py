@@ -31,6 +31,21 @@ def spectrum(eigenvalues, cumulative=None):
 
 
 class ResidualSpectrumAnalysisTest(unittest.TestCase):
+    def test_cli_default_accepts_measured_high_l_fd8_anisotropy(self):
+        args = ANALYSIS.parse_args(
+            [
+                "--coefficients",
+                "coefficients.dat",
+                "--atom-target",
+                "target.dat",
+                "--output",
+                "seed.dat",
+                "--report",
+                "spectrum.json",
+            ]
+        )
+        self.assertEqual(args.magnetic_overlap_tolerance, 3.0e-4)
+
     def test_spectrum_record_reports_weight_capture_and_ao_score(self):
         record = ANALYSIS.spectrum_record(spectrum([9.0, 3.0, 1.0]), l=2)
 

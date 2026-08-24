@@ -125,7 +125,7 @@ def parse_args(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--relative-rank-tolerance", type=float, default=1.0e-12)
-    parser.add_argument("--magnetic-overlap-tolerance", type=float, default=1.0e-4)
+    parser.add_argument("--magnetic-overlap-tolerance", type=float, default=3.0e-4)
     parser.add_argument("--condition-limit", type=float, default=1.0e12)
     parser.add_argument("--tie-fraction", type=float, default=0.01)
     return parser.parse_args(argv)

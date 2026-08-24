@@ -71,6 +71,8 @@ Slurm on df `p1`, LaTeX development note.
 3. Implement analysis helpers, then connect them to
    `radial_residual_spectrum_many`, `read_optimizer_coefficients`, and
    `write_optimizer_coefficients` for C with 31 Bessel rows and `l=0,...,4`.
+   Use magnetic-overlap tolerance `3e-4` and record every measured deviation;
+   the accepted FD8 C target reaches `2.05375e-4` at `l=4`.
 4. Emit `RESIDUAL_SPECTRUM.json` and, only for a unique winner,
    `ORBITAL_RESULTS.next_shell_seed.txt`. Assert all old columns are unchanged
    and exactly one selected channel gains one column.

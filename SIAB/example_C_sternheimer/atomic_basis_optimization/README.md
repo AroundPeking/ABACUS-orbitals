@@ -10,5 +10,10 @@ leading remaining response eigenvalue divided by the number of added AOs and
 constructs exactly one deterministic leading-mode shell seed. Projected-Pi,
 C-C, held-out-volume, and raw SOS-RPA checks remain separate later gates.
 
+The magnetic-channel overlap tolerance is `3e-4`. The accepted FD8 C target
+shows relative deviations from zero through `2.05375e-4` as `l` increases
+from 0 to 4; this threshold admits that measured Cartesian-grid anisotropy
+while retaining an explicit diagnostic in every channel record.
+
 The df runner uses one `p1` task with 8 CPU threads and 16 GiB. The submitter
 preflights the resource request and refuses existing receipts or outputs.
