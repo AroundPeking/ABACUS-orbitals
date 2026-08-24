@@ -26,9 +26,10 @@ OUTPUT="$CAMPAIGN_ROOT/runs/atomic_gradient_gate_df"
 
 test "$(cd "$REPO_ROOT" && git rev-parse HEAD)" = "$EXPECTED_SOURCE_COMMIT"
 for path in "$GATE_DIR/atomic_optimization_gate.py" "$OPTIMIZER" \
-  "$COEFFICIENTS" "$ORBITAL" "$TARGET" "$PYTHON_EXE"; do
+  "$COEFFICIENTS" "$ORBITAL" "$TARGET"; do
   test -f "$path" && test ! -L "$path" && test -s "$path"
 done
+test -x "$PYTHON_EXE"
 test ! -e "$OUTPUT/ATOMIC_GRADIENT_GATE_RESULT.json"
 if test -d "$OUTPUT" && test -n "$(find "$OUTPUT" -mindepth 1 -maxdepth 1 -print -quit)"; then
   echo "refusing nonempty output directory: $OUTPUT" >&2

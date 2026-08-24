@@ -136,9 +136,11 @@ class AtomicOptimizationGateTest(unittest.TestCase):
             "#SBATCH --exclusive",
             "#SBATCH --time=UNLIMITED",
             "export OMP_MAX_ACTIVE_LEVELS=1",
+            'test -x "$PYTHON_EXE"',
         ):
             self.assertIn(marker, text)
         self.assertNotIn("debug", text.lower())
+        self.assertNotIn('"$ORBITAL" "$TARGET" "$PYTHON_EXE"', text)
 
     def test_df_submitter_requires_zero_elapsed_server66_migration(self):
         text = (HERE.parent / "submit_atomic_gradient_gate_df.sh").read_text(
