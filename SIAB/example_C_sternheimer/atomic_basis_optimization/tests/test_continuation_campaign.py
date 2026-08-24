@@ -195,6 +195,12 @@ class ContinuationCampaignTest(unittest.TestCase):
         text = (CAMPAIGN_DIR / "submit_tzdp_continuation_df.sh").read_text(
             encoding="ascii"
         )
+        self.assertIn('for path in "$SCRIPT" "$TARGET" "$CHECKPOINT"; do', text)
+        self.assertNotIn(
+            'for path in "$SCRIPT" "$TARGET" "$CHECKPOINT" "$PYTHON_EXE"; do',
+            text,
+        )
+        self.assertIn('test -x "$PYTHON_EXE"', text)
         self.assertIn('test ! -e "$RECEIPT"', text)
         self.assertIn('test ! -e "$RESULT"', text)
         self.assertIn('test ! -e "$SPECTRUM"', text)

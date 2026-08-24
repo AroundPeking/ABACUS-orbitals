@@ -12,7 +12,7 @@ RECEIPT="$CAMPAIGN_ROOT/TZDP_CONTINUATION_DF_JOB_ID.txt"
 RESULT="$CAMPAIGN_ROOT/runs/tzdp_continuation/TZDP_CONTINUATION_RESULT.json"
 SPECTRUM="$CAMPAIGN_ROOT/runs/tzdp_continuation/RESIDUAL_SPECTRUM.json"
 
-for path in "$SCRIPT" "$TARGET" "$CHECKPOINT" "$PYTHON_EXE"; do
+for path in "$SCRIPT" "$TARGET" "$CHECKPOINT"; do
   test -e "$path" && test ! -L "$path"
 done
 test -x "$PYTHON_EXE"
