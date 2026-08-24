@@ -185,29 +185,68 @@ def _evaluate_periodic_galerkin_response(
             raise RuntimeError("candidate fixed occupied manifold is rank deficient")
 
         occupied_vectors = _adjoint(occupied_orthonormal)
-        occupied_frame, _ = torch.linalg.qr(occupied_vectors, mode="reduced")
+        if allow_rank_reduction:
+            complete_frame, _ = torch.linalg.qr(occupied_vectors, mode="complete")
+            occupied_frame = complete_frame[:, :noccupied]
+            virtual_frame = complete_frame[:, noccupied:]
+        else:
+            occupied_frame, _ = torch.linalg.qr(occupied_vectors, mode="reduced")
+            virtual_frame = None
         occupied_projector = occupied_frame.matmul(_adjoint(occupied_frame))
         identity = torch.eye(effective_count, dtype=torch.complex128)
         virtual_projector = identity - occupied_projector
+        if virtual_frame is not None:
+            virtual_hamiltonian = (
+                _adjoint(virtual_frame)
+                .matmul(hamiltonian_orthonormal)
+                .matmul(virtual_frame)
+            )
+            virtual_hamiltonian = 0.5 * (
+                virtual_hamiltonian + _adjoint(virtual_hamiltonian)
+            )
+            virtual_eigenvalue, virtual_eigenvector = torch.linalg.eigh(
+                virtual_hamiltonian
+            )
+            spectral_frame = virtual_frame.matmul(virtual_eigenvector)
+        else:
+            virtual_eigenvalue = None
+            spectral_frame = None
         per_frequency_projection = []
 
         for ifrequency, frequency in enumerate(dataset.frequency_ha):
             band_projection = []
             for ib in range(noccupied):
-                shifted = (
-                    hamiltonian_orthonormal
-                    - record.source_eigenvalue_ha[ib] * identity
-                    + 1.0j * frequency * identity
-                )
-                system = (
-                    virtual_projector.matmul(shifted).matmul(virtual_projector)
-                    + occupied_projector
-                )
-                right_hand_side = -virtual_projector.matmul(
-                    _adjoint(source_orthonormal[ib])
-                )
-                response_orthonormal = torch.linalg.solve(system, right_hand_side)
-                response_orthonormal = virtual_projector.matmul(response_orthonormal)
+                if spectral_frame is None:
+                    shifted = (
+                        hamiltonian_orthonormal
+                        - record.source_eigenvalue_ha[ib] * identity
+                        + 1.0j * frequency * identity
+                    )
+                    system = (
+                        virtual_projector.matmul(shifted).matmul(virtual_projector)
+                        + occupied_projector
+                    )
+                    right_hand_side = -virtual_projector.matmul(
+                        _adjoint(source_orthonormal[ib])
+                    )
+                    response_orthonormal = torch.linalg.solve(
+                        system, right_hand_side
+                    )
+                    response_orthonormal = virtual_projector.matmul(
+                        response_orthonormal
+                    )
+                else:
+                    right_hand_side = -_adjoint(spectral_frame).matmul(
+                        _adjoint(source_orthonormal[ib])
+                    )
+                    denominator = (
+                        virtual_eigenvalue
+                        - record.source_eigenvalue_ha[ib]
+                        + 1.0j * frequency
+                    )
+                    response_orthonormal = spectral_frame.matmul(
+                        right_hand_side / denominator[:, None]
+                    )
                 response_candidate = lowdin.matmul(response_orthonormal)
                 response_primitive = (
                     response_candidate

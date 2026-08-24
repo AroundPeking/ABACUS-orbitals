@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 import torch
 
@@ -205,6 +206,63 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
         )
         self.assertEqual(result.minimum_candidate_rank, 2)
         self.assertLess(float(result.relative_response_error), 1.0e-14)
+
+    def test_mother_response_uses_one_virtual_spectral_resolvent(self):
+        dataset, _, expected_response = self.complete_two_level_dataset()
+
+        with mock.patch.object(
+            torch.linalg,
+            "solve",
+            side_effect=AssertionError("mother response called dense solve"),
+        ):
+            result = evaluate_periodic_galerkin_mother_response(dataset)
+
+        torch.testing.assert_close(
+            result.response[0, 0, 0],
+            torch.tensor(expected_response, dtype=torch.complex128),
+            rtol=1.0e-14,
+            atol=1.0e-14,
+        )
+
+    def test_mother_spectral_response_matches_dense_complex_virtual_system(self):
+        dataset, _, _ = self.complete_two_level_dataset()
+        record = replace(
+            dataset.kpoints[0],
+            overlap=torch.eye(3, dtype=torch.complex128),
+            hamiltonian_ha=torch.tensor(
+                [
+                    [-0.5, 0.0, 0.0],
+                    [0.0, 0.7, 0.2 + 0.1j],
+                    [0.0, 0.2 - 0.1j, 1.4],
+                ],
+                dtype=torch.complex128,
+            ),
+            occupied_projection=torch.tensor(
+                [[1.0, 0.0, 0.0]], dtype=torch.complex128
+            ),
+            source=torch.tensor(
+                [[[0.0, 0.3 + 0.1j, 0.2 - 0.05j]]], dtype=torch.complex128
+            ),
+            reference_projection=torch.zeros(
+                (1, 1, 1, 3), dtype=torch.complex128
+            ),
+        )
+        dataset = replace(dataset, primitive_count=3, kpoints=(record,))
+
+        dense = evaluate_periodic_galerkin_response(
+            dataset, torch.eye(3, dtype=torch.complex128)
+        )
+        spectral = evaluate_periodic_galerkin_mother_response(dataset)
+
+        torch.testing.assert_close(
+            spectral.response, dense.response, rtol=1.0e-12, atol=1.0e-13
+        )
+        torch.testing.assert_close(
+            spectral.projected_response[0],
+            dense.projected_response[0],
+            rtol=1.0e-12,
+            atol=1.0e-13,
+        )
 
     def test_contracted_coefficient_response_equals_dense_response(self):
         dataset, _, _ = self.complete_two_level_dataset()
