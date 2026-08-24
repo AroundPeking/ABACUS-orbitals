@@ -137,6 +137,7 @@ class AtomicOptimizationGateTest(unittest.TestCase):
             "#SBATCH --time=UNLIMITED",
             "export OMP_MAX_ACTIVE_LEVELS=1",
             'test -x "$PYTHON_EXE"',
+            "/usr/bin/git rev-parse HEAD",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("debug", text.lower())
