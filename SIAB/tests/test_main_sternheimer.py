@@ -586,13 +586,97 @@ class MainRoutingTest(unittest.TestCase):
             ]
         )
 
+    def test_loads_generic_projected_pi_families_in_declaration_order(self):
+        targets = self.projected_pi_targets()
+        targets[0] = {**targets[0], "family": "C_atom"}
+        targets[1] = {**targets[1], "family": "C2"}
+        responses = ("C atom response", "C2 response")
+        sources = ("C atom source", "C2 source")
+        pairs = ("C atom pair", "C2 pair")
+        audits = ("C atom audit", "C2 audit")
+        with mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            side_effect=responses,
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer_source,
+            "read_sternheimer_source",
+            side_effect=sources,
+        ), mock.patch.object(
+            siab_main,
+            "apply_target_element_aliases",
+            side_effect=lambda data, entry: data,
+        ), mock.patch.object(
+            siab_main,
+            "pair_response_and_source",
+            side_effect=pairs,
+        ), mock.patch.object(
+            siab_main,
+            "read_zero_order_audit",
+            side_effect=audits,
+        ):
+            loaded, _ = siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": {"mode": "pi_dpsi_joint"}}],
+            )
+
+        self.assertEqual(
+            tuple(name for name, _ in loaded.projected_pi_pairs),
+            ("C_atom", "C2"),
+        )
+        self.assertEqual(
+            tuple(family.name for family in loaded.families),
+            ("C_atom", "C2"),
+        )
+        self.assertEqual(
+            tuple(name for name, _ in loaded.zero_order_audits),
+            ("C_atom", "C2"),
+        )
+
+    def test_preserves_reversed_generic_projected_pi_family_order(self):
+        targets = self.projected_pi_targets()
+        targets[0] = {**targets[0], "family": "C_atom"}
+        targets[1] = {**targets[1], "family": "C2"}
+        targets.reverse()
+        with mock.patch.object(
+            siab_main.IO.read_sternheimer,
+            "read_sternheimer",
+            side_effect=("C2 response", "C atom response"),
+        ), mock.patch.object(
+            siab_main.IO.read_sternheimer_source,
+            "read_sternheimer_source",
+            side_effect=("C2 source", "C atom source"),
+        ), mock.patch.object(
+            siab_main,
+            "apply_target_element_aliases",
+            side_effect=lambda data, entry: data,
+        ), mock.patch.object(
+            siab_main,
+            "pair_response_and_source",
+            side_effect=("C2 pair", "C atom pair"),
+        ), mock.patch.object(
+            siab_main,
+            "read_zero_order_audit",
+            side_effect=("C2 audit", "C atom audit"),
+        ):
+            loaded, _ = siab_main._load_sternheimer_data(
+                {"sternheimer": targets},
+                [{"loss": {"mode": "pi_dpsi_joint"}}],
+            )
+
+        self.assertEqual(
+            tuple(name for name, _ in loaded.projected_pi_pairs),
+            ("C2", "C_atom"),
+        )
+
     def test_projected_pi_rejects_incomplete_or_nonphysical_targets(self):
         targets = self.projected_pi_targets()
         invalid_campaigns = (
             ([{key: value for key, value in targets[0].items() if key != "source_path"}, targets[1]], "source_path"),
             ([{key: value for key, value in targets[0].items() if key != "zero_order_audit_path"}, targets[1]], "zero_order_audit_path"),
-            ([targets[0]], "one H and one H2"),
-            ([targets[0], {**targets[1], "family": "H"}], "one H and one H2"),
+            ([targets[0]], "exactly two unique"),
+            ([targets[0], {**targets[1], "family": "H"}], "exactly two unique"),
+            ([targets[0], targets[1], {**targets[1], "family": "third"}], "exactly two unique"),
             ([targets[0], {**targets[1], "role": "ghost", "source_path": None, "zero_order_audit_path": None}], "ghost"),
         )
         for campaign, message in invalid_campaigns:
@@ -668,7 +752,7 @@ class MainRoutingTest(unittest.TestCase):
             ]
         )
 
-    def test_rpa_sensitive_loader_requires_exactly_h_and_h2(self):
+    def test_rpa_sensitive_loader_requires_exactly_two_families(self):
         with mock.patch.object(
             siab_main,
             "normalize_loss_config",
@@ -677,13 +761,13 @@ class MainRoutingTest(unittest.TestCase):
             siab_main.IO.read_sternheimer,
             "read_sternheimer",
             return_value="loaded",
-        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+        ), self.assertRaisesRegex(ValueError, "exactly two unique"):
             siab_main._load_sternheimer_data(
                 {"sternheimer": [self.projected_pi_targets()[0]]},
                 [{"loss": self.rpa_sensitive_loss()}],
             )
 
-    def test_rpa_sensitive_loader_rejects_duplicate_h(self):
+    def test_rpa_sensitive_loader_rejects_duplicate_first_family(self):
         targets = self.projected_pi_targets()
         targets[1] = {**targets[1], "family": "H"}
         with mock.patch.object(
@@ -694,13 +778,13 @@ class MainRoutingTest(unittest.TestCase):
             siab_main.IO.read_sternheimer,
             "read_sternheimer",
             return_value="loaded",
-        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+        ), self.assertRaisesRegex(ValueError, "exactly two unique"):
             siab_main._load_sternheimer_data(
                 {"sternheimer": targets},
                 [{"loss": self.rpa_sensitive_loss()}],
             )
 
-    def test_rpa_sensitive_loader_rejects_duplicate_h2(self):
+    def test_rpa_sensitive_loader_rejects_duplicate_second_family(self):
         targets = self.projected_pi_targets()
         targets[0] = {**targets[0], "family": "H2"}
         with mock.patch.object(
@@ -711,7 +795,7 @@ class MainRoutingTest(unittest.TestCase):
             siab_main.IO.read_sternheimer,
             "read_sternheimer",
             return_value="loaded",
-        ), self.assertRaisesRegex(ValueError, "exactly one H and one H2"):
+        ), self.assertRaisesRegex(ValueError, "exactly two unique"):
             siab_main._load_sternheimer_data(
                 {"sternheimer": targets},
                 [{"loss": self.rpa_sensitive_loss()}],

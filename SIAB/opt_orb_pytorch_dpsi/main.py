@@ -155,22 +155,21 @@ def _load_sternheimer_data(file_list, info_optimize):
 						f"{projected_pi_label} target "
 						f"{entry.family} requires zero_order_audit_path"
 					)
-			family_names = [entry.family for entry in entries]
+			family_names = tuple(entry.family for entry in entries)
 			if (
 				len(entries) != 2
 				or len(set(family_names)) != 2
-				or set(family_names) != {"H", "H2"}
+				or any(not name for name in family_names)
 			):
 				raise ValueError(
-					f"{projected_pi_label} requires exactly one H and one H2 target"
+					f"{projected_pi_label} requires exactly two unique physical families"
 				)
 
 			response_by_family = {}
 			pairs = []
 			audits = []
-			entry_by_family = {entry.family: entry for entry in entries}
-			for family in ("H", "H2"):
-				entry = entry_by_family[family]
+			for entry in entries:
+				family = entry.family
 				response = apply_target_element_aliases(
 					IO.read_sternheimer.read_sternheimer(entry.path), entry
 				)
@@ -189,7 +188,7 @@ def _load_sternheimer_data(file_list, info_optimize):
 				audits.append((family, audit))
 			families = tuple(
 				ResponseTargetFamily(name, (response_by_family[name],), "physical")
-				for name in ("H", "H2")
+				for name in family_names
 			)
 			return LoadedSternheimerTargets(
 				entries,
