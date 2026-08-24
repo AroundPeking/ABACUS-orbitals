@@ -18,6 +18,7 @@ class PeriodicGalerkinResponseResult:
     relative_projection_error: torch.Tensor
     minimum_occupied_capture: float
     maximum_overlap_condition: float
+    minimum_candidate_rank: int
 
 
 def _adjoint(value):
@@ -49,8 +50,7 @@ def evaluate_periodic_galerkin_response(
     occupied projector and source eigenvalues are never rediagonalized in the
     candidate space.
     """
-    if not isinstance(dataset, PeriodicGalerkinDataset):
-        raise ValueError("dataset must be a PeriodicGalerkinDataset")
+    _validate_dataset(dataset)
     if not isinstance(primitive_to_candidate, torch.Tensor):
         raise ValueError("primitive_to_candidate must be a torch.Tensor")
     if primitive_to_candidate.device.type != "cpu" or primitive_to_candidate.ndim != 2:
@@ -63,19 +63,64 @@ def evaluate_periodic_galerkin_response(
         raise ValueError("candidate basis must be nonempty")
     if not bool(torch.isfinite(primitive_to_candidate).all()):
         raise ValueError("primitive_to_candidate contains non-finite values")
-    relative_rank_tolerance = _finite_positive(
-        "relative_rank_tolerance", relative_rank_tolerance
+    relative_rank_tolerance, condition_limit, occupied_capture_tolerance = (
+        _validate_tolerances(
+            relative_rank_tolerance,
+            condition_limit,
+            occupied_capture_tolerance,
+        )
     )
-    condition_limit = _finite_positive("condition_limit", condition_limit)
-    occupied_capture_tolerance = _finite_positive(
-        "occupied_capture_tolerance", occupied_capture_tolerance
-    )
-    if relative_rank_tolerance >= 1.0 or occupied_capture_tolerance >= 1.0:
-        raise ValueError("relative tolerances must be less than one")
-    if condition_limit < 1.0:
-        raise ValueError("condition_limit must be at least one")
 
-    transform = primitive_to_candidate.to(torch.complex128)
+    return _evaluate_periodic_galerkin_response(
+        dataset,
+        primitive_to_candidate.to(torch.complex128),
+        relative_rank_tolerance=relative_rank_tolerance,
+        condition_limit=condition_limit,
+        occupied_capture_tolerance=occupied_capture_tolerance,
+        allow_rank_reduction=False,
+    )
+
+
+def evaluate_periodic_galerkin_mother_response(
+    dataset,
+    *,
+    relative_rank_tolerance=1.0e-12,
+    condition_limit=1.0e12,
+    occupied_capture_tolerance=1.0e-6,
+):
+    """Evaluate the complete primitive span after removing numerical nulls.
+
+    This diagnostic establishes the best response available in the exported
+    Bessel mother space.  Candidate-basis optimization remains strict and does
+    not silently remove dependent candidate AOs.
+    """
+    _validate_dataset(dataset)
+    relative_rank_tolerance, condition_limit, occupied_capture_tolerance = (
+        _validate_tolerances(
+            relative_rank_tolerance,
+            condition_limit,
+            occupied_capture_tolerance,
+        )
+    )
+    return _evaluate_periodic_galerkin_response(
+        dataset,
+        None,
+        relative_rank_tolerance=relative_rank_tolerance,
+        condition_limit=condition_limit,
+        occupied_capture_tolerance=occupied_capture_tolerance,
+        allow_rank_reduction=True,
+    )
+
+
+def _evaluate_periodic_galerkin_response(
+    dataset,
+    transform,
+    *,
+    relative_rank_tolerance,
+    condition_limit,
+    occupied_capture_tolerance,
+    allow_rank_reduction,
+):
     nfrequency = dataset.frequency_ha.shape[0]
     nauxiliary = dataset.whitened_auxiliary_rank
     response_half = torch.zeros(
@@ -84,32 +129,46 @@ def evaluate_periodic_galerkin_response(
     projected_response = []
     minimum_occupied_capture = math.inf
     maximum_overlap_condition = 1.0
+    minimum_candidate_rank = dataset.primitive_count
 
     for record in dataset.kpoints:
         noccupied = record.occupation.shape[0]
-        candidate_count = transform.shape[1]
-
-        overlap = _adjoint(transform).matmul(record.overlap).matmul(transform)
-        hamiltonian = _adjoint(transform).matmul(record.hamiltonian_ha).matmul(transform)
+        if transform is None:
+            candidate_count = dataset.primitive_count
+            overlap = record.overlap
+            hamiltonian = record.hamiltonian_ha
+            source_candidate = record.source
+            occupied_candidate = record.occupied_projection
+        else:
+            candidate_count = transform.shape[1]
+            overlap = _adjoint(transform).matmul(record.overlap).matmul(transform)
+            hamiltonian = _adjoint(transform).matmul(record.hamiltonian_ha).matmul(transform)
+            source_candidate = record.source.matmul(transform)
+            occupied_candidate = record.occupied_projection.matmul(transform)
         overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
         maximum = torch.max(overlap_eigenvalue)
+        if float(maximum.detach()) <= 0.0:
+            raise RuntimeError("candidate overlap has no positive direction")
         threshold = relative_rank_tolerance * maximum
-        if bool(torch.any(overlap_eigenvalue <= threshold)):
+        retained = overlap_eigenvalue > threshold
+        if not allow_rank_reduction and bool(torch.any(~retained)):
             raise RuntimeError("candidate overlap is rank deficient")
-        condition = float((maximum / torch.min(overlap_eigenvalue)).detach())
+        retained_eigenvalue = overlap_eigenvalue[retained]
+        retained_eigenvector = overlap_eigenvector[:, retained]
+        effective_count = int(retained_eigenvalue.shape[0])
+        minimum_candidate_rank = min(minimum_candidate_rank, effective_count)
+        condition = float((maximum / torch.min(retained_eigenvalue)).detach())
         if condition > condition_limit:
             raise RuntimeError("candidate overlap condition number exceeds limit")
         maximum_overlap_condition = max(maximum_overlap_condition, condition)
 
         lowdin = (
-            overlap_eigenvector
-            @ torch.diag(overlap_eigenvalue.rsqrt()).to(torch.complex128)
-            @ _adjoint(overlap_eigenvector)
+            retained_eigenvector
+            @ torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
         )
         hamiltonian_orthonormal = _adjoint(lowdin).matmul(hamiltonian).matmul(lowdin)
-        source_candidate = record.source.matmul(transform)
         source_orthonormal = source_candidate.matmul(lowdin)
-        occupied_orthonormal = record.occupied_projection.matmul(transform).matmul(lowdin)
+        occupied_orthonormal = occupied_candidate.matmul(lowdin)
 
         capture_matrix = occupied_orthonormal.matmul(_adjoint(occupied_orthonormal))
         capture = torch.linalg.eigvalsh(capture_matrix)
@@ -117,7 +176,7 @@ def evaluate_periodic_galerkin_response(
         minimum_occupied_capture = min(minimum_occupied_capture, minimum_capture)
         if minimum_capture < 1.0 - occupied_capture_tolerance:
             raise RuntimeError("candidate basis does not capture the fixed occupied manifold")
-        if candidate_count <= noccupied:
+        if effective_count <= noccupied:
             raise RuntimeError("candidate basis has no virtual complement")
         singular_value = torch.linalg.svdvals(occupied_orthonormal)
         if singular_value.shape[0] != noccupied or bool(
@@ -128,7 +187,7 @@ def evaluate_periodic_galerkin_response(
         occupied_vectors = _adjoint(occupied_orthonormal)
         occupied_frame, _ = torch.linalg.qr(occupied_vectors, mode="reduced")
         occupied_projector = occupied_frame.matmul(_adjoint(occupied_frame))
-        identity = torch.eye(candidate_count, dtype=torch.complex128)
+        identity = torch.eye(effective_count, dtype=torch.complex128)
         virtual_projector = identity - occupied_projector
         per_frequency_projection = []
 
@@ -149,7 +208,12 @@ def evaluate_periodic_galerkin_response(
                 )
                 response_orthonormal = torch.linalg.solve(system, right_hand_side)
                 response_orthonormal = virtual_projector.matmul(response_orthonormal)
-                response_primitive = transform.matmul(lowdin).matmul(response_orthonormal)
+                response_candidate = lowdin.matmul(response_orthonormal)
+                response_primitive = (
+                    response_candidate
+                    if transform is None
+                    else transform.matmul(response_candidate)
+                )
 
                 matrix_occupation = record.k_weight * record.occupation[ib]
                 response_half[ifrequency] = response_half[ifrequency] + matrix_occupation * (
@@ -193,7 +257,32 @@ def evaluate_periodic_galerkin_response(
         relative_projection_error=projection_error,
         minimum_occupied_capture=minimum_occupied_capture,
         maximum_overlap_condition=maximum_overlap_condition,
+        minimum_candidate_rank=minimum_candidate_rank,
     )
+
+
+def _validate_dataset(dataset):
+    if not isinstance(dataset, PeriodicGalerkinDataset):
+        raise ValueError("dataset must be a PeriodicGalerkinDataset")
+
+
+def _validate_tolerances(
+    relative_rank_tolerance,
+    condition_limit,
+    occupied_capture_tolerance,
+):
+    relative_rank_tolerance = _finite_positive(
+        "relative_rank_tolerance", relative_rank_tolerance
+    )
+    condition_limit = _finite_positive("condition_limit", condition_limit)
+    occupied_capture_tolerance = _finite_positive(
+        "occupied_capture_tolerance", occupied_capture_tolerance
+    )
+    if relative_rank_tolerance >= 1.0 or occupied_capture_tolerance >= 1.0:
+        raise ValueError("relative tolerances must be less than one")
+    if condition_limit < 1.0:
+        raise ValueError("condition_limit must be at least one")
+    return relative_rank_tolerance, condition_limit, occupied_capture_tolerance
 
 
 def _finite_positive(name, value):

@@ -9,7 +9,10 @@ from periodic_galerkin_data import (
     PeriodicGalerkinKPoint,
     PeriodicGalerkinPrimitiveBlock,
 )
-from periodic_galerkin_sternheimer import evaluate_periodic_galerkin_response
+from periodic_galerkin_sternheimer import (
+    evaluate_periodic_galerkin_mother_response,
+    evaluate_periodic_galerkin_response,
+)
 
 
 class PeriodicGalerkinSternheimerTest(unittest.TestCase):
@@ -86,6 +89,7 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
         self.assertLess(float(result.relative_response_error), 1.0e-14)
         self.assertLess(float(result.relative_projection_error), 1.0e-14)
         self.assertGreater(result.minimum_occupied_capture, 1.0 - 1.0e-14)
+        self.assertEqual(result.minimum_candidate_rank, 2)
 
     def test_response_is_invariant_under_invertible_candidate_coordinates(self):
         dataset, _, _ = self.complete_two_level_dataset()
@@ -160,6 +164,44 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
         self.assertIsNotNone(scale.grad)
         self.assertTrue(bool(torch.isfinite(scale.grad)))
         self.assertGreater(abs(float(scale.grad)), 1.0e-8)
+
+    def test_mother_response_drops_only_numerical_null_directions(self):
+        dataset, delta, expected_response = self.complete_two_level_dataset()
+        record = replace(
+            dataset.kpoints[0],
+            overlap=torch.diag(
+                torch.tensor([1.0, 1.0, 0.0], dtype=torch.float64)
+            ).to(torch.complex128),
+            hamiltonian_ha=torch.diag(
+                torch.tensor([-0.5, 0.7, 0.0], dtype=torch.float64)
+            ).to(torch.complex128),
+            occupied_projection=torch.tensor(
+                [[1.0, 0.0, 0.0]], dtype=torch.complex128
+            ),
+            source=torch.tensor(
+                [[[0.0, 0.3, 0.0]]], dtype=torch.complex128
+            ),
+            reference_projection=torch.tensor(
+                [[[[0.0, delta.conjugate(), 0.0]]]], dtype=torch.complex128
+            ),
+        )
+        dataset = replace(dataset, primitive_count=3, kpoints=(record,))
+
+        with self.assertRaisesRegex(RuntimeError, "rank deficient"):
+            evaluate_periodic_galerkin_response(
+                dataset, torch.eye(3, dtype=torch.complex128)
+            )
+
+        result = evaluate_periodic_galerkin_mother_response(dataset)
+
+        torch.testing.assert_close(
+            result.response[0, 0, 0],
+            torch.tensor(expected_response, dtype=torch.complex128),
+            rtol=1.0e-14,
+            atol=1.0e-14,
+        )
+        self.assertEqual(result.minimum_candidate_rank, 2)
+        self.assertLess(float(result.relative_response_error), 1.0e-14)
 
 
 if __name__ == "__main__":
