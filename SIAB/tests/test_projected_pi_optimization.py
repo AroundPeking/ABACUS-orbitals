@@ -80,6 +80,23 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
             result.lowest_frequency_loss, result.frequency_loss[0]
         )
 
+    def test_accepts_any_two_unique_physical_family_names(self):
+        result = self.adapter(
+            ("C_atom", self.h), ("C2", self.h2)
+        ).evaluate(coefficients(self.coefficient))
+
+        self.assertEqual(tuple(result.family_results), ("C_atom", "C2"))
+        reversed_result = self.adapter(
+            ("C2", self.h2), ("C_atom", self.h)
+        ).evaluate(coefficients(self.coefficient))
+        self.assertEqual(
+            tuple(reversed_result.family_results), ("C2", "C_atom")
+        )
+        torch.testing.assert_close(result.loss, reversed_result.loss)
+        torch.testing.assert_close(
+            result.frequency_loss, reversed_result.frequency_loss
+        )
+
     def rpa_sensitive_pairs(self):
         h = scaled_pair(self.h)
         h2_q = h.response.q.clone()
@@ -267,15 +284,15 @@ class ProjectedPiOptimizationTest(unittest.TestCase):
         )
         self.assertAlmostEqual(analytic, finite_difference, delta=3.0e-7)
 
-    def test_rejects_wrong_duplicate_or_ghost_families(self):
+    def test_rejects_wrong_duplicate_or_empty_families(self):
         for pairs in (
             (("H", self.h),),
             (("H", self.h), ("H", self.h2)),
-            (("H", self.h), ("ghost", self.h2)),
+            (("H", self.h), ("", self.h2)),
             (("H", self.h), ("H2", self.h2), ("H2", self.h2)),
         ):
             with self.subTest(pairs=tuple(name for name, _ in pairs)):
-                with self.assertRaisesRegex(ValueError, "exactly one.*H.*H2"):
+                with self.assertRaisesRegex(ValueError, "exactly two unique"):
                     self.adapter(*pairs)
 
     def test_rejects_unequal_frequency_grids_or_weights(self):

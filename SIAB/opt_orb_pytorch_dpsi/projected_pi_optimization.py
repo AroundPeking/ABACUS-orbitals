@@ -7,9 +7,6 @@ import torch
 from projected_pi import NormalizedPhysicalFamilyProjectedPi
 
 
-_PHYSICAL_FAMILIES = ("H", "H2")
-
-
 @dataclass(frozen=True)
 class ProjectedPiOptimizationResult:
     loss: torch.Tensor
@@ -41,17 +38,15 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
         items = _normalize_named_pairs(named_pairs)
         names = tuple(name for name, _ in items)
         if (
-            len(items) != len(_PHYSICAL_FAMILIES)
+            len(items) != 2
             or len(set(names)) != len(names)
-            or set(names) != set(_PHYSICAL_FAMILIES)
+            or any(not name for name in names)
         ):
             raise ValueError(
-                "projected-Pi optimization requires exactly one H and one H2 pair"
+                "projected-Pi optimization requires exactly two unique family names"
             )
-        pair_by_name = dict(items)
-        ordered = tuple(
-            (name, pair_by_name[name]) for name in _PHYSICAL_FAMILIES
-        )
+        self._family_names = names
+        ordered = items
         self._condition_limit = _positive_condition_limit(condition_limit)
         if sensitivity_alpha is None:
             if family_power is not None:
@@ -87,24 +82,24 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
                 "projected-Pi candidate overlap condition number exceeds limit"
             )
 
-        h = family.results["H"]
-        h2 = family.results["H2"]
-        if not torch.equal(h.frequency_ha, h2.frequency_ha):
-            raise ValueError("H and H2 projected-Pi frequency grids differ")
-        if not torch.equal(h.frequency_weight, h2.frequency_weight):
-            raise ValueError("H and H2 projected-Pi frequency weights differ")
+        first = family.results[self._family_names[0]]
+        second = family.results[self._family_names[1]]
+        if not torch.equal(first.frequency_ha, second.frequency_ha):
+            raise ValueError("projected-Pi family frequency grids differ")
+        if not torch.equal(first.frequency_weight, second.frequency_weight):
+            raise ValueError("projected-Pi family frequency weights differ")
         if self._family_power is None:
             loss = family.loss
             sensitivity_alpha = None
         else:
             family_losses = torch.stack(
-                tuple(family.results[name].loss for name in _PHYSICAL_FAMILIES)
+                tuple(family.results[name].loss for name in self._family_names)
             )
             loss = torch.linalg.vector_norm(family_losses, ord=4)
-            sensitivity_alpha = h.sensitivity_alpha
+            sensitivity_alpha = first.sensitivity_alpha
         if not bool(torch.isfinite(loss)):
             raise RuntimeError("projected-Pi optimization loss must be finite")
-        frequency_loss = (h.frequency_loss + h2.frequency_loss) / 2.0
+        frequency_loss = (first.frequency_loss + second.frequency_loss) / 2.0
         if not bool(torch.all(torch.isfinite(frequency_loss))):
             raise RuntimeError(
                 "projected-Pi optimization frequency loss must be finite"
@@ -112,7 +107,7 @@ class NormalizedPhysicalFamilyProjectedPiOptimization:
         return ProjectedPiOptimizationResult(
             loss=loss,
             max_condition=family.max_candidate_condition,
-            frequency_ha=h.frequency_ha,
+            frequency_ha=first.frequency_ha,
             frequency_loss=frequency_loss,
             family_results=family.results,
             sensitivity_alpha=sensitivity_alpha,
