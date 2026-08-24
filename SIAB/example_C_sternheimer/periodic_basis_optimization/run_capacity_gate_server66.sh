@@ -59,6 +59,8 @@ if report["mother"]["capacity_gate"] != "PASS":
     raise SystemExit("mother-space capacity gate failed")
 if not report["optimization_allowed"]:
     raise SystemExit("optimization is not allowed")
+if report["candidate"]["evaluation_gate"] != "PASS":
+    raise SystemExit("initial candidate basis gate failed")
 PY
 
 {
