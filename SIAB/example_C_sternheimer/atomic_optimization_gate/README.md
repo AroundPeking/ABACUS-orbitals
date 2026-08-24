@@ -4,11 +4,15 @@ This is the first optimizer gate after the accepted C atomic Delta-ST producer.
 It is not a transferable C basis and it is not an RPA validation result.
 
 The gate keeps the SG15 C TZDP size at `3s3p2d`.  It freezes the DFT-safe DZP
-columns `1s,2s,1p,2p,1d` and permits only `3s,3p,2d` to vary.  The target is
-the 16-frequency, full-Coulomb C atomic Sternheimer matrix.  The short run uses
-20 Adam steps with learning rate `0.001` and the response-only `st_only` loss.
-This short loss is used only to prove that the C input, freeze map and PyTorch
-gradient path are consistent.
+columns `1s,2s,1p,2p,1d` and permits only `3s,3p,2d` to vary.  The SIAB shell
+count is written as `3s3p2d0f0g` because the reference matrix contains the
+complete `l=0,...,4` primitive response space.  The zero counts do not add
+orbitals: they retain the unresolved `f` and `g` response in the loss instead
+of silently deleting it.  The target is the 16-frequency, full-Coulomb C
+atomic Sternheimer matrix.  The short run uses 20 Adam steps with learning
+rate `0.001` and the response-only `st_only` loss.  This short loss is used
+only to prove that the C input, freeze map and PyTorch gradient path are
+consistent.
 
 The three source hashes are fixed in `atomic_optimization_gate.py`:
 

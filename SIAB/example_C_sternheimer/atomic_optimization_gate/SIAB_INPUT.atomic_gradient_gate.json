@@ -5,7 +5,7 @@
   },
   "element": {
     "Nt_all": ["C"],
-    "Nu": {"C": [3, 3, 2]}
+    "Nu": {"C": [3, 3, 2, 0, 0]}
   },
   "weight": {},
   "optimize": [

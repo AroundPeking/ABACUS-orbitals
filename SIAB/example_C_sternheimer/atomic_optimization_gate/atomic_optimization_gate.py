@@ -68,8 +68,10 @@ def variable_keys(template) -> frozenset[tuple[str, int, int]]:
 def validate_template(template) -> None:
     if template.get("element", {}).get("Nt_all") != ["C"]:
         raise ValueError("atomic gate must contain only C")
-    if template["element"].get("Nu") != {"C": [3, 3, 2]}:
-        raise ValueError("atomic gate must use the SG15 C 3s3p2d TZDP size")
+    if template["element"].get("Nu") != {"C": [3, 3, 2, 0, 0]}:
+        raise ValueError(
+            "atomic gate must use C 3s3p2d with explicit zero f/g channels"
+        )
     if freeze_keys(template.get("freeze_orbitals", [])) != FIXED_DZP:
         raise ValueError("atomic gate must use the exact C DZP freeze set")
     if variable_keys(template) != EXPECTED_VARIABLE:

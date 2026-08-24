@@ -25,7 +25,9 @@ class AtomicOptimizationGateTest(unittest.TestCase):
 
     def test_template_freezes_dzp_and_varies_only_tzdp_excess(self):
         GATE.validate_template(self.template)
-        self.assertEqual(self.template["element"]["Nu"]["C"], [3, 3, 2])
+        self.assertEqual(
+            self.template["element"]["Nu"]["C"], [3, 3, 2, 0, 0]
+        )
         self.assertEqual(
             GATE.freeze_keys(self.template["freeze_orbitals"]),
             frozenset(
