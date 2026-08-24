@@ -30,3 +30,22 @@ Numerical convergence alone does not promote the basis. The converged loss must
 also improve on the accepted `3s3p2d` loss `0.7114382940310687` by at least 1%.
 Only `F_SHELL_MATERIAL_GAIN` may enter C-C and projected-Pi validation;
 `F_SHELL_MARGINAL_GAIN` stops this shell-growth route before SOS-RPA.
+
+## Projected-Pi production boundary
+
+The projected-Pi loader and optimization adapter now accept any two unique
+physical family names in declaration order, so the C campaign will use
+`C_atom` and `C2` without changing the validated two-family H/H2 objective.
+Both families must still provide strict response-v1, source-v1, and zero-order
+audit files on an identical frequency grid; ghost data remain forbidden.
+
+This is a software interface gate only. No C projected-Pi result exists until
+the C atom and 1.544 Angstrom C2 pairs have been produced with the frozen
+20 Angstrom, FD8, 16-frequency, full-Coulomb, SG15/TZDP, PCA `1e-4`
+definition. The `3s3p2d1f` candidate cannot enter SOS-RPA before that
+two-family comparison passes.
+
+The generic-family interface passed 84 focused loader/projected-Pi tests, 92
+compatibility tests, and 27 C campaign tests in the immutable df PyTorch
+environment. These counts validate software behavior only; they are not a
+physical acceptance result for C.
