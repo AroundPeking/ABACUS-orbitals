@@ -56,12 +56,31 @@ def evaluate_periodic_basis_capacity(
         dataset.primitive_count,
         coefficients,
     )
-    mother_result = evaluate_periodic_galerkin_mother_response(
-        dataset,
-        relative_rank_tolerance=relative_rank_tolerance,
-        condition_limit=condition_limit,
-        occupied_capture_tolerance=occupied_capture_tolerance,
-    )
+    mother = {
+        "primitive_count": dataset.primitive_count,
+        "capacity_tolerance": float(mother_response_tolerance),
+    }
+    try:
+        mother_result = evaluate_periodic_galerkin_mother_response(
+            dataset,
+            relative_rank_tolerance=relative_rank_tolerance,
+            condition_limit=condition_limit,
+            occupied_capture_tolerance=occupied_capture_tolerance,
+        )
+    except RuntimeError as error:
+        mother.update(
+            {
+                "capacity_gate": "FAIL",
+                "error": str(error),
+            }
+        )
+    else:
+        mother.update(_result_metrics(mother_result))
+        mother["capacity_gate"] = (
+            "PASS"
+            if mother["relative_pi_error"] <= mother_response_tolerance
+            else "FAIL"
+        )
 
     candidate = {
         "ao_count": int(candidate_basis.transform.shape[1]),
@@ -85,14 +104,6 @@ def evaluate_periodic_basis_capacity(
     else:
         candidate.update(_result_metrics(candidate_result))
         candidate["evaluation_gate"] = "PASS"
-    mother = _result_metrics(mother_result)
-    mother["primitive_count"] = dataset.primitive_count
-    mother["capacity_tolerance"] = float(mother_response_tolerance)
-    mother["capacity_gate"] = (
-        "PASS"
-        if mother["relative_pi_error"] <= mother_response_tolerance
-        else "FAIL"
-    )
     return {
         "scope": (
             "periodic Galerkin capacity gate; not an independent SOS or "

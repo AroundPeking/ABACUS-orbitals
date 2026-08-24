@@ -97,6 +97,23 @@ class PeriodicGalerkinCampaignTest(unittest.TestCase):
         self.assertEqual(report["mother"]["capacity_gate"], "PASS")
         self.assertTrue(report["optimization_allowed"])
 
+    def test_reports_mother_occupied_capture_failure_as_capacity_failure(self):
+        dataset, _, _ = PeriodicGalerkinSternheimerTest().complete_two_level_dataset()
+        record = replace(
+            dataset.kpoints[0],
+            overlap=torch.diag(torch.tensor([0.0, 1.0])).to(torch.complex128),
+        )
+        dataset = replace(dataset, kpoints=(record,))
+
+        report = evaluate_periodic_basis_capacity(
+            dataset,
+            {"C": [torch.eye(2, dtype=torch.float64)]},
+        )
+
+        self.assertEqual(report["mother"]["capacity_gate"], "FAIL")
+        self.assertIn("fixed occupied manifold", report["mother"]["error"])
+        self.assertFalse(report["optimization_allowed"])
+
 
 if __name__ == "__main__":
     unittest.main()
