@@ -137,10 +137,12 @@ class AtomicOptimizationGateTest(unittest.TestCase):
             "#SBATCH --time=UNLIMITED",
             "export OMP_MAX_ACTIVE_LEVELS=1",
             'test -x "$PYTHON_EXE"',
-            "/usr/bin/git rev-parse HEAD",
+            'SOURCE_HEAD_FILE="$REPO_ROOT/.git/HEAD"',
+            'SOURCE_REF_FILE="$REPO_ROOT/.git/$source_ref"',
         ):
             self.assertIn(marker, text)
         self.assertNotIn("debug", text.lower())
+        self.assertNotIn("git rev-parse", text)
         self.assertNotIn('"$ORBITAL" "$TARGET" "$PYTHON_EXE"', text)
 
     def test_df_submitter_requires_zero_elapsed_server66_migration(self):

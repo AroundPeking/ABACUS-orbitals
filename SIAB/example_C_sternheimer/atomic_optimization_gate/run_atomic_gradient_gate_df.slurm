@@ -24,7 +24,15 @@ COEFFICIENTS="$REPO_ROOT/SG15_v1.0/Orbitals_v2.0/C_TZDP/info/10/ORBITAL_RESULTS.
 ORBITAL="$REPO_ROOT/SG15_v1.0/Orbitals_v2.0/C_TZDP/C_gga_10au_100Ry_3s3p2d.orb"
 OUTPUT="$CAMPAIGN_ROOT/runs/atomic_gradient_gate_df"
 
-test "$(cd "$REPO_ROOT" && /usr/bin/git rev-parse HEAD)" = "$EXPECTED_SOURCE_COMMIT"
+SOURCE_HEAD_FILE="$REPO_ROOT/.git/HEAD"
+test -f "$SOURCE_HEAD_FILE" && test ! -L "$SOURCE_HEAD_FILE"
+IFS= read -r source_head < "$SOURCE_HEAD_FILE"
+source_ref=${source_head#ref: }
+test "$source_ref" = "refs/heads/codex/c-pbe-reference-gate"
+SOURCE_REF_FILE="$REPO_ROOT/.git/$source_ref"
+test -f "$SOURCE_REF_FILE" && test ! -L "$SOURCE_REF_FILE"
+IFS= read -r source_commit < "$SOURCE_REF_FILE"
+test "$source_commit" = "$EXPECTED_SOURCE_COMMIT"
 for path in "$GATE_DIR/atomic_optimization_gate.py" "$OPTIMIZER" \
   "$COEFFICIENTS" "$ORBITAL" "$TARGET"; do
   test -f "$path" && test ! -L "$path" && test -s "$path"
