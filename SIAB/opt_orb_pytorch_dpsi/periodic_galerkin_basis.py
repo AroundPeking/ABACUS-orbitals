@@ -7,7 +7,10 @@ from typing import Tuple
 
 import torch
 
-from periodic_galerkin_data import PeriodicGalerkinPrimitiveBlock
+from periodic_galerkin_data import (
+    PeriodicGalerkinKPoint,
+    PeriodicGalerkinPrimitiveBlock,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,15 @@ class PeriodicGalerkinCandidateColumn:
 @dataclass(frozen=True)
 class PeriodicGalerkinCandidateBasis:
     transform: torch.Tensor
+    columns: Tuple[PeriodicGalerkinCandidateColumn, ...]
+
+
+@dataclass(frozen=True)
+class PeriodicGalerkinCandidateOperators:
+    overlap: torch.Tensor
+    hamiltonian_ha: torch.Tensor
+    source: torch.Tensor
+    occupied_projection: torch.Tensor
     columns: Tuple[PeriodicGalerkinCandidateColumn, ...]
 
 
@@ -196,4 +208,125 @@ def build_primitive_to_candidate(primitive_blocks, primitive_count, coefficients
     return PeriodicGalerkinCandidateBasis(
         transform=torch.stack(columns, dim=1),
         columns=tuple(labels),
+    )
+
+
+def _active_groups(primitive_blocks, coefficients):
+    groups = {}
+    active = []
+    for block in primitive_blocks:
+        radial = coefficients[block.element][block.l]
+        if radial.shape[1] == 0:
+            continue
+        key = (block.element, block.l)
+        group = groups.setdefault(key, [])
+        index = len(group)
+        group.append(block)
+        active.append((block, key, index))
+    return groups, active
+
+
+def _stack_operator_blocks(operator, row_blocks, column_blocks):
+    return torch.stack(
+        tuple(
+            torch.stack(
+                tuple(
+                    operator[
+                        row.offset:row.offset + row.n_primitive,
+                        column.offset:column.offset + column.n_primitive,
+                    ]
+                    for column in column_blocks
+                ),
+                dim=0,
+            )
+            for row in row_blocks
+        ),
+        dim=0,
+    )
+
+
+def _contract_operator(operator, groups, active, coefficients):
+    grouped = {}
+    for row_key, row_blocks in groups.items():
+        row_radial = coefficients[row_key[0]][row_key[1]].to(operator.dtype)
+        for column_key, column_blocks in groups.items():
+            column_radial = coefficients[column_key[0]][column_key[1]].to(
+                operator.dtype
+            )
+            blocks = _stack_operator_blocks(operator, row_blocks, column_blocks)
+            grouped[(row_key, column_key)] = torch.einsum(
+                "rz,abrs,sw->azbw",
+                row_radial.conj(),
+                blocks,
+                column_radial,
+            )
+
+    rows = []
+    for _, row_key, row_index in active:
+        rows.append(
+            torch.cat(
+                tuple(
+                    grouped[(row_key, column_key)][
+                        row_index, :, column_index, :
+                    ]
+                    for _, column_key, column_index in active
+                ),
+                dim=1,
+            )
+        )
+    return torch.cat(tuple(rows), dim=0)
+
+
+def _contract_rows(rows, groups, active, coefficients):
+    grouped = {}
+    for key, blocks in groups.items():
+        radial = coefficients[key[0]][key[1]].to(rows.dtype)
+        primitive = torch.stack(
+            tuple(
+                rows[..., block.offset:block.offset + block.n_primitive]
+                for block in blocks
+            ),
+            dim=-2,
+        )
+        grouped[key] = torch.einsum("...ar,rz->...az", primitive, radial)
+    return torch.cat(
+        tuple(grouped[key][..., index, :] for _, key, index in active),
+        dim=-1,
+    )
+
+
+def contract_periodic_candidate_operators(record, primitive_blocks, coefficients):
+    """Contract periodic primitive operators without dense 1550-by-AO products."""
+    if not isinstance(record, PeriodicGalerkinKPoint):
+        raise ValueError("record must be a PeriodicGalerkinKPoint")
+    primitive_count = record.overlap.shape[0]
+    candidate = build_primitive_to_candidate(
+        primitive_blocks,
+        primitive_count,
+        coefficients,
+    )
+    groups, active = _active_groups(primitive_blocks, coefficients)
+    if not active:
+        raise ValueError("candidate basis must be nonempty")
+    return PeriodicGalerkinCandidateOperators(
+        overlap=_contract_operator(
+            record.overlap,
+            groups,
+            active,
+            coefficients,
+        ),
+        hamiltonian_ha=_contract_operator(
+            record.hamiltonian_ha,
+            groups,
+            active,
+            coefficients,
+        ),
+        source=_contract_rows(record.source, groups, active, coefficients),
+        occupied_projection=_contract_rows(
+            record.occupied_projection,
+            groups,
+            active,
+            coefficients,
+        ),
+        columns=candidate.columns,
     )

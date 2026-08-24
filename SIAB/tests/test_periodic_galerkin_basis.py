@@ -7,9 +7,13 @@ import torch
 import common  # noqa: F401 - configures the optimizer import path
 from periodic_galerkin_basis import (
     build_primitive_to_candidate,
+    contract_periodic_candidate_operators,
     read_periodic_optimizer_coefficients,
 )
-from periodic_galerkin_data import PeriodicGalerkinPrimitiveBlock
+from periodic_galerkin_data import (
+    PeriodicGalerkinKPoint,
+    PeriodicGalerkinPrimitiveBlock,
+)
 
 
 class PeriodicGalerkinBasisTest(unittest.TestCase):
@@ -116,6 +120,63 @@ Left spillage = 0.0
             )
         )
         self.assertEqual(coefficients["C"][2].shape, (2, 0))
+
+    def test_block_contractions_equal_dense_candidate_transform(self):
+        blocks = (
+            PeriodicGalerkinPrimitiveBlock("C", 0, 0, 0, 2, 0),
+            PeriodicGalerkinPrimitiveBlock("C", 0, 1, -1, 2, 2),
+            PeriodicGalerkinPrimitiveBlock("C", 0, 1, 0, 2, 4),
+            PeriodicGalerkinPrimitiveBlock("C", 0, 1, 1, 2, 6),
+        )
+        coefficients = {
+            "C": [
+                torch.tensor([[0.7], [-0.2]], dtype=torch.float64),
+                torch.tensor([[0.4], [0.9]], dtype=torch.float64),
+            ]
+        }
+        torch.manual_seed(11)
+        raw = torch.randn((8, 8), dtype=torch.complex128)
+        overlap = raw.transpose(-2, -1).conj().matmul(raw) + torch.eye(8)
+        raw = torch.randn((8, 8), dtype=torch.complex128)
+        hamiltonian = raw + raw.transpose(-2, -1).conj()
+        source = torch.randn((2, 3, 8), dtype=torch.complex128)
+        occupied = torch.randn((2, 8), dtype=torch.complex128)
+        record = PeriodicGalerkinKPoint(
+            source_ik=1,
+            target_ik=1,
+            source_kpoint=(0.0, 0.0, 0.0),
+            target_kpoint=(0.0, 0.0, 0.0),
+            reciprocal_shift=(0, 0, 0),
+            k_weight=1.0,
+            occupation=torch.ones(2, dtype=torch.float64),
+            source_eigenvalue_ha=torch.tensor([-0.5, -0.4]),
+            overlap=overlap,
+            hamiltonian_ha=hamiltonian,
+            occupied_projection=occupied,
+            source=source,
+            reference_projection=torch.empty(0),
+        )
+        dense = build_primitive_to_candidate(blocks, 8, coefficients).transform
+
+        contracted = contract_periodic_candidate_operators(
+            record,
+            blocks,
+            coefficients,
+        )
+
+        torch.testing.assert_close(
+            contracted.overlap,
+            dense.transpose(-2, -1).conj().matmul(overlap).matmul(dense),
+        )
+        torch.testing.assert_close(
+            contracted.hamiltonian_ha,
+            dense.transpose(-2, -1).conj().matmul(hamiltonian).matmul(dense),
+        )
+        torch.testing.assert_close(contracted.source, source.matmul(dense))
+        torch.testing.assert_close(
+            contracted.occupied_projection,
+            occupied.matmul(dense),
+        )
 
 
 if __name__ == "__main__":

@@ -13,6 +13,9 @@ from periodic_galerkin_sternheimer import (
     evaluate_periodic_galerkin_mother_response,
     evaluate_periodic_galerkin_response,
 )
+from periodic_galerkin_optimization import (
+    evaluate_periodic_galerkin_coefficient_response,
+)
 
 
 class PeriodicGalerkinSternheimerTest(unittest.TestCase):
@@ -202,6 +205,83 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
         )
         self.assertEqual(result.minimum_candidate_rank, 2)
         self.assertLess(float(result.relative_response_error), 1.0e-14)
+
+    def test_contracted_coefficient_response_equals_dense_response(self):
+        dataset, _, _ = self.complete_two_level_dataset()
+        coefficients = {"C": [torch.eye(2, dtype=torch.float64)]}
+
+        dense = evaluate_periodic_galerkin_response(
+            dataset,
+            torch.eye(2, dtype=torch.complex128),
+        )
+        contracted = evaluate_periodic_galerkin_coefficient_response(
+            dataset,
+            coefficients,
+        )
+
+        torch.testing.assert_close(contracted.response, dense.response)
+        torch.testing.assert_close(
+            contracted.relative_response_error,
+            dense.relative_response_error,
+        )
+        self.assertEqual(contracted.minimum_candidate_rank, 2)
+
+    def test_contracted_response_preserves_radial_coefficient_gradient(self):
+        dataset, _, _ = self.complete_two_level_dataset()
+        omega = float(dataset.frequency_ha[0])
+        delta_1 = -0.3 / (1.2 + 1.0j * omega)
+        delta_2 = -0.2 / (1.9 + 1.0j * omega)
+        response = 2.0 * (0.3 * delta_1 + 0.2 * delta_2)
+        response = response + response.conjugate()
+        record = replace(
+            dataset.kpoints[0],
+            overlap=torch.eye(3, dtype=torch.complex128),
+            hamiltonian_ha=torch.diag(
+                torch.tensor([-0.5, 0.7, 1.4], dtype=torch.float64)
+            ).to(torch.complex128),
+            occupied_projection=torch.tensor(
+                [[1.0, 0.0, 0.0]], dtype=torch.complex128
+            ),
+            source=torch.tensor([[[0.0, 0.3, 0.2]]], dtype=torch.complex128),
+            reference_projection=torch.tensor(
+                [[[[0.0, delta_1.conjugate(), delta_2.conjugate()]]]],
+                dtype=torch.complex128,
+            ),
+        )
+        dataset = replace(
+            dataset,
+            primitive_count=3,
+            primitive_blocks=(
+                PeriodicGalerkinPrimitiveBlock("C", 0, 0, 0, 3, 0),
+            ),
+            reference_response=torch.tensor([[[response]]], dtype=torch.complex128),
+            kpoints=(record,),
+        )
+        scale = torch.tensor(0.25, dtype=torch.float64, requires_grad=True)
+        radial = torch.stack(
+            (
+                torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64),
+                torch.stack(
+                    (
+                        torch.tensor(0.0, dtype=torch.float64),
+                        torch.tensor(1.0, dtype=torch.float64),
+                        scale,
+                    )
+                ),
+            ),
+            dim=1,
+        )
+
+        result = evaluate_periodic_galerkin_coefficient_response(
+            dataset,
+            {"C": [radial]},
+        )
+        loss = result.relative_response_error ** 2
+        loss.backward()
+
+        self.assertIsNotNone(scale.grad)
+        self.assertTrue(bool(torch.isfinite(scale.grad)))
+        self.assertGreater(abs(float(scale.grad)), 1.0e-8)
 
 
 if __name__ == "__main__":
