@@ -17,9 +17,9 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_EXPORT_FAILED line=$LINENO command=$BASH_
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-4afd3152
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
+siab_commit=4afd3152906b422a4e24023753f6004acd1ff0f0
 exporter=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/export_periodic_orbitals.py
 ng=${SLURM_ARRAY_TASK_ID:?missing g multiplicity}
 

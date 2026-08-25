@@ -27,7 +27,7 @@ class ProductPcaJobProvenanceTest(unittest.TestCase):
         for script in scripts:
             text = (CAMPAIGN / script).read_text(encoding="ascii")
             self.assertIn(
-                "code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf",
+                "code=/data/home/df_iopcas_ghj/app/siab/periodic-c-4afd3152",
                 text,
             )
             self.assertIn(

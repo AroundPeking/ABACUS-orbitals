@@ -17,9 +17,9 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_JOINT_OPTIMIZATION_FAILED line=$LINENO co
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-4afd3152
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
+siab_commit=4afd3152906b422a4e24023753f6004acd1ff0f0
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q1=$producer_root/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q1_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 q2=$producer_root/c-diamond-g24-fd8-nfreq6-q2-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q2_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
