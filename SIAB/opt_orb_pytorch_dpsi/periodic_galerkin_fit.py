@@ -1,5 +1,6 @@
 """Optimize compact SIAB radial subspaces against exact periodic Pi."""
 
+import copy
 from dataclasses import dataclass
 import math
 
@@ -21,6 +22,8 @@ class PeriodicGalerkinFitResult:
     best_step: int
     steps_completed: int
     stop_reason: str
+    total_backtracks: int
+    final_learning_rate: float
 
 
 def _finite_positive(name, value):
@@ -171,6 +174,7 @@ def optimize_periodic_galerkin_basis(
     minimum_steps=200,
     plateau_patience=300,
     plateau_relative_improvement=1.0e-6,
+    maximum_backtracks=20,
     progress_callback=None,
 ):
     """Optimize only the nonfixed radial columns and retain the best subspace."""
@@ -186,6 +190,8 @@ def optimize_periodic_galerkin_basis(
         or minimum_steps < 0
         or minimum_steps > max_steps
         or plateau_patience <= 0
+        or type(maximum_backtracks) is not int
+        or maximum_backtracks < 0
     ):
         raise ValueError("optimization step and plateau controls are invalid")
     fixed, variable, parameters = _validate_inputs(datasets, initial, fixed_nu)
@@ -203,13 +209,20 @@ def optimize_periodic_galerkin_basis(
     significant_loss = math.inf
     last_significant_step = 0
     stop_reason = "maximum_steps"
+    pending_evaluation = None
+    backtracks_from_previous_step = 0
+    total_backtracks = 0
 
     for step in range(max_steps + 1):
         coefficients = _assemble(fixed, variable)
-        loss, minimum_capture, maximum_condition = _global_pi_loss(
-            datasets,
-            coefficients,
-        )
+        if pending_evaluation is None:
+            loss, minimum_capture, maximum_condition = _global_pi_loss(
+                datasets,
+                coefficients,
+            )
+        else:
+            loss, minimum_capture, maximum_condition = pending_evaluation
+            pending_evaluation = None
         loss_value = float(loss.detach())
         if not math.isfinite(loss_value):
             raise RuntimeError("periodic Pi loss is non-finite")
@@ -230,8 +243,11 @@ def optimize_periodic_galerkin_basis(
                 "relative_pi_error": math.sqrt(loss_value),
                 "minimum_occupied_capture": minimum_capture,
                 "maximum_overlap_condition": maximum_condition,
+                "learning_rate": float(optimizer.param_groups[0]["lr"]),
+                "backtracks_from_previous_step": backtracks_from_previous_step,
             }
         )
+        backtracks_from_previous_step = 0
         if progress_callback is not None:
             progress_callback(history[-1])
 
@@ -248,8 +264,47 @@ def optimize_periodic_galerkin_basis(
         for parameter in parameters:
             if parameter.grad is None or not bool(torch.isfinite(parameter.grad).all()):
                 raise RuntimeError("periodic Pi gradient is missing or non-finite")
-        optimizer.step()
-        _retract_variables(fixed, variable)
+        parameter_snapshot = [parameter.detach().clone() for parameter in parameters]
+        optimizer_snapshot = copy.deepcopy(optimizer.state_dict())
+        base_learning_rates = [
+            float(group["lr"]) for group in optimizer.param_groups
+        ]
+        accepted = False
+        for backtrack in range(maximum_backtracks + 1):
+            if backtrack:
+                with torch.no_grad():
+                    for parameter, snapshot in zip(parameters, parameter_snapshot):
+                        parameter.copy_(snapshot)
+                optimizer.load_state_dict(optimizer_snapshot)
+                for group, base_rate in zip(
+                    optimizer.param_groups, base_learning_rates
+                ):
+                    group["lr"] = base_rate * (0.5 ** backtrack)
+            optimizer.step()
+            try:
+                _retract_variables(fixed, variable)
+                trial_coefficients = _assemble(fixed, variable)
+                pending_evaluation = _global_pi_loss(
+                    datasets,
+                    trial_coefficients,
+                )
+            except RuntimeError as error:
+                if str(error) != (
+                    "candidate basis does not capture the fixed occupied manifold"
+                ):
+                    raise
+                continue
+            accepted = True
+            backtracks_from_previous_step = backtrack
+            total_backtracks += backtrack
+            break
+        if not accepted:
+            with torch.no_grad():
+                for parameter, snapshot in zip(parameters, parameter_snapshot):
+                    parameter.copy_(snapshot)
+            optimizer.load_state_dict(optimizer_snapshot)
+            stop_reason = "occupied_capture_boundary"
+            break
 
     if best_coefficients is None:
         raise RuntimeError("periodic basis optimization produced no accepted step")
@@ -261,4 +316,6 @@ def optimize_periodic_galerkin_basis(
         best_step=best_step,
         steps_completed=history[-1]["step"],
         stop_reason=stop_reason,
+        total_backtracks=total_backtracks,
+        final_learning_rate=float(optimizer.param_groups[0]["lr"]),
     )

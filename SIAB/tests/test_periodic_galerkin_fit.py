@@ -1,9 +1,11 @@
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
+import periodic_galerkin_fit
 from periodic_galerkin_data import PeriodicGalerkinPrimitiveBlock
 from periodic_galerkin_fit import optimize_periodic_galerkin_basis
 from test_periodic_galerkin_sternheimer import PeriodicGalerkinSternheimerTest
@@ -69,6 +71,50 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
         self.assertGreater(abs(float(result.coefficients["C"][0][2, 1])), 0.01)
         self.assertIn(result.stop_reason, ("plateau", "maximum_steps"))
         self.assertEqual(tuple(progress), result.history)
+
+    def test_backtracks_at_fixed_occupied_capture_boundary(self):
+        dataset = self.three_level_dataset()
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
+        def constrained_loss(_datasets, coefficients):
+            coordinate = coefficients["C"][0][2, 1]
+            if abs(float(coordinate.detach())) > 0.1:
+                raise RuntimeError(
+                    "candidate basis does not capture the fixed occupied manifold"
+                )
+            loss = (coordinate - 1.0) ** 2
+            return loss, 1.0 - float(coordinate.detach()) ** 2, 1.0
+
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "_global_pi_loss",
+            side_effect=constrained_loss,
+        ):
+            result = optimize_periodic_galerkin_basis(
+                (dataset,),
+                initial,
+                fixed_nu={"C": (1,)},
+                learning_rate=0.2,
+                max_steps=20,
+                minimum_steps=0,
+                plateau_patience=20,
+                plateau_relative_improvement=1.0e-8,
+            )
+
+        coordinate = float(result.coefficients["C"][0][2, 1])
+        self.assertLessEqual(abs(coordinate), 0.1 + 1.0e-12)
+        self.assertLess(result.best_loss, result.initial_loss)
+        self.assertIn(
+            result.stop_reason,
+            ("occupied_capture_boundary", "maximum_steps"),
+        )
 
     def test_rejects_fixed_prefix_larger_than_candidate_channel(self):
         dataset = self.three_level_dataset()

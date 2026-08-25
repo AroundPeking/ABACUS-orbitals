@@ -83,6 +83,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--plateau-relative-improvement", type=float, default=1.0e-6
     )
+    parser.add_argument("--maximum-backtracks", type=int, default=20)
     return parser.parse_args(argv)
 
 
@@ -164,7 +165,9 @@ def main(argv=None):
                 print(
                     "step={step} loss={loss:.12e} pi={relative_pi_error:.6e} "
                     "capture={minimum_occupied_capture:.12e} "
-                    "condition={maximum_overlap_condition:.6e}".format(**record),
+                    "condition={maximum_overlap_condition:.6e} "
+                    "lr={learning_rate:.3e} "
+                    "backtracks={backtracks_from_previous_step}".format(**record),
                     flush=True,
                 )
 
@@ -177,6 +180,7 @@ def main(argv=None):
                 minimum_steps=args.minimum_steps,
                 plateau_patience=args.plateau_patience,
                 plateau_relative_improvement=args.plateau_relative_improvement,
+                maximum_backtracks=args.maximum_backtracks,
                 progress_callback=record_progress,
             )
         for l, count in enumerate(fixed_nu):
@@ -227,6 +231,9 @@ def main(argv=None):
             "minimum_steps": args.minimum_steps,
             "plateau_patience": args.plateau_patience,
             "plateau_relative_improvement": args.plateau_relative_improvement,
+            "maximum_backtracks": args.maximum_backtracks,
+            "total_backtracks": fit.total_backtracks,
+            "final_learning_rate": fit.final_learning_rate,
         }
         _write_json(result_path, payload)
         _write_json(
