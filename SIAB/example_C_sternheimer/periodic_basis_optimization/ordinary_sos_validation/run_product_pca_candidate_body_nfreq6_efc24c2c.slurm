@@ -17,10 +17,11 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_CANDIDATE_SOS_FAILED line=$LINENO command
 module load oneapi/2024.2
 
 code=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-abacus_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825
-abacus=$abacus_root/artifacts/job3117942/abacus_3p
-abacus_commit=711af860c125b9757c344a1961b63524c550cfe4
-expected_abacus_sha=5a7ab8f2fc14424c8b47c5a9cbe22d1784016140cc9fa302f7e032662eed58b2
+abacus_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-bz-identity-7772406ac-20260825
+abacus=$abacus_root/artifacts/job3120556/abacus_3p
+abacus_commit=7772406ac92925d410f38bf69142a98b5c23a62b
+expected_abacus_sha=c6939a4ac6c990be0753dfb88c3239a680f8e8ef8bd2f593677d62b9f4bd1f61
+template_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825
 librpa=/data/home/df_iopcas_ghj/app/oml-pinned/LibRPA-v0.7.0-dd169fa/build-df-oml/chi0_main.exe
 expected_librpa_sha=7af5e426933283a2aa08b8771692bc770506ce3b6f00ccf8545108cb8e58d3bc
 librpa_template=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/librpa_tzdp_nfreq6.in
@@ -55,7 +56,7 @@ grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*t$' "$librpa_template"
 ! grep -Eq '^use_abacus_(exx|rpa|gw)_symmetry[[:space:]]*=' "$librpa_template"
 
 mkdir -p "$work"
-cp -a "$abacus_root/gate-template-product-pca/." "$work/"
+cp -a "$template_root/gate-template-product-pca/." "$work/"
 cp "$orbital" "$work/"
 cd "$work"
 
@@ -106,7 +107,7 @@ export I_MPI_FABRICS=shm:ofi
   echo purpose=periodic_c_product_pca_joint_candidate_all_band_sos_body
   echo candidate=joint_${ng}g
   echo abacus_commit=$abacus_commit
-  echo abacus_build_job=3117942
+  echo abacus_build_job=3120556
   echo librpa_commit=dd169fa11fa920d580d4f39dc11e218a7f17f7b5
   echo optimizer_job=${OPTIMIZER_ARRAY_JOB_ID:?missing optimizer array job id}_${ng}
   echo heldout_job=${HELDOUT_JOB_ID:?missing heldout job id}
@@ -135,6 +136,21 @@ for path in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out \
   KS_eigenvector_0.dat stru_out; do
   test -s "$path"
 done
+python3 - bz_sampling_out > BZ_SAMPLING_IDENTITY.txt <<'PY'
+import sys
+
+lines = open(sys.argv[1], encoding="ascii").read().splitlines()
+counts = [int(value) for value in lines[1].split()]
+assert len(counts) == 2 and counts[0] == counts[1]
+rows = [line.split() for line in lines[2:]]
+assert len(rows) == counts[0]
+labels = [(int(row[-2]), int(row[-1])) for row in rows]
+expected = [(index, index) for index in range(1, counts[0] + 1)]
+assert labels == expected
+print("status success")
+print("irreducible_count", counts[0])
+print("bz_sampling_identity yes")
+PY
 cs_count=$(find . -maxdepth 1 -type f -name 'v1_Cs_data_*.txt' -size +0c | wc -l)
 coulomb_count=$(find . -maxdepth 1 -type f -name 'v1_coulomb_full_iq_*_rank*.dat' -size +0c | wc -l)
 test "$cs_count" -ge 8
@@ -197,7 +213,7 @@ PY
   echo reader_coulomb_file_count=$coulomb_count
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/abacus_wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/abacus_max_rss_kb=/p' abacus.time
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/librpa_wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/librpa_max_rss_kb=/p' librpa.time
-  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt
+  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt BZ_SAMPLING_IDENTITY.txt
 } >> provenance.txt
 
 echo "C24_PRODUCT_PCA_CANDIDATE_SOS_OK g=$ng work=$work"
