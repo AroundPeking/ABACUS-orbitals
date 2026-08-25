@@ -31,6 +31,10 @@ test ! -e "$work"
 test -x "$librpa"
 test "$(sha256sum "$librpa" | awk '{print $1}')" = "$expected_librpa_sha"
 test -s "$template"
+grep -Eq '^version_coul_reader[[:space:]]*=[[:space:]]*1$' "$template"
+grep -Eq '^version_lri_reader[[:space:]]*=[[:space:]]*1$' "$template"
+grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*t$' "$template"
+! grep -Eq '^use_abacus_(exx|rpa|gw)_symmetry[[:space:]]*=' "$template"
 test -s "$source/RUN_PROVENANCE.txt"
 grep -qx 'status=success' "$source/RUN_PROVENANCE.txt"
 grep -qx 'auxiliary_basis_source product_pca' "$dataset/manifest.dat"
@@ -64,7 +68,7 @@ export I_MPI_FABRICS=shm:ofi
   echo status=running
   echo purpose=periodic_c_original_tzdp_product_pca_all_band_sos_body_baseline
   echo sos_contract_parent_commit=08b5085ad506442881a2edc4fcb233f6025c64f5
-  echo producer_job=3118459_1
+  echo producer_job=${PRODUCER_JOB_ID:?missing producer job id}
   echo producer_abacus_commit=711af860c125b9757c344a1961b63524c550cfe4
   echo producer_abacus_sha=$expected_abacus_sha
   echo librpa_commit=dd169fa11fa920d580d4f39dc11e218a7f17f7b5
