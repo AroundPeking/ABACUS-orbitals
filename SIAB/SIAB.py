@@ -266,10 +266,12 @@ def get_input_INPUT(name, Pseudo_dir, nspin, maxL, nbands_STRU, Ecut, Rcut, smea
         stru_file           {name}.stru
         pseudo_dir          {Pseudo_dir}
         kpoint_file         KPOINTS
-        wannier_card        INPUTw
         calculation         scf
         ks_solver           dav  //#cg; dav; lapack; genelpa; hpseps; scalapack_gvx; cusolver
         nspin               {nspin}
+
+        out_spillage         2
+        spillage_outdir      OUT.{name}
 
         lmaxmax                 {maxL}
         bessel_nao_ecut         {Ecut} #energy cutoff for spherical bessel functions(Ry)
