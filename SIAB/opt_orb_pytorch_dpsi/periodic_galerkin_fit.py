@@ -24,6 +24,8 @@ class PeriodicGalerkinFitResult:
     stop_reason: str
     total_backtracks: int
     final_learning_rate: float
+    initial_minimum_occupied_capture: float
+    occupied_capture_floor: float
 
 
 def _finite_positive(name, value):
@@ -131,7 +133,12 @@ def _retract_variables(fixed, variable, rank_tolerance=1.0e-12):
                 parameter.copy_(frame * sign)
 
 
-def _global_pi_loss(datasets, coefficients):
+def _global_pi_loss(
+    datasets,
+    coefficients,
+    *,
+    occupied_capture_tolerance=1.0e-6,
+):
     numerator = torch.zeros((), dtype=torch.float64)
     denominator = torch.zeros((), dtype=torch.float64)
     minimum_capture = math.inf
@@ -140,7 +147,8 @@ def _global_pi_loss(datasets, coefficients):
         result = evaluate_periodic_galerkin_coefficient_response(
             dataset,
             coefficients,
-            contraction_backend="dense",
+            contraction_backend="block",
+            occupied_capture_tolerance=occupied_capture_tolerance,
         )
         weight = dataset.frequency_weights_ha[:, None, None]
         q_weight = dataset.q_weight
@@ -175,12 +183,26 @@ def optimize_periodic_galerkin_basis(
     plateau_patience=300,
     plateau_relative_improvement=1.0e-6,
     maximum_backtracks=20,
+    occupied_capture_degradation_tolerance=1.0e-8,
     progress_callback=None,
 ):
     """Optimize only the nonfixed radial columns and retain the best subspace."""
     learning_rate = _finite_positive("learning_rate", learning_rate)
     plateau_relative_improvement = _finite_positive(
         "plateau_relative_improvement", plateau_relative_improvement
+    )
+    if (
+        not isinstance(occupied_capture_degradation_tolerance, (int, float))
+        or isinstance(occupied_capture_degradation_tolerance, bool)
+        or not math.isfinite(occupied_capture_degradation_tolerance)
+        or occupied_capture_degradation_tolerance < 0.0
+        or occupied_capture_degradation_tolerance >= 1.0
+    ):
+        raise ValueError(
+            "occupied_capture_degradation_tolerance must be finite in [0, 1)"
+        )
+    occupied_capture_degradation_tolerance = float(
+        occupied_capture_degradation_tolerance
     )
     if (
         type(max_steps) is not int
@@ -212,6 +234,9 @@ def optimize_periodic_galerkin_basis(
     pending_evaluation = None
     backtracks_from_previous_step = 0
     total_backtracks = 0
+    initial_minimum_occupied_capture = None
+    occupied_capture_floor = None
+    occupied_capture_tolerance = None
 
     for step in range(max_steps + 1):
         coefficients = _assemble(fixed, variable)
@@ -219,10 +244,25 @@ def optimize_periodic_galerkin_basis(
             loss, minimum_capture, maximum_condition = _global_pi_loss(
                 datasets,
                 coefficients,
+                occupied_capture_tolerance=(
+                    1.0 - 1.0e-12
+                    if occupied_capture_tolerance is None
+                    else occupied_capture_tolerance
+                ),
             )
         else:
             loss, minimum_capture, maximum_condition = pending_evaluation
             pending_evaluation = None
+        if initial_minimum_occupied_capture is None:
+            initial_minimum_occupied_capture = minimum_capture
+            occupied_capture_floor = max(
+                0.0,
+                minimum_capture - occupied_capture_degradation_tolerance,
+            )
+            occupied_capture_tolerance = min(
+                1.0 - 1.0e-15,
+                max(1.0e-15, 1.0 - occupied_capture_floor),
+            )
         loss_value = float(loss.detach())
         if not math.isfinite(loss_value):
             raise RuntimeError("periodic Pi loss is non-finite")
@@ -243,6 +283,7 @@ def optimize_periodic_galerkin_basis(
                 "relative_pi_error": math.sqrt(loss_value),
                 "minimum_occupied_capture": minimum_capture,
                 "maximum_overlap_condition": maximum_condition,
+                "occupied_capture_floor": occupied_capture_floor,
                 "learning_rate": float(optimizer.param_groups[0]["lr"]),
                 "backtracks_from_previous_step": backtracks_from_previous_step,
             }
@@ -287,6 +328,7 @@ def optimize_periodic_galerkin_basis(
                 pending_evaluation = _global_pi_loss(
                     datasets,
                     trial_coefficients,
+                    occupied_capture_tolerance=occupied_capture_tolerance,
                 )
             except RuntimeError as error:
                 if str(error) != (
@@ -318,4 +360,6 @@ def optimize_periodic_galerkin_basis(
         stop_reason=stop_reason,
         total_backtracks=total_backtracks,
         final_learning_rate=float(optimizer.param_groups[0]["lr"]),
+        initial_minimum_occupied_capture=initial_minimum_occupied_capture,
+        occupied_capture_floor=occupied_capture_floor,
     )

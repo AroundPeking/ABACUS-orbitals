@@ -84,6 +84,11 @@ def parse_args(argv=None):
         "--plateau-relative-improvement", type=float, default=1.0e-6
     )
     parser.add_argument("--maximum-backtracks", type=int, default=20)
+    parser.add_argument(
+        "--occupied-capture-degradation-tolerance",
+        type=float,
+        default=1.0e-8,
+    )
     return parser.parse_args(argv)
 
 
@@ -183,6 +188,9 @@ def main(argv=None):
                 plateau_patience=args.plateau_patience,
                 plateau_relative_improvement=args.plateau_relative_improvement,
                 maximum_backtracks=args.maximum_backtracks,
+                occupied_capture_degradation_tolerance=(
+                    args.occupied_capture_degradation_tolerance
+                ),
                 progress_callback=record_progress,
             )
         for l, count in enumerate(fixed_nu):
@@ -234,6 +242,13 @@ def main(argv=None):
             "plateau_patience": args.plateau_patience,
             "plateau_relative_improvement": args.plateau_relative_improvement,
             "maximum_backtracks": args.maximum_backtracks,
+            "occupied_capture_degradation_tolerance": (
+                args.occupied_capture_degradation_tolerance
+            ),
+            "initial_minimum_occupied_capture": (
+                fit.initial_minimum_occupied_capture
+            ),
+            "occupied_capture_floor": fit.occupied_capture_floor,
             "total_backtracks": fit.total_backtracks,
             "final_learning_rate": fit.final_learning_rate,
         }
