@@ -8,6 +8,7 @@ code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 validation=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 response_script=$validation/run_selected_candidate_matched_delta_response.slurm
 consumer_script=$validation/run_selected_candidate_matched_delta_reader_d4810f73.slurm
+qavg_script=$validation/run_selected_candidate_matched_headwing_qavg_d4810f73.slurm
 root=$campaign/runs/product-pca-20260825/matched-delta-selected-fixed-prefix-nfreq6-ad29464fd
 q1=$root/q1
 frequency=$campaign/runs/product-pca-20260825/ordinary-sos-selected-grid-full-bz-reader-fractional-nfreq6-d4810f73/SELECTED_SOS_FREQUENCY_GRID.dat
@@ -17,11 +18,14 @@ lock=$root/.release.lock
 q1_job=${Q1_RESPONSE_JOB_ID:?missing completed q1 response job id}
 selected_sos_job=${SELECTED_SOS_JOB_ID:?missing selected SOS LibRPA job id}
 grid_job=${GRID_COULOMB_ARRAY_JOB_ID:?missing grid Coulomb array job id}
+headwing_job=${HEADWING_JOB_ID:?missing selected headwing job id}
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 runtime_gate_hours=18
 
 test -s "$response_script"
 test -s "$consumer_script"
+test -s "$qavg_script"
+test "$headwing_job" -gt 0
 test -s "$frequency"
 test -x "$python"
 test -d "$q1"
@@ -83,12 +87,13 @@ mkdir -p "$root"
   echo q1_response_job=$q1_job
   echo selected_sos_job=$selected_sos_job
   echo grid_coulomb_array_job=$grid_job
+  echo headwing_job=$headwing_job
   echo canonical_q_indices=$canonical_csv
   echo remaining_q_indices=$remaining_csv
   echo runtime_gate_hours=$runtime_gate_hours
   echo q1_wall_seconds=$q1_wall_seconds
   echo frequency_grid_sha256=$(sha256sum "$frequency" | awk '{print $1}')
-  sha256sum "$response_script" "$consumer_script" "$frequency" "$report"
+  sha256sum "$response_script" "$consumer_script" "$qavg_script" "$frequency" "$report"
 } > "$pending"
 
 sbatch --test-only --array="$remaining_csv%1" \
@@ -97,6 +102,8 @@ sbatch --test-only --array="$remaining_csv%1" \
 response_job=$(sbatch --parsable --array="$remaining_csv%1" \
   --export=ALL,SIAB_SOURCE_ROOT="$code",SELECTED_SOS_JOB_ID="$selected_sos_job",GRID_COULOMB_ARRAY_JOB_ID="$grid_job" \
   "$response_script")
+response_job=${response_job%%;*}
+test "$response_job" -gt 0
 echo response_array_job=$response_job >> "$pending"
 
 sbatch --test-only \
@@ -105,8 +112,20 @@ sbatch --test-only \
 consumer_job=$(sbatch --parsable --dependency=afterok:"$response_job" \
   --export=ALL,SIAB_SOURCE_ROOT="$code",Q1_RESPONSE_JOB_ID="$q1_job",RESPONSE_ARRAY_JOB_ID="$response_job",SELECTED_SOS_JOB_ID="$selected_sos_job",GRID_COULOMB_ARRAY_JOB_ID="$grid_job" \
   "$consumer_script")
+consumer_job=${consumer_job%%;*}
+test "$consumer_job" -gt 0
 echo consumer_job=$consumer_job >> "$pending"
+
+sbatch --test-only \
+  --export=ALL,SIAB_SOURCE_ROOT="$code" \
+  "$qavg_script" > "$root/QAVG_TEST_ONLY.txt"
+qavg_job=$(sbatch --parsable --dependency=afterok:"$consumer_job":"$headwing_job" \
+  --export=ALL,SIAB_SOURCE_ROOT="$code" \
+  "$qavg_script")
+qavg_job=${qavg_job%%;*}
+test "$qavg_job" -gt 0
+echo qavg_job=$qavg_job >> "$pending"
 echo status=submitted >> "$pending"
 mv "$pending" "$chain"
 
-echo "C24_SELECTED_MATCHED_DELTA_RELEASE_OK response_job=$response_job consumer_job=$consumer_job"
+echo "C24_SELECTED_MATCHED_DELTA_RELEASE_OK response_job=$response_job consumer_job=$consumer_job qavg_job=$qavg_job"
