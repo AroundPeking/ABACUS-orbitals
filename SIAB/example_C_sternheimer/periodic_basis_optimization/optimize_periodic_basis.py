@@ -98,7 +98,6 @@ def validate_dataset_contract(datasets):
         "primitive_blocks_sha256",
         "primitive_count",
         "raw_auxiliary_dimension",
-        "whitened_auxiliary_rank",
         "primitive_blocks",
     )
     for dataset in datasets[1:]:

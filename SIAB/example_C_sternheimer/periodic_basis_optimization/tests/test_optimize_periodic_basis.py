@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 
@@ -22,6 +23,28 @@ class OptimizePeriodicBasisTest(unittest.TestCase):
         self.assertEqual(MODULE.validate_commit("a" * 40), "a" * 40)
         with self.assertRaisesRegex(ValueError, "commit"):
             MODULE.validate_commit("a1129b06")
+
+    def test_allows_q_dependent_whitened_auxiliary_rank(self):
+        common = {
+            "abacus_commit": "a" * 40,
+            "executable_sha256": "b" * 64,
+            "orbital_sha256": "c" * 64,
+            "pseudopotential_sha256": "d" * 64,
+            "auxiliary_basis_sha256": "e" * 64,
+            "primitive_blocks_sha256": "f" * 64,
+            "primitive_count": 10,
+            "raw_auxiliary_dimension": 8,
+            "primitive_blocks": (("C", 0, 0, 10),),
+        }
+        q1 = SimpleNamespace(**common, whitened_auxiliary_rank=6)
+        q2 = SimpleNamespace(**common, whitened_auxiliary_rank=7)
+        MODULE.validate_dataset_contract((q1, q2))
+
+        changed = dict(common)
+        changed["auxiliary_basis_sha256"] = "0" * 64
+        q2_bad = SimpleNamespace(**changed, whitened_auxiliary_rank=7)
+        with self.assertRaisesRegex(ValueError, "basis/provenance"):
+            MODULE.validate_dataset_contract((q1, q2_bad))
 
 
 if __name__ == "__main__":
