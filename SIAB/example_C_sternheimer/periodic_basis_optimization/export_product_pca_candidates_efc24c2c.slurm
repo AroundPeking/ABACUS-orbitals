@@ -17,7 +17,8 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_EXPORT_FAILED line=$LINENO command=$BASH_
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf
+campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
 exporter=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/export_periodic_orbitals.py
 ng=${SLURM_ARRAY_TASK_ID:?missing g multiplicity}
@@ -28,8 +29,8 @@ case "$ng" in
   *) echo "unsupported g multiplicity: $ng" >&2; exit 2 ;;
 esac
 
-input=$code/runs/product-pca-20260825/joint-${ng}g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
-output=$code/runs/product-pca-20260825/export-joint-${ng}g
+input=$campaign/runs/product-pca-20260825/joint-${ng}g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
+output=$campaign/runs/product-pca-20260825/export-joint-${ng}g
 orbital=$output/C_gga_10au_100Ry_3s3p2d1f${ng}g_product_pca.orb
 
 test "$SLURM_JOB_PARTITION" = p1

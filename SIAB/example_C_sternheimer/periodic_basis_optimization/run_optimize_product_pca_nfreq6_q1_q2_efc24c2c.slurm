@@ -17,7 +17,8 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_JOINT_OPTIMIZATION_FAILED line=$LINENO co
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf
+campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q1=$producer_root/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q1_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
@@ -27,12 +28,12 @@ ng=${SLURM_ARRAY_TASK_ID:?missing g multiplicity}
 
 case "$ng" in
   2)
-    initial=$code/seeds/C_3s3p2d1f2g_q1_lowfreq.txt
+    initial=$campaign/seeds/C_3s3p2d1f2g_q1_lowfreq.txt
     initial_sha=835ed71ccc3d590f60fac3257ee613260b80d11c88528fda1d3bf5355e81c059
     nu=3,3,2,1,2
     ;;
   3)
-    initial=$code/seeds/C_3s3p2d1f3g_q1_lowfreq.txt
+    initial=$campaign/seeds/C_3s3p2d1f3g_q1_lowfreq.txt
     initial_sha=40ef9cb46c3f1d33b634b4ae0b601a712d1fd9ab14bc619e0593f24d8a0cca58
     nu=3,3,2,1,3
     ;;
@@ -42,7 +43,7 @@ case "$ng" in
     ;;
 esac
 
-output=$code/runs/product-pca-20260825/joint-${ng}g-nfreq6-q1-q2
+output=$campaign/runs/product-pca-20260825/joint-${ng}g-nfreq6-q1-q2
 
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1

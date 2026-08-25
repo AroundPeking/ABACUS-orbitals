@@ -18,6 +18,25 @@ class ProductPcaJobProvenanceTest(unittest.TestCase):
             self.assertNotIn("git -C", text)
             self.assertIn('test "$(cat "$code/.git/HEAD")" = "$siab_commit"', text)
 
+    def test_compute_jobs_separate_immutable_code_from_campaign_data(self):
+        scripts = (
+            "run_optimize_product_pca_nfreq6_q1_q2_efc24c2c.slurm",
+            "run_compare_product_pca_heldout_q3_efc24c2c.slurm",
+            "export_product_pca_candidates_efc24c2c.slurm",
+        )
+        for script in scripts:
+            text = (CAMPAIGN / script).read_text(encoding="ascii")
+            self.assertIn(
+                "code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf",
+                text,
+            )
+            self.assertIn(
+                "campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c",
+                text,
+            )
+            self.assertNotIn("$code/runs/product-pca-20260825", text)
+            self.assertNotIn("$code/seeds/", text)
+
 
 if __name__ == "__main__":
     unittest.main()

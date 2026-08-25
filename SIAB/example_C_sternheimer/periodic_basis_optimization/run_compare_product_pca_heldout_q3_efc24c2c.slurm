@@ -16,17 +16,18 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_HELDOUT_FAILED line=$LINENO command=$BASH
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5d799cf
+campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q3=$producer_root/c-diamond-g24-fd8-nfreq6-q3-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q3_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
-original=$code/seeds/C_TZDP_original.txt
-seed_two_g=$code/seeds/C_3s3p2d1f2g_q1_lowfreq.txt
-seed_three_g=$code/seeds/C_3s3p2d1f3g_q1_lowfreq.txt
-joint_two_g=$code/runs/product-pca-20260825/joint-2g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
-joint_three_g=$code/runs/product-pca-20260825/joint-3g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
+original=$campaign/seeds/C_TZDP_original.txt
+seed_two_g=$campaign/seeds/C_3s3p2d1f2g_q1_lowfreq.txt
+seed_three_g=$campaign/seeds/C_3s3p2d1f3g_q1_lowfreq.txt
+joint_two_g=$campaign/runs/product-pca-20260825/joint-2g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
+joint_three_g=$campaign/runs/product-pca-20260825/joint-3g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
 comparator=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/compare_periodic_candidates.py
-output=$code/runs/product-pca-20260825/heldout-q3-comparison
+output=$campaign/runs/product-pca-20260825/heldout-q3-comparison
 
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
