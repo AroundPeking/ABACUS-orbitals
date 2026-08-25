@@ -33,6 +33,7 @@ test "$SLURM_CPUS_PER_TASK" = 40
 test "$ordinal" -ge 1
 test "$ordinal" -le 64
 test ! -e "$work"
+test -f "$abacus"
 test -x "$abacus"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb; do
