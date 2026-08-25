@@ -136,6 +136,79 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             ("occupied_capture_boundary", "maximum_steps"),
         )
 
+    def test_fixed_prefix_reference_sets_floor_from_immutable_basis(self):
+        dataset = self.three_level_dataset()
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
+        def smooth_loss(
+            _datasets,
+            coefficients,
+            *,
+            occupied_capture_tolerance,
+        ):
+            coordinate = coefficients["C"][0][2, 1]
+            capture = 0.9 - 0.01 * float(coordinate.detach()) ** 2
+            if capture < 1.0 - occupied_capture_tolerance:
+                raise RuntimeError(
+                    "candidate basis does not capture the fixed occupied manifold"
+                )
+            return (coordinate - 1.0) ** 2, capture, 1.0
+
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "_minimum_occupied_capture",
+            return_value=0.8,
+        ) as fixed_capture, mock.patch.object(
+            periodic_galerkin_fit,
+            "_global_pi_loss",
+            side_effect=smooth_loss,
+        ):
+            result = optimize_periodic_galerkin_basis(
+                (dataset,),
+                initial,
+                fixed_nu={"C": (1,)},
+                learning_rate=0.1,
+                max_steps=1,
+                minimum_steps=0,
+                plateau_patience=1,
+                plateau_relative_improvement=1.0e-8,
+                occupied_capture_reference="fixed_prefix",
+            )
+
+        fixed_capture.assert_called_once()
+        self.assertEqual(result.occupied_capture_reference, "fixed_prefix")
+        self.assertAlmostEqual(result.reference_minimum_occupied_capture, 0.8)
+        self.assertAlmostEqual(result.initial_minimum_occupied_capture, 0.9)
+        self.assertAlmostEqual(result.occupied_capture_floor, 0.8 - 1.0e-8)
+        self.assertLess(result.best_loss, result.initial_loss)
+
+    def test_fixed_prefix_capture_is_evaluated_in_mother_space_metric(self):
+        dataset = periodic_galerkin_fit.prepare_periodic_occupied_reference(
+            self.three_level_dataset()
+        )
+        fixed = {
+            "C": [
+                torch.tensor(
+                    [[1.0], [0.0], [0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
+        capture = periodic_galerkin_fit._minimum_occupied_capture(
+            (dataset,),
+            fixed,
+        )
+
+        self.assertAlmostEqual(capture, 1.0)
+
     def test_global_loss_uses_block_contraction(self):
         dataset = self.three_level_dataset()
         response = dataset.reference_response.clone()

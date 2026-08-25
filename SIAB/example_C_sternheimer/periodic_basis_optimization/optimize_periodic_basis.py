@@ -86,6 +86,11 @@ def parse_args(argv=None):
     parser.add_argument("--maximum-backtracks", type=int, default=20)
     parser.add_argument("--block-cache-workers", type=int, default=1)
     parser.add_argument(
+        "--occupied-capture-reference",
+        choices=("initial_candidate", "fixed_prefix"),
+        default="initial_candidate",
+    )
+    parser.add_argument(
         "--occupied-capture-degradation-tolerance",
         type=float,
         default=1.0e-8,
@@ -192,6 +197,7 @@ def main(argv=None):
                 occupied_capture_degradation_tolerance=(
                     args.occupied_capture_degradation_tolerance
                 ),
+                occupied_capture_reference=args.occupied_capture_reference,
                 block_cache_workers=args.block_cache_workers,
                 progress_callback=record_progress,
             )
@@ -245,6 +251,10 @@ def main(argv=None):
             "plateau_relative_improvement": args.plateau_relative_improvement,
             "maximum_backtracks": args.maximum_backtracks,
             "block_cache_workers": args.block_cache_workers,
+            "occupied_capture_reference": fit.occupied_capture_reference,
+            "reference_minimum_occupied_capture": (
+                fit.reference_minimum_occupied_capture
+            ),
             "occupied_capture_degradation_tolerance": (
                 args.occupied_capture_degradation_tolerance
             ),

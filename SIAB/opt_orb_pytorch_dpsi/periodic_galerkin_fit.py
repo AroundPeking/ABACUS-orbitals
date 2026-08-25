@@ -8,7 +8,10 @@ import math
 import torch
 
 from periodic_galerkin_data import PeriodicGalerkinDataset
-from periodic_galerkin_basis import prepare_periodic_block_contraction_record
+from periodic_galerkin_basis import (
+    build_primitive_to_candidate,
+    prepare_periodic_block_contraction_record,
+)
 from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
 )
@@ -26,6 +29,8 @@ class PeriodicGalerkinFitResult:
     stop_reason: str
     total_backtracks: int
     final_learning_rate: float
+    occupied_capture_reference: str
+    reference_minimum_occupied_capture: float
     initial_minimum_occupied_capture: float
     occupied_capture_floor: float
 
@@ -174,6 +179,73 @@ def _clone_coefficients(coefficients):
     }
 
 
+def _adjoint(value):
+    return value.transpose(-2, -1).conj()
+
+
+def _minimum_occupied_capture(
+    datasets,
+    coefficients,
+    *,
+    relative_rank_tolerance=1.0e-12,
+    condition_limit=1.0e12,
+):
+    minimum_capture = math.inf
+    with torch.no_grad():
+        for dataset in datasets:
+            candidate = build_primitive_to_candidate(
+                dataset.primitive_blocks,
+                dataset.primitive_count,
+                coefficients,
+            )
+            transform = candidate.transform
+            for record in dataset.kpoints:
+                overlap = _adjoint(transform).matmul(record.overlap).matmul(
+                    transform
+                )
+                overlap = 0.5 * (overlap + _adjoint(overlap))
+                overlap_eigenvalue = torch.linalg.eigvalsh(overlap)
+                maximum = torch.max(overlap_eigenvalue)
+                if float(maximum) <= 0.0:
+                    raise RuntimeError(
+                        "fixed radial prefix overlap has no positive direction"
+                    )
+                minimum = torch.min(overlap_eigenvalue)
+                if float(minimum) <= relative_rank_tolerance * float(maximum):
+                    raise RuntimeError("fixed radial prefix overlap is rank deficient")
+                if float(maximum / minimum) > condition_limit:
+                    raise RuntimeError(
+                        "fixed radial prefix overlap condition number exceeds limit"
+                    )
+                identity = torch.eye(overlap.shape[0], dtype=torch.complex128)
+                cholesky = torch.linalg.cholesky(overlap)
+                lowdin = torch.linalg.solve(_adjoint(cholesky), identity)
+                occupied = record.occupied_projection.matmul(transform).matmul(
+                    lowdin
+                )
+                if record.occupied_projection_normalization is not None:
+                    occupied = record.occupied_projection_normalization.matmul(
+                        occupied
+                    )
+                capture = occupied.matmul(_adjoint(occupied))
+                capture = 0.5 * (capture + _adjoint(capture))
+                capture_eigenvalue = torch.linalg.eigvalsh(capture)
+                if (
+                    capture_eigenvalue.numel() != record.occupation.numel()
+                    or float(torch.max(capture_eigenvalue)) <= 0.0
+                ):
+                    raise RuntimeError(
+                        "fixed radial prefix does not span the occupied manifold"
+                    )
+                minimum_capture = min(
+                    minimum_capture,
+                    float(torch.min(capture_eigenvalue)),
+                )
+    if not math.isfinite(minimum_capture):
+        raise RuntimeError("fixed radial prefix occupied capture is non-finite")
+    return minimum_capture
+
+
 def _prepare_block_contraction_task(task):
     record, primitive_blocks, coefficients = task
     return prepare_periodic_block_contraction_record(
@@ -218,6 +290,7 @@ def optimize_periodic_galerkin_basis(
     plateau_relative_improvement=1.0e-6,
     maximum_backtracks=20,
     occupied_capture_degradation_tolerance=1.0e-8,
+    occupied_capture_reference="initial_candidate",
     block_cache_workers=1,
     progress_callback=None,
 ):
@@ -228,6 +301,10 @@ def optimize_periodic_galerkin_basis(
     )
     if type(block_cache_workers) is not int or block_cache_workers <= 0:
         raise ValueError("block_cache_workers must be a positive integer")
+    if occupied_capture_reference not in ("initial_candidate", "fixed_prefix"):
+        raise ValueError(
+            "occupied_capture_reference must be initial_candidate or fixed_prefix"
+        )
     if (
         not isinstance(occupied_capture_degradation_tolerance, (int, float))
         or isinstance(occupied_capture_degradation_tolerance, bool)
@@ -259,6 +336,12 @@ def optimize_periodic_galerkin_basis(
         raise ValueError("progress_callback must be callable")
     _retract_variables(fixed, variable)
     initial_coefficients = _assemble(fixed, variable)
+    reference_minimum_occupied_capture = None
+    if occupied_capture_reference == "fixed_prefix":
+        reference_minimum_occupied_capture = _minimum_occupied_capture(
+            datasets,
+            fixed,
+        )
     datasets = _prepare_block_contraction_caches(
         datasets,
         initial_coefficients,
@@ -298,9 +381,12 @@ def optimize_periodic_galerkin_basis(
             pending_evaluation = None
         if initial_minimum_occupied_capture is None:
             initial_minimum_occupied_capture = minimum_capture
+            if reference_minimum_occupied_capture is None:
+                reference_minimum_occupied_capture = minimum_capture
             occupied_capture_floor = max(
                 0.0,
-                minimum_capture - occupied_capture_degradation_tolerance,
+                reference_minimum_occupied_capture
+                - occupied_capture_degradation_tolerance,
             )
             occupied_capture_tolerance = min(
                 1.0 - 1.0e-15,
@@ -403,6 +489,8 @@ def optimize_periodic_galerkin_basis(
         stop_reason=stop_reason,
         total_backtracks=total_backtracks,
         final_learning_rate=float(optimizer.param_groups[0]["lr"]),
+        occupied_capture_reference=occupied_capture_reference,
+        reference_minimum_occupied_capture=reference_minimum_occupied_capture,
         initial_minimum_occupied_capture=initial_minimum_occupied_capture,
         occupied_capture_floor=occupied_capture_floor,
     )
