@@ -11,6 +11,24 @@ SPEC.loader.exec_module(MODULE)
 
 
 class OptimizePeriodicBasisTest(unittest.TestCase):
+    def test_parses_explicit_block_cache_worker_count(self):
+        args = MODULE.parse_args(
+            [
+                "--dataset",
+                "q1",
+                "--initial",
+                "initial.txt",
+                "--output-directory",
+                "result",
+                "--siab-commit",
+                "a" * 40,
+                "--block-cache-workers",
+                "8",
+            ]
+        )
+
+        self.assertEqual(args.block_cache_workers, 8)
+
     def test_fixed_prefix_must_not_exceed_candidate_counts(self):
         self.assertEqual(
             MODULE.parse_channel_counts("2,2,1,0,0", (3, 3, 2, 0, 0)),

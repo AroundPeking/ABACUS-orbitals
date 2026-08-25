@@ -174,6 +174,54 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             ]
         }
 
+        serial = optimize_periodic_galerkin_basis(
+            (dataset,),
+            initial,
+            fixed_nu={"C": (1,)},
+            learning_rate=0.01,
+            max_steps=1,
+            minimum_steps=0,
+            plateau_patience=1,
+            plateau_relative_improvement=1.0e-8,
+            block_cache_workers=1,
+        )
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "prepare_periodic_block_contraction_record",
+            wraps=periodic_galerkin_basis.prepare_periodic_block_contraction_record,
+        ) as prepare:
+            parallel = optimize_periodic_galerkin_basis(
+                (dataset,),
+                initial,
+                fixed_nu={"C": (1,)},
+                learning_rate=0.01,
+                max_steps=1,
+                minimum_steps=0,
+                plateau_patience=1,
+                plateau_relative_improvement=1.0e-8,
+            )
+
+        self.assertEqual(prepare.call_count, len(dataset.kpoints))
+        self.assertEqual(parallel.history, serial.history)
+        self.assertTrue(
+            torch.equal(
+                parallel.coefficients["C"][0],
+                serial.coefficients["C"][0],
+            )
+        )
+
+    def test_optimizer_accepts_parallel_block_cache_preparation(self):
+        dataset = self.three_level_dataset()
+        dataset = replace(dataset, kpoints=dataset.kpoints * 2)
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
         with mock.patch.object(
             periodic_galerkin_fit,
             "prepare_periodic_block_contraction_record",
@@ -188,6 +236,7 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
                 minimum_steps=0,
                 plateau_patience=1,
                 plateau_relative_improvement=1.0e-8,
+                block_cache_workers=2,
             )
 
         self.assertEqual(prepare.call_count, len(dataset.kpoints))

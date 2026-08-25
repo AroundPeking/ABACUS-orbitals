@@ -1,6 +1,7 @@
 """Optimize compact SIAB radial subspaces against exact periodic Pi."""
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import math
 
@@ -173,6 +174,38 @@ def _clone_coefficients(coefficients):
     }
 
 
+def _prepare_block_contraction_task(task):
+    record, primitive_blocks, coefficients = task
+    return prepare_periodic_block_contraction_record(
+        record,
+        primitive_blocks,
+        coefficients,
+    )
+
+
+def _prepare_block_contraction_caches(datasets, coefficients, workers):
+    tasks = tuple(
+        (record, dataset.primitive_blocks, coefficients)
+        for dataset in datasets
+        for record in dataset.kpoints
+    )
+    if workers == 1:
+        prepared = tuple(_prepare_block_contraction_task(task) for task in tasks)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            prepared = tuple(executor.map(_prepare_block_contraction_task, tasks))
+
+    offset = 0
+    cached_datasets = []
+    for dataset in datasets:
+        count = len(dataset.kpoints)
+        cached_datasets.append(
+            replace(dataset, kpoints=prepared[offset:offset + count])
+        )
+        offset += count
+    return tuple(cached_datasets)
+
+
 def optimize_periodic_galerkin_basis(
     datasets,
     initial,
@@ -185,6 +218,7 @@ def optimize_periodic_galerkin_basis(
     plateau_relative_improvement=1.0e-6,
     maximum_backtracks=20,
     occupied_capture_degradation_tolerance=1.0e-8,
+    block_cache_workers=1,
     progress_callback=None,
 ):
     """Optimize only the nonfixed radial columns and retain the best subspace."""
@@ -192,6 +226,8 @@ def optimize_periodic_galerkin_basis(
     plateau_relative_improvement = _finite_positive(
         "plateau_relative_improvement", plateau_relative_improvement
     )
+    if type(block_cache_workers) is not int or block_cache_workers <= 0:
+        raise ValueError("block_cache_workers must be a positive integer")
     if (
         not isinstance(occupied_capture_degradation_tolerance, (int, float))
         or isinstance(occupied_capture_degradation_tolerance, bool)
@@ -223,19 +259,10 @@ def optimize_periodic_galerkin_basis(
         raise ValueError("progress_callback must be callable")
     _retract_variables(fixed, variable)
     initial_coefficients = _assemble(fixed, variable)
-    datasets = tuple(
-        replace(
-            dataset,
-            kpoints=tuple(
-                prepare_periodic_block_contraction_record(
-                    record,
-                    dataset.primitive_blocks,
-                    initial_coefficients,
-                )
-                for record in dataset.kpoints
-            ),
-        )
-        for dataset in datasets
+    datasets = _prepare_block_contraction_caches(
+        datasets,
+        initial_coefficients,
+        block_cache_workers,
     )
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
 

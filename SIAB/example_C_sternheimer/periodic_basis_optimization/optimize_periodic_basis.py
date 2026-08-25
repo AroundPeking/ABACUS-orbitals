@@ -84,6 +84,7 @@ def parse_args(argv=None):
         "--plateau-relative-improvement", type=float, default=1.0e-6
     )
     parser.add_argument("--maximum-backtracks", type=int, default=20)
+    parser.add_argument("--block-cache-workers", type=int, default=1)
     parser.add_argument(
         "--occupied-capture-degradation-tolerance",
         type=float,
@@ -191,6 +192,7 @@ def main(argv=None):
                 occupied_capture_degradation_tolerance=(
                     args.occupied_capture_degradation_tolerance
                 ),
+                block_cache_workers=args.block_cache_workers,
                 progress_callback=record_progress,
             )
         for l, count in enumerate(fixed_nu):
@@ -242,6 +244,7 @@ def main(argv=None):
             "plateau_patience": args.plateau_patience,
             "plateau_relative_improvement": args.plateau_relative_improvement,
             "maximum_backtracks": args.maximum_backtracks,
+            "block_cache_workers": args.block_cache_workers,
             "occupied_capture_degradation_tolerance": (
                 args.occupied_capture_degradation_tolerance
             ),
