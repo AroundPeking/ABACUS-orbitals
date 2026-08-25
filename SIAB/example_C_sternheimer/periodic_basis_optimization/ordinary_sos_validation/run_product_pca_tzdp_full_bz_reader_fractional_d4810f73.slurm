@@ -18,7 +18,7 @@ module load oneapi/2024.2
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 source_work=$campaign/runs/product-pca-20260825/ordinary-sos-original-tzdp-grid-full-bz-body-nfreq6-ad29464fd
 template=$source_work/librpa.in
-librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-test
+librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel
 librpa=$librpa_root/chi0_main.exe
 librpa_commit=d4810f73aab20c36e69b1c353c945b77f40931c9
 build_provenance=$librpa_root/PROVENANCE-d4810f73.txt

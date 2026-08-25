@@ -27,7 +27,7 @@ grep -Fq 'determinant_route=single_rank_lapack_exact_bvk' "$lapack_control"
 grep -Fq 'reference_scalapack_total=-0.501460253' "$lapack_control"
 
 grep -Fq 'd4810f73aab20c36e69b1c353c945b77f40931c9' "$reader_control"
-grep -Fq 'LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-test' "$reader_control"
+grep -Fq 'LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel' "$reader_control"
 grep -Fq 'bz_coordinate_source=fractional_columns' "$reader_control"
 grep -Fq 'maximum_reported_discrepancy=7.82805267e-06' "$reader_control"
 grep -Fq 'abs(total - (-0.501460253)) <= 1.0e-9' "$reader_control"
