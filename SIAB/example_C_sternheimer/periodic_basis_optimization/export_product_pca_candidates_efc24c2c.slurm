@@ -77,8 +77,8 @@ grep -qx "Number of Gorbital-->       $ng" "$orbital"
   echo status=success
   echo purpose=periodic_c_product_pca_joint_candidate_export
   echo siab_commit=$siab_commit
-  echo optimizer_job=3118689_${ng}
-  echo heldout_gate_job=3118691
+  echo optimizer_job=${OPTIMIZER_ARRAY_JOB_ID:?missing optimizer array job id}_${ng}
+  echo heldout_gate_job=${HELDOUT_JOB_ID:?missing heldout job id}
   echo basis=3s3p2d1f${ng}g
   echo ecut_ry=100
   echo rcut_bohr=10
