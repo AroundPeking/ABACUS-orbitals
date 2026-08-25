@@ -18,7 +18,7 @@ module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
 code=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=efc24c2c02a460cc08ffdd6bc5c016b5ccf29ba1
+siab_commit=d5d799cfa2003fee79376d0578cb826a3c31030a
 exporter=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/export_periodic_orbitals.py
 ng=${SLURM_ARRAY_TASK_ID:?missing g multiplicity}
 
