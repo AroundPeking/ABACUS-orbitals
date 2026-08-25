@@ -79,7 +79,7 @@ mkdir -p "$output"
   echo status=running
   echo purpose=periodic_c_product_pca_multifrequency_multiq_joint_optimization
   echo siab_commit=$siab_commit
-  echo producer_job=3118459
+  echo producer_jobs=${PRODUCER_JOB_IDS:?missing producer job ids}
   echo producer_abacus_commit=711af860c125b9757c344a1961b63524c550cfe4
   echo datasets=q1,q2
   echo full_q_indices=1,22

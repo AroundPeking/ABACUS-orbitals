@@ -65,7 +65,7 @@ mkdir -p "$output"
   echo status=running
   echo purpose=periodic_c_product_pca_independent_q3_validation
   echo siab_commit=$siab_commit
-  echo producer_job=3118460_3
+  echo producer_job=${Q3_PRODUCER_JOB_ID:?missing q3 producer job id}
   echo optimizer_job=${OPTIMIZER_JOB_ID:-unknown}
   echo dataset=q3
   echo full_q_index=43
