@@ -61,7 +61,7 @@ class RepairBzSamplingIdentityTest(unittest.TestCase):
                 [str(TOOL), str(source), str(output)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                universal_newlines=True,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(output.exists())
