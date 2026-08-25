@@ -46,6 +46,7 @@ class PeriodicGalerkinKPoint:
     source: torch.Tensor
     reference_projection: torch.Tensor
     occupied_projection_normalization: torch.Tensor = None
+    block_contraction_cache: object = None
 
 
 @dataclass(frozen=True)

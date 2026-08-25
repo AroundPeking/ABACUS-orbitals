@@ -1,12 +1,13 @@
 """Optimize compact SIAB radial subspaces against exact periodic Pi."""
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import torch
 
 from periodic_galerkin_data import PeriodicGalerkinDataset
+from periodic_galerkin_basis import prepare_periodic_block_contraction_record
 from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
 )
@@ -221,6 +222,21 @@ def optimize_periodic_galerkin_basis(
     if progress_callback is not None and not callable(progress_callback):
         raise ValueError("progress_callback must be callable")
     _retract_variables(fixed, variable)
+    initial_coefficients = _assemble(fixed, variable)
+    datasets = tuple(
+        replace(
+            dataset,
+            kpoints=tuple(
+                prepare_periodic_block_contraction_record(
+                    record,
+                    dataset.primitive_blocks,
+                    initial_coefficients,
+                )
+                for record in dataset.kpoints
+            ),
+        )
+        for dataset in datasets
+    )
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
 
     history = []

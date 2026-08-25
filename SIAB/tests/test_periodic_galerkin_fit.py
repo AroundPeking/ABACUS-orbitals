@@ -6,6 +6,7 @@ from unittest import mock
 import torch
 
 import common  # noqa: F401 - configures the optimizer import path
+import periodic_galerkin_basis
 import periodic_galerkin_fit
 from periodic_galerkin_data import PeriodicGalerkinPrimitiveBlock
 from periodic_galerkin_fit import optimize_periodic_galerkin_basis
@@ -161,6 +162,35 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
         self.assertEqual(
             evaluator.call_args.kwargs["occupied_capture_tolerance"], 0.2
         )
+
+    def test_optimizer_prepares_constant_block_slices_once_per_kpoint(self):
+        dataset = self.three_level_dataset()
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "prepare_periodic_block_contraction_record",
+            wraps=periodic_galerkin_basis.prepare_periodic_block_contraction_record,
+        ) as prepare:
+            optimize_periodic_galerkin_basis(
+                (dataset,),
+                initial,
+                fixed_nu={"C": (1,)},
+                learning_rate=0.01,
+                max_steps=1,
+                minimum_steps=0,
+                plateau_patience=1,
+                plateau_relative_improvement=1.0e-8,
+            )
+
+        self.assertEqual(prepare.call_count, len(dataset.kpoints))
 
     def test_rejects_fixed_prefix_larger_than_candidate_channel(self):
         dataset = self.three_level_dataset()

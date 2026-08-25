@@ -1,6 +1,6 @@
 """Map shared SIAB radial coefficients into periodic Bloch-Bessel blocks."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 from typing import Tuple
@@ -35,6 +35,17 @@ class PeriodicGalerkinCandidateOperators:
     source: torch.Tensor
     occupied_projection: torch.Tensor
     columns: Tuple[PeriodicGalerkinCandidateColumn, ...]
+
+
+@dataclass(frozen=True)
+class PeriodicGalerkinBlockContractionCache:
+    coefficient_profile: tuple
+    groups: dict
+    active: tuple
+    overlap_blocks: dict
+    hamiltonian_blocks: dict
+    source_blocks: dict
+    occupied_projection_blocks: dict
 
 
 def _next_nonempty(lines, index):
@@ -279,6 +290,14 @@ def _active_groups(primitive_blocks, coefficients):
     return groups, active
 
 
+def _coefficient_profile(coefficients):
+    return tuple(
+        (element, l, int(channel.shape[0]), int(channel.shape[1]))
+        for element in sorted(coefficients)
+        for l, channel in enumerate(coefficients[element])
+    )
+
+
 def _stack_operator_blocks(operator, row_blocks, column_blocks):
     return torch.stack(
         tuple(
@@ -298,7 +317,75 @@ def _stack_operator_blocks(operator, row_blocks, column_blocks):
     )
 
 
-def _contract_operator(operator, groups, active, coefficients):
+def _stack_row_blocks(rows, blocks):
+    return torch.stack(
+        tuple(
+            rows[..., block.offset:block.offset + block.n_primitive]
+            for block in blocks
+        ),
+        dim=-2,
+    )
+
+
+def prepare_periodic_block_contraction_record(
+    record,
+    primitive_blocks,
+    coefficients,
+):
+    """Cache coefficient-independent primitive slices for one k point."""
+    if not isinstance(record, PeriodicGalerkinKPoint):
+        raise ValueError("record must be a PeriodicGalerkinKPoint")
+    profile = _coefficient_profile(coefficients)
+    if record.block_contraction_cache is not None:
+        if record.block_contraction_cache.coefficient_profile != profile:
+            raise ValueError("block contraction cache coefficient profile mismatch")
+        return record
+    groups, active = _active_groups(primitive_blocks, coefficients)
+    if not active:
+        raise ValueError("candidate basis must be nonempty")
+    groups = {key: tuple(blocks) for key, blocks in groups.items()}
+    active = tuple(active)
+    overlap_blocks = {}
+    hamiltonian_blocks = {}
+    for row_key, row_blocks in groups.items():
+        for column_key, column_blocks in groups.items():
+            key = (row_key, column_key)
+            overlap_blocks[key] = _stack_operator_blocks(
+                record.overlap,
+                row_blocks,
+                column_blocks,
+            )
+            hamiltonian_blocks[key] = _stack_operator_blocks(
+                record.hamiltonian_ha,
+                row_blocks,
+                column_blocks,
+            )
+    cache = PeriodicGalerkinBlockContractionCache(
+        coefficient_profile=profile,
+        groups=groups,
+        active=active,
+        overlap_blocks=overlap_blocks,
+        hamiltonian_blocks=hamiltonian_blocks,
+        source_blocks={
+            key: _stack_row_blocks(record.source, blocks)
+            for key, blocks in groups.items()
+        },
+        occupied_projection_blocks={
+            key: _stack_row_blocks(record.occupied_projection, blocks)
+            for key, blocks in groups.items()
+        },
+    )
+    return replace(record, block_contraction_cache=cache)
+
+
+def _contract_operator(
+    operator,
+    groups,
+    active,
+    coefficients,
+    *,
+    prepared_blocks=None,
+):
     grouped = {}
     for row_key, row_blocks in groups.items():
         row_radial = coefficients[row_key[0]][row_key[1]].to(operator.dtype)
@@ -306,7 +393,11 @@ def _contract_operator(operator, groups, active, coefficients):
             column_radial = coefficients[column_key[0]][column_key[1]].to(
                 operator.dtype
             )
-            blocks = _stack_operator_blocks(operator, row_blocks, column_blocks)
+            blocks = (
+                _stack_operator_blocks(operator, row_blocks, column_blocks)
+                if prepared_blocks is None
+                else prepared_blocks[(row_key, column_key)]
+            )
             grouped[(row_key, column_key)] = torch.einsum(
                 "rz,abrs,sw->azbw",
                 row_radial.conj(),
@@ -330,16 +421,21 @@ def _contract_operator(operator, groups, active, coefficients):
     return torch.cat(tuple(rows), dim=0)
 
 
-def _contract_rows(rows, groups, active, coefficients):
+def _contract_rows(
+    rows,
+    groups,
+    active,
+    coefficients,
+    *,
+    prepared_blocks=None,
+):
     grouped = {}
     for key, blocks in groups.items():
         radial = coefficients[key[0]][key[1]].to(rows.dtype)
-        primitive = torch.stack(
-            tuple(
-                rows[..., block.offset:block.offset + block.n_primitive]
-                for block in blocks
-            ),
-            dim=-2,
+        primitive = (
+            _stack_row_blocks(rows, blocks)
+            if prepared_blocks is None
+            else prepared_blocks[key]
         )
         grouped[key] = torch.einsum("...ar,rz->...az", primitive, radial)
     return torch.cat(
@@ -358,28 +454,48 @@ def contract_periodic_candidate_operators(record, primitive_blocks, coefficients
         primitive_count,
         coefficients,
     )
-    groups, active = _active_groups(primitive_blocks, coefficients)
-    if not active:
-        raise ValueError("candidate basis must be nonempty")
+    cache = record.block_contraction_cache
+    if cache is None:
+        groups, active = _active_groups(primitive_blocks, coefficients)
+        if not active:
+            raise ValueError("candidate basis must be nonempty")
+    else:
+        if not isinstance(cache, PeriodicGalerkinBlockContractionCache):
+            raise ValueError("record has an invalid block contraction cache")
+        if cache.coefficient_profile != _coefficient_profile(coefficients):
+            raise ValueError("block contraction cache coefficient profile mismatch")
+        groups = cache.groups
+        active = cache.active
     return PeriodicGalerkinCandidateOperators(
         overlap=_contract_operator(
             record.overlap,
             groups,
             active,
             coefficients,
+            prepared_blocks=None if cache is None else cache.overlap_blocks,
         ),
         hamiltonian_ha=_contract_operator(
             record.hamiltonian_ha,
             groups,
             active,
             coefficients,
+            prepared_blocks=None if cache is None else cache.hamiltonian_blocks,
         ),
-        source=_contract_rows(record.source, groups, active, coefficients),
+        source=_contract_rows(
+            record.source,
+            groups,
+            active,
+            coefficients,
+            prepared_blocks=None if cache is None else cache.source_blocks,
+        ),
         occupied_projection=_contract_rows(
             record.occupied_projection,
             groups,
             active,
             coefficients,
+            prepared_blocks=(
+                None if cache is None else cache.occupied_projection_blocks
+            ),
         ),
         columns=candidate.columns,
     )
