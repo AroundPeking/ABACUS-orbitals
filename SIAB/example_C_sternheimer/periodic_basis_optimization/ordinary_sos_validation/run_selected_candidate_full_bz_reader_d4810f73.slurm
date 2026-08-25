@@ -16,11 +16,13 @@ trap 'status=$?; echo "C24_SELECTED_FRACTIONAL_READER_RPA_FAILED line=$LINENO co
 module load oneapi/2024.2
 
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-e4f1914a
+code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 selection_root=$campaign/runs/product-pca-20260825/selected-fixed-prefix-checkpoint-500
 selection=$selection_root/SELECTED_CANDIDATE.json
 grid_root=$campaign/runs/product-pca-20260825/grid-coulomb-selected-fixed-prefix-full-bz-ad29464fd
 template=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/librpa_tzdp_grid_full_bz_nfreq6.in
+frequency_extractor=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/extract_librpa_frequency_grid.py
+frequency_python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel
 librpa=$librpa_root/chi0_main.exe
 librpa_commit=d4810f73aab20c36e69b1c353c945b77f40931c9
@@ -42,6 +44,8 @@ expected_librpa_sha=$(tail -1 "$build_provenance" | awk '{print $1}')
 test "${#expected_librpa_sha}" = 64
 test "$(sha256sum "$librpa" | awk '{print $1}')" = "$expected_librpa_sha"
 test -s "$template"
+test -s "$frequency_extractor"
+test -x "$frequency_python"
 grep -Eq '^use_scalapack_ecrpa[[:space:]]*=[[:space:]]*t$' "$template"
 grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*f$' "$template"
 grep -Eq '^prefix_coul_full[[:space:]]*=[[:space:]]*v1_coulomb_grid_iq_$' "$template"
@@ -136,6 +140,22 @@ cd "$work"
 grep -Fq "Canonicalized BZ Cartesian k-vectors from fractional coordinates; maximum reported discrepancy = $maximum_reported_discrepancy" librpa.out
 grep -q '^RPA correlation energy (Hartree)' librpa.out
 grep -q '^| Total EcRPA:' librpa.out
+"$frequency_python" "$frequency_extractor" \
+  --source librpa.out \
+  --output SELECTED_SOS_FREQUENCY_GRID.dat \
+  --manifest SELECTED_SOS_FREQUENCY_GRID.json \
+  --expected-nfreq 6 > frequency_extract.out
+python3 - SELECTED_SOS_FREQUENCY_GRID.json <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))
+assert payload["status"] == "success"
+assert payload["nfreq"] == 6
+assert len(payload["frequencies_ha"]) == 6
+assert len(payload["weights_ha"]) == 6
+PY
 python3 - librpa.out > RESULT_SUMMARY.txt <<'PY'
 import math
 import re
@@ -177,8 +197,12 @@ PY
 
 {
   echo status=success
+  echo frequency_grid_source=selected_candidate_sos
+  echo matched_delta_st_frequency_file=SELECTED_SOS_FREQUENCY_GRID.dat
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' librpa.time
-  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt
+  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt \
+    SELECTED_SOS_FREQUENCY_GRID.dat SELECTED_SOS_FREQUENCY_GRID.json \
+    frequency_extract.out "$frequency_extractor"
 } >> provenance.txt
 
 echo "C24_SELECTED_FRACTIONAL_READER_RPA_OK work=$work"

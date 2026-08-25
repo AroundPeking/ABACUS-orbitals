@@ -43,11 +43,18 @@ class SelectedCandidateFullBzSosContractTest(unittest.TestCase):
         ).read_text(encoding="ascii")
 
         self.assertIn("d4810f73aab20c36e69b1c353c945b77f40931c9", text)
+        self.assertIn("SIAB_SOURCE_ROOT:?missing exact SIAB source deployment", text)
         self.assertIn("SELECTED_CANDIDATE.json", text)
         self.assertIn("for ordinal in $(seq 1 64)", text)
         self.assertIn('test "$grid_coulomb_file_count" -eq 64', text)
         self.assertIn("bz_coordinate_source=fractional_columns", text)
         self.assertIn("analytic_headwing=no_body_screen", text)
+        self.assertIn("extract_librpa_frequency_grid.py", text)
+        self.assertIn("/data/home/df_iopcas_ghj/app/miniconda3/bin/python", text)
+        self.assertIn('"$frequency_python" "$frequency_extractor"', text)
+        self.assertIn("SELECTED_SOS_FREQUENCY_GRID.dat", text)
+        self.assertIn("SELECTED_SOS_FREQUENCY_GRID.json", text)
+        self.assertIn("frequency_grid_source=selected_candidate_sos", text)
         self.assertNotIn("-0.501460253", text)
 
 
