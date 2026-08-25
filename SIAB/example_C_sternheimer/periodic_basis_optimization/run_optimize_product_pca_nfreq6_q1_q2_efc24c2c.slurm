@@ -61,7 +61,7 @@ for dataset in "$q1" "$q2"; do
   grep -qx 'kernel full_coulomb' "$dataset/manifest.dat"
 done
 grep -qx 'selected_iq 1' "$q1/manifest.dat"
-grep -qx 'selected_iq 2' "$q2/manifest.dat"
+grep -qx 'selected_iq 22' "$q2/manifest.dat"
 test "$(awk '$1 == "auxiliary_basis_sha256" {print $2}' "$q1/manifest.dat")" = \
   "$(awk '$1 == "auxiliary_basis_sha256" {print $2}' "$q2/manifest.dat")"
 
@@ -82,6 +82,7 @@ mkdir -p "$output"
   echo producer_job=3118459
   echo producer_abacus_commit=711af860c125b9757c344a1961b63524c550cfe4
   echo datasets=q1,q2
+  echo full_q_indices=1,22
   echo nfreq=6
   echo initial_basis=3s3p2d1f${ng}g
   echo fixed_basis=2s2p1d

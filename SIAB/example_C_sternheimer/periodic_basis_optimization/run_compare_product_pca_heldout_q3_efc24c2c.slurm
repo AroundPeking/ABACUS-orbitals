@@ -38,7 +38,7 @@ grep -qx 'status success' "$q3/status.dat"
 grep -qx 'all_converged yes' "$q3/status.dat"
 grep -qx 'auxiliary_basis_source product_pca' "$q3/manifest.dat"
 grep -qx 'frequency_count 6' "$q3/manifest.dat"
-grep -qx 'selected_iq 3' "$q3/manifest.dat"
+grep -qx 'selected_iq 43' "$q3/manifest.dat"
 grep -qx 'kernel full_coulomb' "$q3/manifest.dat"
 for path in "$original" "$seed_two_g" "$seed_three_g" \
   "$joint_two_g" "$joint_three_g" "$comparator"; do
@@ -68,6 +68,7 @@ mkdir -p "$output"
   echo producer_job=3118460_3
   echo optimizer_job=${OPTIMIZER_JOB_ID:-unknown}
   echo dataset=q3
+  echo full_q_index=43
   echo nfreq=6
   echo auxiliary_basis_source=product_pca
   echo candidates=original_tzdp,seed_two_g,joint_two_g,seed_three_g,joint_three_g
