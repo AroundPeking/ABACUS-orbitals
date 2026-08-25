@@ -41,6 +41,8 @@ test "$(sha256sum "$source/bz_sampling_out" | awk '{print $1}')" = "$expected_so
 test -s "$template"
 grep -Eq '^version_coul_reader[[:space:]]*=[[:space:]]*1$' "$template"
 grep -Eq '^version_lri_reader[[:space:]]*=[[:space:]]*1$' "$template"
+grep -Eq '^prefix_coul_full[[:space:]]*=[[:space:]]*v1_coulomb_full_iq_$' "$template"
+grep -Eq '^prefix_lri_coeff[[:space:]]*=[[:space:]]*v1_Cs_data_$' "$template"
 grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*t$' "$template"
 ! grep -Eq '^use_abacus_(exx|rpa|gw)_symmetry[[:space:]]*=' "$template"
 test -s "$source/RUN_PROVENANCE.txt"

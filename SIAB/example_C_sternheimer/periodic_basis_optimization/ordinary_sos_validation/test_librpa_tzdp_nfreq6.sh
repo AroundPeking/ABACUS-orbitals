@@ -7,6 +7,8 @@ input=$root/librpa_tzdp_nfreq6.in
 
 grep -Eq '^version_coul_reader[[:space:]]*=[[:space:]]*1$' "$input"
 grep -Eq '^version_lri_reader[[:space:]]*=[[:space:]]*1$' "$input"
+grep -Eq '^prefix_coul_full[[:space:]]*=[[:space:]]*v1_coulomb_full_iq_$' "$input"
+grep -Eq '^prefix_lri_coeff[[:space:]]*=[[:space:]]*v1_Cs_data_$' "$input"
 grep -Eq '^use_symmetry_exx[[:space:]]*=[[:space:]]*t$' "$input"
 grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*t$' "$input"
 grep -Eq '^use_symmetry_gw[[:space:]]*=[[:space:]]*f$' "$input"

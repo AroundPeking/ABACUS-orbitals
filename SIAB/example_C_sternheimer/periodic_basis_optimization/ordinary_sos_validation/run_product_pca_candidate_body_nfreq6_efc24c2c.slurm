@@ -52,6 +52,8 @@ grep -qx 'status=success' "$export_dir/provenance.txt"
 test -s "$librpa_template"
 grep -Eq '^version_coul_reader[[:space:]]*=[[:space:]]*1$' "$librpa_template"
 grep -Eq '^version_lri_reader[[:space:]]*=[[:space:]]*1$' "$librpa_template"
+grep -Eq '^prefix_coul_full[[:space:]]*=[[:space:]]*v1_coulomb_full_iq_$' "$librpa_template"
+grep -Eq '^prefix_lri_coeff[[:space:]]*=[[:space:]]*v1_Cs_data_$' "$librpa_template"
 grep -Eq '^use_symmetry_rpa[[:space:]]*=[[:space:]]*t$' "$librpa_template"
 ! grep -Eq '^use_abacus_(exx|rpa|gw)_symmetry[[:space:]]*=' "$librpa_template"
 
