@@ -282,8 +282,10 @@ def _hermitian(matrix, label, tolerance=1.0e-9):
     _require(error <= tolerance, label + " is not Hermitian")
 
 
-def read_periodic_galerkin_dataset(directory):
+def read_periodic_galerkin_dataset(directory, *, include_reference_projection=True):
     """Read and validate one complete-q periodic Galerkin training dataset."""
+    if not isinstance(include_reference_projection, bool):
+        raise ValueError("include_reference_projection must be boolean")
     directory = os.path.realpath(os.fspath(directory))
     status = _read_status(directory)
     scalar, frequencies, kpoint_metadata, eigenvalues, entries = _read_manifest(directory)
@@ -371,7 +373,11 @@ def read_periodic_galerkin_dataset(directory):
     _require(not missing, "periodic Galerkin dataset is missing chunk records")
     _require(not extra, "periodic Galerkin dataset contains unexpected chunk records")
 
-    chunks = {key: _read_chunk(directory, entry) for key, entry in entry_map.items()}
+    chunks = {}
+    for key, entry in entry_map.items():
+        chunk = _read_chunk(directory, entry)
+        if include_reference_projection or entry.kind != 3:
+            chunks[key] = chunk
     metric = chunks[(4, 0, -1)]
     whitening = chunks[(5, 0, -1)]
     _require(metric.shape == (raw_aux, raw_aux) and whitening.shape == (raw_aux, white_aux),
@@ -417,15 +423,21 @@ def read_periodic_galerkin_dataset(directory):
         hamiltonian_ha = chunks[(6, ik, -1)] * _RY_TO_HA
         occupied_projection = chunks[(7, ik, -1)]
         source_flat = chunks[(2, ik, -1)]
-        reference_flat = torch.stack([chunks[(3, ik, iw)] for iw in range(nfrequency)])
+        reference_flat = (
+            torch.stack([chunks[(3, ik, iw)] for iw in range(nfrequency)])
+            if include_reference_projection
+            else torch.empty((0,), dtype=torch.complex128)
+        )
         _require(overlap.shape == (primitive_count, primitive_count)
                  and hamiltonian_ha.shape == overlap.shape,
                  "periodic Galerkin primitive matrices have inconsistent dimensions")
         _require(occupied_projection.shape == (noccupied, primitive_count),
                  "periodic Galerkin occupied projection has inconsistent dimensions")
-        _require(source_flat.shape == (noccupied * white_aux, primitive_count)
-                 and reference_flat.shape == (nfrequency, noccupied * white_aux, primitive_count),
-                 "periodic Galerkin source or reference projection has inconsistent dimensions")
+        _require(source_flat.shape == (noccupied * white_aux, primitive_count),
+                 "periodic Galerkin source projection has inconsistent dimensions")
+        if include_reference_projection:
+            _require(reference_flat.shape == (nfrequency, noccupied * white_aux, primitive_count),
+                     "periodic Galerkin reference projection has inconsistent dimensions")
         _hermitian(overlap, "periodic Galerkin primitive overlap")
         _hermitian(hamiltonian_ha, "periodic Galerkin primitive Hamiltonian")
         records.append(PeriodicGalerkinKPoint(
@@ -441,8 +453,11 @@ def read_periodic_galerkin_dataset(directory):
             hamiltonian_ha=hamiltonian_ha,
             occupied_projection=occupied_projection,
             source=source_flat.reshape(noccupied, white_aux, primitive_count),
-            reference_projection=reference_flat.reshape(
-                nfrequency, noccupied, white_aux, primitive_count),
+            reference_projection=(
+                reference_flat.reshape(nfrequency, noccupied, white_aux, primitive_count)
+                if include_reference_projection
+                else reference_flat
+            ),
         ))
 
     weight_sum = sum(record.k_weight for record in records)

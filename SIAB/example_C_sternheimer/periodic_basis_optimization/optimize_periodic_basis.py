@@ -133,7 +133,10 @@ def main(argv=None):
     if any(not path.is_dir() or path.is_symlink() for path in dataset_paths):
         raise ValueError("each dataset must be a real directory")
 
-    datasets = tuple(read_periodic_galerkin_dataset(path) for path in dataset_paths)
+    datasets = tuple(
+        read_periodic_galerkin_dataset(path, include_reference_projection=False)
+        for path in dataset_paths
+    )
     validate_dataset_contract(datasets)
     initial = read_periodic_optimizer_coefficients(
         initial_path,

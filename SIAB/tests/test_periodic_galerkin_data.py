@@ -74,6 +74,29 @@ class PeriodicGalerkinDataTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "missing chunk"):
                 read_periodic_galerkin_dataset(directory)
 
+    def test_can_validate_without_retaining_reference_projection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.write_fixture(directory)
+
+            data = read_periodic_galerkin_dataset(
+                directory, include_reference_projection=False
+            )
+
+            self.assertEqual(data.kpoints[0].reference_projection.numel(), 0)
+            torch.testing.assert_close(
+                data.reference_response,
+                torch.tensor([[[-0.4 + 0.0j]]], dtype=torch.complex128),
+            )
+
+            path = os.path.join(directory, "response_ik_1_ifreq_0.bin")
+            with open(path, "r+b") as handle:
+                handle.seek(-1, os.SEEK_END)
+                handle.write(b"\x01")
+            with self.assertRaisesRegex(RuntimeError, "SHA256 mismatch"):
+                read_periodic_galerkin_dataset(
+                    directory, include_reference_projection=False
+                )
+
     def write_fixture(self, directory):
         chunks = {
             "coulomb_metric.bin": (4, 0, -1, 1, 1, [1.0 + 0.0j]),
