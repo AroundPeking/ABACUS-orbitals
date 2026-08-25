@@ -22,6 +22,7 @@ grep -Eq '^prefix_coul_full[[:space:]]*=[[:space:]]*v1_coulomb_grid_iq_$' "$inpu
 grep -Eq '^replace_w_head[[:space:]]*=[[:space:]]*f$' "$input"
 grep -Fq 'grid_coulomb_file_count' "$consumer"
 grep -Fq 'expected_full_q_indices=(1 22 43 6 27 23 11 55)' "$consumer"
+grep -Fq 'test "$cs_file_count" -eq 1' "$consumer"
 grep -Fq 'abs(total) < 2.0' "$consumer"
 
 echo "C_PRODUCT_PCA_TZDP_GRID_COULOMB_CONTRACT_OK"

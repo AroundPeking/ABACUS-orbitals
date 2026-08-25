@@ -58,7 +58,7 @@ done
 grid_coulomb_file_count=$(find -L "$reader" -maxdepth 1 -type f -name 'v1_coulomb_grid_iq_*_rank*.dat' -size +0c | wc -l)
 cs_file_count=$(find -L "$reader" -maxdepth 1 -type f -name 'v1_Cs_data_*.txt' -size +0c | wc -l)
 test "$grid_coulomb_file_count" -eq 8
-test "$cs_file_count" -ge 8
+test "$cs_file_count" -eq 1
 python3 - "$reader/bz_sampling_out" <<'PY'
 import sys
 
