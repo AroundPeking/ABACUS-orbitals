@@ -31,7 +31,7 @@ output=$code/runs/product-pca-20260825/heldout-q3-comparison
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
 test "$SLURM_CPUS_PER_TASK" = 40
-test "$(git -C "$code" rev-parse HEAD)" = "$siab_commit"
+test "$(cat "$code/.git/HEAD")" = "$siab_commit"
 test ! -e "$output"
 test -s "$q3/manifest.dat"
 grep -qx 'status success' "$q3/status.dat"

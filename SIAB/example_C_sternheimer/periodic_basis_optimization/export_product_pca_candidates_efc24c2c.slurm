@@ -35,7 +35,7 @@ orbital=$output/C_gga_10au_100Ry_3s3p2d1f${ng}g_product_pca.orb
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
 test "$SLURM_CPUS_PER_TASK" = 40
-test "$(git -C "$code" rev-parse HEAD)" = "$siab_commit"
+test "$(cat "$code/.git/HEAD")" = "$siab_commit"
 test -s "$input"
 test -s "$exporter"
 test ! -e "$output"

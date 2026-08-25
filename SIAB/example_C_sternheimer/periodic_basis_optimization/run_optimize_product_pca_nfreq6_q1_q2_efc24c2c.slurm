@@ -47,7 +47,7 @@ output=$code/runs/product-pca-20260825/joint-${ng}g-nfreq6-q1-q2
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
 test "$SLURM_CPUS_PER_TASK" = 40
-test "$(git -C "$code" rev-parse HEAD)" = "$siab_commit"
+test "$(cat "$code/.git/HEAD")" = "$siab_commit"
 test "$(sha256sum "$initial" | awk '{print $1}')" = "$initial_sha"
 test -s "$optimizer"
 test ! -e "$output"
