@@ -208,6 +208,39 @@ class PeriodicGalerkinSternheimerTest(unittest.TestCase):
         self.assertEqual(result.minimum_candidate_rank, 2)
         self.assertLess(float(result.relative_response_error), 1.0e-14)
 
+    def test_mother_response_is_invariant_to_primitive_rescaling(self):
+        dataset, delta, expected_response = self.complete_two_level_dataset()
+        scale = 1.0e-8
+        record = replace(
+            dataset.kpoints[0],
+            overlap=torch.diag(
+                torch.tensor([1.0, scale**2], dtype=torch.float64)
+            ).to(torch.complex128),
+            hamiltonian_ha=torch.diag(
+                torch.tensor([-0.5, 0.7 * scale**2], dtype=torch.float64)
+            ).to(torch.complex128),
+            source=torch.tensor(
+                [[[0.0, 0.3 * scale]]], dtype=torch.complex128
+            ),
+            reference_projection=torch.tensor(
+                [[[[0.0, delta.conjugate() * scale]]]],
+                dtype=torch.complex128,
+            ),
+        )
+        dataset = replace(dataset, kpoints=(record,))
+
+        result = evaluate_periodic_galerkin_mother_response(dataset)
+
+        torch.testing.assert_close(
+            result.response[0, 0, 0],
+            torch.tensor(expected_response, dtype=torch.complex128),
+            rtol=1.0e-14,
+            atol=1.0e-14,
+        )
+        self.assertEqual(result.minimum_candidate_rank, 2)
+        self.assertLess(float(result.relative_response_error), 1.0e-14)
+        self.assertLess(float(result.relative_projection_error), 1.0e-14)
+
     def test_mother_response_uses_one_virtual_spectral_resolvent(self):
         dataset, _, expected_response = self.complete_two_level_dataset()
 

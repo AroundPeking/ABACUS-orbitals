@@ -35,6 +35,50 @@ def _weighted_relative_error(value, reference, weights):
     return torch.sqrt(numerator / denominator)
 
 
+def _mother_overlap_orthogonalizer(overlap, relative_rank_tolerance):
+    """Return a scale-invariant orthogonalizer for a primitive mother space."""
+    overlap = 0.5 * (overlap + _adjoint(overlap))
+    diagonal = torch.real(torch.diagonal(overlap))
+    if not bool(torch.isfinite(diagonal).all()):
+        raise RuntimeError("Bessel mother overlap has a non-finite diagonal")
+    if bool(torch.any(diagonal < 0.0)):
+        raise RuntimeError("Bessel mother overlap has a negative diagonal")
+    active = diagonal > 0.0
+    if not bool(torch.any(active)):
+        raise RuntimeError("Bessel mother overlap has no positive direction")
+
+    active_index = torch.nonzero(active, as_tuple=False).reshape(-1)
+    active_overlap = overlap.index_select(0, active_index).index_select(
+        1, active_index
+    )
+    inverse_norm = diagonal[active].rsqrt()
+    normalized_overlap = (
+        inverse_norm[:, None] * active_overlap * inverse_norm[None, :]
+    )
+    overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(
+        normalized_overlap
+    )
+    maximum = torch.max(overlap_eigenvalue)
+    if float(maximum.detach()) <= 0.0:
+        raise RuntimeError("Bessel mother overlap has no positive direction")
+    retained = overlap_eigenvalue > relative_rank_tolerance * maximum
+    retained_eigenvalue = overlap_eigenvalue[retained]
+    if retained_eigenvalue.numel() == 0:
+        raise RuntimeError("Bessel mother overlap has no positive direction")
+    active_lowdin = (
+        inverse_norm[:, None]
+        * overlap_eigenvector[:, retained]
+        * retained_eigenvalue.rsqrt()[None, :]
+    )
+    lowdin = torch.zeros(
+        (overlap.shape[0], retained_eigenvalue.numel()),
+        dtype=torch.complex128,
+    )
+    lowdin.index_copy_(0, active_index, active_lowdin)
+    condition = float((maximum / torch.min(retained_eigenvalue)).detach())
+    return lowdin, int(retained_eigenvalue.numel()), condition
+
+
 def evaluate_periodic_galerkin_response(
     dataset,
     primitive_to_candidate,
@@ -142,20 +186,12 @@ def prepare_periodic_occupied_reference(
     records = []
     with torch.no_grad():
         for record in dataset.kpoints:
-            overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(
-                record.overlap
+            lowdin, retained_count, condition = _mother_overlap_orthogonalizer(
+                record.overlap,
+                relative_rank_tolerance,
             )
-            maximum = torch.max(overlap_eigenvalue)
-            if float(maximum) <= 0.0:
-                raise RuntimeError("Bessel mother overlap has no positive direction")
-            retained = overlap_eigenvalue > relative_rank_tolerance * maximum
-            retained_eigenvalue = overlap_eigenvalue[retained]
-            condition = float(maximum / torch.min(retained_eigenvalue))
             if condition > condition_limit:
                 raise RuntimeError("Bessel mother overlap condition number exceeds limit")
-            lowdin = overlap_eigenvector[:, retained].matmul(
-                torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
-            )
             occupied = record.occupied_projection.matmul(lowdin)
             capture = occupied.matmul(_adjoint(occupied))
             capture = 0.5 * (capture + _adjoint(capture))
@@ -174,7 +210,7 @@ def prepare_periodic_occupied_reference(
                 raise RuntimeError(
                     "Bessel mother space does not capture the fixed occupied manifold"
                 )
-            if retained_eigenvalue.numel() <= record.occupation.numel():
+            if retained_count <= record.occupation.numel():
                 raise RuntimeError("Bessel mother space has no virtual complement")
             normalization = (
                 capture_eigenvector
@@ -227,27 +263,33 @@ def _evaluate_periodic_galerkin_response(
             occupied_candidate = record.occupied_projection_normalization.matmul(
                 occupied_candidate
             )
-        overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
-        maximum = torch.max(overlap_eigenvalue)
-        if float(maximum.detach()) <= 0.0:
-            raise RuntimeError("candidate overlap has no positive direction")
-        threshold = relative_rank_tolerance * maximum
-        retained = overlap_eigenvalue > threshold
-        if not allow_rank_reduction and bool(torch.any(~retained)):
-            raise RuntimeError("candidate overlap is rank deficient")
-        retained_eigenvalue = overlap_eigenvalue[retained]
-        retained_eigenvector = overlap_eigenvector[:, retained]
-        effective_count = int(retained_eigenvalue.shape[0])
+        if allow_rank_reduction:
+            lowdin, effective_count, condition = _mother_overlap_orthogonalizer(
+                overlap,
+                relative_rank_tolerance,
+            )
+        else:
+            overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
+            maximum = torch.max(overlap_eigenvalue)
+            if float(maximum.detach()) <= 0.0:
+                raise RuntimeError("candidate overlap has no positive direction")
+            threshold = relative_rank_tolerance * maximum
+            retained = overlap_eigenvalue > threshold
+            if bool(torch.any(~retained)):
+                raise RuntimeError("candidate overlap is rank deficient")
+            retained_eigenvalue = overlap_eigenvalue[retained]
+            retained_eigenvector = overlap_eigenvector[:, retained]
+            effective_count = int(retained_eigenvalue.shape[0])
+            condition = float((maximum / torch.min(retained_eigenvalue)).detach())
+            lowdin = (
+                retained_eigenvector
+                @ torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
+            )
         minimum_candidate_rank = min(minimum_candidate_rank, effective_count)
-        condition = float((maximum / torch.min(retained_eigenvalue)).detach())
         if condition > condition_limit:
             raise RuntimeError("candidate overlap condition number exceeds limit")
         maximum_overlap_condition = max(maximum_overlap_condition, condition)
 
-        lowdin = (
-            retained_eigenvector
-            @ torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
-        )
         hamiltonian_orthonormal = _adjoint(lowdin).matmul(hamiltonian).matmul(lowdin)
         source_orthonormal = source_candidate.matmul(lowdin)
         occupied_orthonormal = occupied_candidate.matmul(lowdin)
