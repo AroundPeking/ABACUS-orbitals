@@ -1,7 +1,11 @@
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
+
+import torch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "optimize_periodic_basis.py"
@@ -99,6 +103,39 @@ class OptimizePeriodicBasisTest(unittest.TestCase):
         q2_bad = SimpleNamespace(**changed, whitened_auxiliary_rank=7)
         with self.assertRaisesRegex(ValueError, "basis/provenance"):
             MODULE.validate_dataset_contract((q1, q2_bad))
+
+    def test_best_checkpoint_records_hash_and_replaces_previous_basis(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root)
+            first = {"C": [torch.eye(3, 2, dtype=torch.float64)]}
+            second = {
+                "C": [
+                    torch.tensor(
+                        [[1.0, 0.0], [0.0, 0.0], [0.0, 1.0]],
+                        dtype=torch.float64,
+                    )
+                ]
+            }
+
+            MODULE.write_best_checkpoint(output, 2, 0.5, first)
+            MODULE.write_best_checkpoint(output, 7, 0.25, second)
+
+            metadata = json.loads(
+                (output / "BEST_CHECKPOINT.json").read_text(encoding="ascii")
+            )
+            orbital = output / "BEST_ORBITAL_CHECKPOINT.txt"
+            self.assertEqual(metadata["step"], 7)
+            self.assertEqual(metadata["loss"], 0.25)
+            self.assertEqual(metadata["orbital_sha256"], MODULE.sha256(orbital))
+            restored = MODULE.read_periodic_optimizer_coefficients(
+                orbital,
+                element="C",
+                radial_rows=3,
+                expected_nu=(2,),
+            )
+            self.assertTrue(torch.equal(restored["C"][0], second["C"][0]))
+            self.assertFalse((output / ".BEST_ORBITAL_CHECKPOINT.txt.tmp").exists())
+            self.assertFalse((output / ".BEST_CHECKPOINT.json.tmp").exists())
 
 
 if __name__ == "__main__":

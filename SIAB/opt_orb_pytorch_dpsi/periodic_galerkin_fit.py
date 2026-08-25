@@ -293,6 +293,7 @@ def optimize_periodic_galerkin_basis(
     occupied_capture_reference="initial_candidate",
     block_cache_workers=1,
     progress_callback=None,
+    best_callback=None,
 ):
     """Optimize only the nonfixed radial columns and retain the best subspace."""
     learning_rate = _finite_positive("learning_rate", learning_rate)
@@ -334,6 +335,8 @@ def optimize_periodic_galerkin_basis(
     datasets = tuple(prepare_periodic_occupied_reference(dataset) for dataset in datasets)
     if progress_callback is not None and not callable(progress_callback):
         raise ValueError("progress_callback must be callable")
+    if best_callback is not None and not callable(best_callback):
+        raise ValueError("best_callback must be callable")
     _retract_variables(fixed, variable)
     initial_coefficients = _assemble(fixed, variable)
     reference_minimum_occupied_capture = None
@@ -402,6 +405,12 @@ def optimize_periodic_galerkin_basis(
             best_loss = loss_value
             best_step = step
             best_coefficients = _clone_coefficients(coefficients)
+            if best_callback is not None:
+                best_callback(
+                    best_step,
+                    best_loss,
+                    _clone_coefficients(best_coefficients),
+                )
         if loss_value < significant_loss * (1.0 - plateau_relative_improvement):
             significant_loss = loss_value
             last_significant_step = step

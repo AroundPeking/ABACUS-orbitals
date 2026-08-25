@@ -128,6 +128,32 @@ def _write_json(path, payload):
     )
 
 
+def write_best_checkpoint(output, step, loss, coefficients):
+    output = Path(output)
+    orbital_path = output / "BEST_ORBITAL_CHECKPOINT.txt"
+    metadata_path = output / "BEST_CHECKPOINT.json"
+    orbital_temporary = output / ".BEST_ORBITAL_CHECKPOINT.txt.tmp"
+    metadata_temporary = output / ".BEST_CHECKPOINT.json.tmp"
+    for temporary in (orbital_temporary, metadata_temporary):
+        if temporary.exists():
+            temporary.unlink()
+    write_periodic_optimizer_coefficients(orbital_temporary, coefficients)
+    orbital_hash = sha256(orbital_temporary)
+    _write_json(
+        metadata_temporary,
+        {
+            "format_version": 1,
+            "step": int(step),
+            "loss": float(loss),
+            "relative_pi_error": math.sqrt(float(loss)),
+            "orbital_file": orbital_path.name,
+            "orbital_sha256": orbital_hash,
+        },
+    )
+    orbital_temporary.replace(orbital_path)
+    metadata_temporary.replace(metadata_path)
+
+
 def main(argv=None):
     args = parse_args(argv)
     siab_commit = validate_commit(args.siab_commit)
@@ -171,6 +197,8 @@ def main(argv=None):
     history_path = output / "OPTIMIZATION_HISTORY.jsonl"
     result_path = output / "OPTIMIZATION_RESULT.json"
     coefficient_path = output / "ORBITAL_RESULTS.txt"
+    checkpoint_path = output / "BEST_ORBITAL_CHECKPOINT.txt"
+    checkpoint_metadata_path = output / "BEST_CHECKPOINT.json"
     _write_json(
         status_path,
         {
@@ -195,6 +223,9 @@ def main(argv=None):
                     flush=True,
                 )
 
+            def record_best(step, loss, coefficients):
+                write_best_checkpoint(output, step, loss, coefficients)
+
             fit = optimize_periodic_galerkin_basis(
                 datasets,
                 initial,
@@ -211,6 +242,7 @@ def main(argv=None):
                 occupied_capture_reference=args.occupied_capture_reference,
                 block_cache_workers=args.block_cache_workers,
                 progress_callback=record_progress,
+                best_callback=record_best,
             )
         for l, count in enumerate(fixed_nu):
             if not bool(
@@ -233,6 +265,18 @@ def main(argv=None):
                 )
             ):
                 raise RuntimeError("written output changed the fixed radial prefix")
+        if not checkpoint_metadata_path.is_file():
+            raise RuntimeError("best checkpoint metadata is missing")
+        checkpoint_metadata = json.loads(
+            checkpoint_metadata_path.read_text(encoding="ascii")
+        )
+        if (
+            checkpoint_metadata["step"] != fit.best_step
+            or checkpoint_metadata["loss"] != fit.best_loss
+            or checkpoint_metadata["orbital_sha256"] != sha256(checkpoint_path)
+            or sha256(checkpoint_path) != sha256(coefficient_path)
+        ):
+            raise RuntimeError("best checkpoint does not match the final result")
 
         payload = {
             "format_version": 1,
@@ -245,6 +289,8 @@ def main(argv=None):
             "initial_coefficients_sha256": sha256(initial_path),
             "output_coefficients": str(coefficient_path),
             "output_coefficients_sha256": sha256(coefficient_path),
+            "best_checkpoint": str(checkpoint_path),
+            "best_checkpoint_sha256": sha256(checkpoint_path),
             "history_sha256": sha256(history_path),
             "nu": list(nu),
             "fixed_nu": list(fixed_nu),

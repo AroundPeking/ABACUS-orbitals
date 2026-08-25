@@ -74,6 +74,50 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
         self.assertIn(result.stop_reason, ("plateau", "maximum_steps"))
         self.assertEqual(tuple(progress), result.history)
 
+    def test_best_callback_receives_independent_improving_snapshots(self):
+        dataset = self.three_level_dataset()
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+        checkpoints = []
+
+        def record_best(step, loss, coefficients):
+            checkpoints.append((step, loss, coefficients))
+            coefficients["C"][0].fill_(99.0)
+
+        result = optimize_periodic_galerkin_basis(
+            (dataset,),
+            initial,
+            fixed_nu={"C": (1,)},
+            learning_rate=0.05,
+            max_steps=8,
+            minimum_steps=0,
+            plateau_patience=8,
+            plateau_relative_improvement=1.0e-8,
+            best_callback=record_best,
+        )
+
+        self.assertGreater(len(checkpoints), 1)
+        self.assertEqual(checkpoints[-1][0], result.best_step)
+        self.assertEqual(checkpoints[-1][1], result.best_loss)
+        self.assertTrue(
+            torch.equal(
+                checkpoints[-1][2]["C"][0],
+                torch.full_like(checkpoints[-1][2]["C"][0], 99.0),
+            )
+        )
+        self.assertFalse(
+            torch.equal(
+                result.coefficients["C"][0],
+                checkpoints[-1][2]["C"][0],
+            )
+        )
+
     def test_backtracks_at_fixed_occupied_capture_boundary(self):
         dataset = self.three_level_dataset()
         initial = {
