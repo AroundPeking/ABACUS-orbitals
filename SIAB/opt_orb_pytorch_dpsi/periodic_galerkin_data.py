@@ -93,6 +93,12 @@ def _require(condition, message):
         raise RuntimeError(message)
 
 
+def _whitening_consistency_limit(retained_rank, declared_max_element_error):
+    """Bound a reconstructed whitening probe from its elementwise error."""
+    return max(1.0e-8,
+               retained_rank * declared_max_element_error + 1.0e-12)
+
+
 def _read_status(directory):
     path = os.path.join(directory, "status.dat")
     _require(os.path.isfile(path), "periodic Galerkin dataset is missing status.dat")
@@ -388,7 +394,8 @@ def read_periodic_galerkin_dataset(directory, *, include_reference_projection=Tr
     whitening_error = float(torch.linalg.norm(whitened_metric - identity).item()) / max(1.0, white_aux ** 0.5)
     declared_error = float(_one(scalar, "coulomb_max_orthonormality_error"))
     _require(math.isfinite(declared_error) and declared_error >= 0.0
-             and whitening_error <= max(1.0e-8, 2.0 * declared_error + 1.0e-12),
+             and declared_error <= 1.0e-8
+             and whitening_error <= _whitening_consistency_limit(white_aux, declared_error),
              "periodic Galerkin Coulomb whitening is inconsistent with its metric")
 
     frequency_ha = torch.tensor([frequencies[i][0] for i in range(nfrequency)], dtype=torch.float64)
