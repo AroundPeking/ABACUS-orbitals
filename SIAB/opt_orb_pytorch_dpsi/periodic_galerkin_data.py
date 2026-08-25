@@ -281,6 +281,44 @@ def _read_chunk(directory, entry):
     return torch.from_numpy(array)
 
 
+def _validate_chunk_layout(directory, entry):
+    path = _safe_chunk_path(directory, entry.relative_path)
+    _require(
+        os.path.isfile(path),
+        "periodic Galerkin dataset is missing chunk: " + entry.relative_path,
+    )
+    expected_size = _HEADER.size + 16 * entry.rows * entry.columns
+    _require(
+        os.path.getsize(path) == expected_size,
+        "periodic Galerkin chunk payload has the wrong size",
+    )
+    with open(path, "rb") as handle:
+        header_bytes = handle.read(_HEADER.size)
+    _require(
+        len(header_bytes) == _HEADER.size,
+        "truncated periodic Galerkin chunk header",
+    )
+    magic, version, kind, iq, ik, ifrequency, rows, columns = _HEADER.unpack(
+        header_bytes
+    )
+    _require(
+        magic == _CHUNK_MAGIC and version == 1,
+        "invalid periodic Galerkin chunk version",
+    )
+    expected = (
+        entry.kind,
+        entry.iq,
+        entry.ik,
+        entry.ifrequency,
+        entry.rows,
+        entry.columns,
+    )
+    _require(
+        (kind, iq, ik, ifrequency, rows, columns) == expected,
+        "periodic Galerkin chunk header differs from manifest",
+    )
+
+
 def _hermitian(matrix, label, tolerance=1.0e-9):
     _require(matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1], label + " is not square")
     scale = max(1.0, float(torch.linalg.norm(matrix).item()))
@@ -289,10 +327,17 @@ def _hermitian(matrix, label, tolerance=1.0e-9):
     _require(error <= tolerance, label + " is not Hermitian")
 
 
-def read_periodic_galerkin_dataset(directory, *, include_reference_projection=True):
+def read_periodic_galerkin_dataset(
+    directory,
+    *,
+    include_reference_projection=True,
+    verify_omitted_chunks=True,
+):
     """Read and validate one complete-q periodic Galerkin training dataset."""
     if not isinstance(include_reference_projection, bool):
         raise ValueError("include_reference_projection must be boolean")
+    if not isinstance(verify_omitted_chunks, bool):
+        raise ValueError("verify_omitted_chunks must be boolean")
     directory = os.path.realpath(os.fspath(directory))
     status = _read_status(directory)
     scalar, frequencies, kpoint_metadata, eigenvalues, entries = _read_manifest(directory)
@@ -382,9 +427,16 @@ def read_periodic_galerkin_dataset(directory, *, include_reference_projection=Tr
 
     chunks = {}
     for key, entry in entry_map.items():
-        chunk = _read_chunk(directory, entry)
-        if include_reference_projection or entry.kind != 3:
-            chunks[key] = chunk
+        if (
+            not include_reference_projection
+            and entry.kind == 3
+            and not verify_omitted_chunks
+        ):
+            _validate_chunk_layout(directory, entry)
+        else:
+            chunk = _read_chunk(directory, entry)
+            if include_reference_projection or entry.kind != 3:
+                chunks[key] = chunk
     metric = chunks[(4, 0, -1)]
     whitening = chunks[(5, 0, -1)]
     _require(metric.shape == (raw_aux, raw_aux) and whitening.shape == (raw_aux, white_aux),

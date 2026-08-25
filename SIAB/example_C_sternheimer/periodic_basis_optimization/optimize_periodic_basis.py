@@ -91,6 +91,11 @@ def parse_args(argv=None):
         default="initial_candidate",
     )
     parser.add_argument(
+        "--omitted-reference-projection-validation",
+        choices=("sha256", "layout"),
+        default="sha256",
+    )
+    parser.add_argument(
         "--occupied-capture-degradation-tolerance",
         type=float,
         default=1.0e-8,
@@ -145,7 +150,13 @@ def main(argv=None):
         raise ValueError("each dataset must be a real directory")
 
     datasets = tuple(
-        read_periodic_galerkin_dataset(path, include_reference_projection=False)
+        read_periodic_galerkin_dataset(
+            path,
+            include_reference_projection=False,
+            verify_omitted_chunks=(
+                args.omitted_reference_projection_validation == "sha256"
+            ),
+        )
         for path in dataset_paths
     )
     validate_dataset_contract(datasets)
@@ -251,6 +262,9 @@ def main(argv=None):
             "plateau_relative_improvement": args.plateau_relative_improvement,
             "maximum_backtracks": args.maximum_backtracks,
             "block_cache_workers": args.block_cache_workers,
+            "omitted_reference_projection_validation": (
+                args.omitted_reference_projection_validation
+            ),
             "occupied_capture_reference": fit.occupied_capture_reference,
             "reference_minimum_occupied_capture": (
                 fit.reference_minimum_occupied_capture

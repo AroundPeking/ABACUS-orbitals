@@ -97,6 +97,30 @@ class PeriodicGalerkinDataTest(unittest.TestCase):
                     directory, include_reference_projection=False
                 )
 
+    def test_can_check_only_layout_for_unused_reference_projection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.write_fixture(directory)
+            path = os.path.join(directory, "response_ik_1_ifreq_0.bin")
+            with open(path, "r+b") as handle:
+                handle.seek(-1, os.SEEK_END)
+                handle.write(b"\x01")
+
+            data = read_periodic_galerkin_dataset(
+                directory,
+                include_reference_projection=False,
+                verify_omitted_chunks=False,
+            )
+
+            self.assertEqual(data.kpoints[0].reference_projection.numel(), 0)
+            with open(path, "r+b") as handle:
+                handle.truncate(os.path.getsize(path) - 1)
+            with self.assertRaisesRegex(RuntimeError, "wrong size"):
+                read_periodic_galerkin_dataset(
+                    directory,
+                    include_reference_projection=False,
+                    verify_omitted_chunks=False,
+                )
+
     def write_fixture(self, directory):
         chunks = {
             "coulomb_metric.bin": (4, 0, -1, 1, 1, [1.0 + 0.0j]),

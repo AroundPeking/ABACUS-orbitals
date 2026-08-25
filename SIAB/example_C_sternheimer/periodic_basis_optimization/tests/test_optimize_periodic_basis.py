@@ -47,6 +47,24 @@ class OptimizePeriodicBasisTest(unittest.TestCase):
 
         self.assertEqual(args.occupied_capture_reference, "fixed_prefix")
 
+    def test_parses_layout_only_validation_for_unused_projection_chunks(self):
+        args = MODULE.parse_args(
+            [
+                "--dataset",
+                "q1",
+                "--initial",
+                "initial.txt",
+                "--output-directory",
+                "result",
+                "--siab-commit",
+                "a" * 40,
+                "--omitted-reference-projection-validation",
+                "layout",
+            ]
+        )
+
+        self.assertEqual(args.omitted_reference_projection_validation, "layout")
+
     def test_fixed_prefix_must_not_exceed_candidate_counts(self):
         self.assertEqual(
             MODULE.parse_channel_counts("2,2,1,0,0", (3, 3, 2, 0, 0)),
