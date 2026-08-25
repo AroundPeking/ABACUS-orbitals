@@ -1,4 +1,5 @@
 #!/bin/bash
+# Held-out q3 comparison for checkpointed SIAB commit 06f61e4c trajectories.
 #SBATCH --job-name=c24_pca_fp_holdout
 #SBATCH --partition=p1
 #SBATCH --nodes=1
@@ -16,18 +17,20 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_FIXED_PREFIX_HELDOUT_FAILED line=$LINENO 
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-c5b09b89
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-06f61e4c
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=c5b09b892eff6bb38f98bc3659052f358c5f4c1b
+siab_commit=06f61e4c5d8aa514a391b268206d99a2e70c6075
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q3=$producer_root/c-diamond-g24-fd8-nfreq6-q3-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q3_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 original=$campaign/seeds/C_TZDP_original.txt
 seed_two_g=$campaign/seeds/C_3s3p2d1f2g_q1_lowfreq.txt
 seed_three_g=$campaign/seeds/C_3s3p2d1f3g_q1_lowfreq.txt
-joint_two_g=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-2g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
-joint_three_g=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-3g-nfreq6-q1-q2/result/ORBITAL_RESULTS.txt
+joint_two_root=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-checkpoint-500-2g-nfreq6-q1-q2/result
+joint_three_root=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-checkpoint-500-3g-nfreq6-q1-q2/result
+joint_two_g=$joint_two_root/ORBITAL_RESULTS.txt
+joint_three_g=$joint_three_root/ORBITAL_RESULTS.txt
 comparator=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/compare_periodic_candidates.py
-output=$campaign/runs/product-pca-20260825/heldout-q3-fixed-prefix-layout
+output=$campaign/runs/product-pca-20260825/heldout-q3-fixed-prefix-layout-checkpoint-500
 
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
@@ -43,9 +46,26 @@ grep -qx 'frequency_count 6' "$q3/manifest.dat"
 grep -qx 'selected_iq 43' "$q3/manifest.dat"
 grep -qx 'kernel full_coulomb' "$q3/manifest.dat"
 for path in "$original" "$seed_two_g" "$seed_three_g" \
-  "$joint_two_g" "$joint_three_g" "$comparator"; do
+  "$joint_two_g" "$joint_three_g" \
+  "$joint_two_root/BEST_CHECKPOINT.json" \
+  "$joint_three_root/BEST_CHECKPOINT.json" "$comparator"; do
   test -s "$path"
 done
+python3 - "$joint_two_root" "$joint_three_root" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+for root_name in sys.argv[1:]:
+    root = pathlib.Path(root_name)
+    metadata = json.loads((root / "BEST_CHECKPOINT.json").read_text(encoding="ascii"))
+    checkpoint = root / "BEST_ORBITAL_CHECKPOINT.txt"
+    final = root / "ORBITAL_RESULTS.txt"
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    assert metadata["orbital_sha256"] == digest(checkpoint)
+    assert digest(checkpoint) == digest(final)
+PY
 
 export PYTHONPATH=$runtime/lib-dynload:$runtime/site-packages:$code
 export LD_LIBRARY_PATH=$runtime/lib:${LD_LIBRARY_PATH:-}
@@ -59,7 +79,7 @@ export OMP_PLACES=cores
 mkdir -p "$output"
 {
   echo status=running
-  echo purpose=periodic_c_product_pca_fixed_prefix_independent_q3_validation
+  echo purpose=periodic_c_product_pca_fixed_prefix_checkpointed_independent_q3_validation
   echo siab_commit=$siab_commit
   echo producer_job=3119906_3
   echo dataset=q3

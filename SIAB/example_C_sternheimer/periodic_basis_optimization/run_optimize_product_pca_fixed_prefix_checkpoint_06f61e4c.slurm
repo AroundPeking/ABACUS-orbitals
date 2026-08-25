@@ -1,5 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=c24_pca_fp_opt
+# Checkpointed 500-step segment pinned to SIAB commit 06f61e4c.
+#SBATCH --job-name=c24_pca_fp_ckp
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -17,9 +18,9 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_FIXED_PREFIX_OPTIMIZATION_FAILED line=$LI
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-c5b09b89
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-06f61e4c
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=c5b09b892eff6bb38f98bc3659052f358c5f4c1b
+siab_commit=06f61e4c5d8aa514a391b268206d99a2e70c6075
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q1=$producer_root/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q1_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 q2=$producer_root/c-diamond-g24-fd8-nfreq6-q2-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q2_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
@@ -43,7 +44,7 @@ case "$ng" in
     ;;
 esac
 
-output=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-${ng}g-nfreq6-q1-q2
+output=$campaign/runs/product-pca-20260825/joint-fixed-prefix-layout-checkpoint-500-${ng}g-nfreq6-q1-q2
 
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
@@ -79,7 +80,7 @@ export OMP_PLACES=cores
 mkdir -p "$output"
 {
   echo status=running
-  echo purpose=periodic_c_product_pca_fixed_prefix_multifrequency_multiq_optimization
+  echo purpose=periodic_c_product_pca_fixed_prefix_multifrequency_multiq_checkpointed_optimization
   echo siab_commit=$siab_commit
   echo producer_jobs=3118459_1+3119622,3119900_2
   echo datasets=q1,q2
@@ -89,6 +90,8 @@ mkdir -p "$output"
   echo fixed_basis=2s2p1d
   echo occupied_capture_reference=fixed_prefix
   echo omitted_reference_projection_validation=layout
+  echo maximum_steps=500
+  echo best_checkpoint=each_strict_loss_improvement
   echo auxiliary_basis_source=product_pca
   echo pca_threshold=1e-4
   echo mpi_ranks=$SLURM_NTASKS
@@ -114,7 +117,7 @@ mkdir -p "$output"
     --radial-rows 31 \
     --max-l 4 \
     --learning-rate 1e-3 \
-    --max-steps 1000 \
+    --max-steps 500 \
     --minimum-steps 200 \
     --plateau-patience 250 \
     --plateau-relative-improvement 1e-7 \
@@ -127,25 +130,38 @@ mkdir -p "$output"
 grep -q '"status": "success"' "$output/result/STATUS.json"
 test -s "$output/result/OPTIMIZATION_RESULT.json"
 test -s "$output/result/ORBITAL_RESULTS.txt"
-python3 - "$output/result/OPTIMIZATION_RESULT.json" <<'PY'
+test -s "$output/result/BEST_CHECKPOINT.json"
+test -s "$output/result/BEST_ORBITAL_CHECKPOINT.txt"
+python3 - "$output/result/OPTIMIZATION_RESULT.json" "$output/result/BEST_CHECKPOINT.json" \
+  "$output/result/BEST_ORBITAL_CHECKPOINT.txt" "$output/result/ORBITAL_RESULTS.txt" <<'PY'
+import hashlib
 import json
 import math
 import sys
 
 result = json.load(open(sys.argv[1], encoding="ascii"))
+checkpoint = json.load(open(sys.argv[2], encoding="ascii"))
+digest = lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest()
 assert result["occupied_capture_reference"] == "fixed_prefix"
 assert result["omitted_reference_projection_validation"] == "layout"
 assert result["block_cache_workers"] == 8
 assert result["steps_completed"] >= 200
+assert result["steps_completed"] <= 500
 assert math.isfinite(result["best_loss"])
 assert result["best_loss"] < result["initial_loss"]
+assert checkpoint["step"] == result["best_step"]
+assert checkpoint["loss"] == result["best_loss"]
+assert checkpoint["orbital_sha256"] == digest(sys.argv[3])
+assert digest(sys.argv[3]) == digest(sys.argv[4])
 PY
 
 {
   echo status=success
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' "$output/optimize.time"
   sha256sum "$output/result/OPTIMIZATION_RESULT.json" \
-    "$output/result/ORBITAL_RESULTS.txt"
+    "$output/result/ORBITAL_RESULTS.txt" \
+    "$output/result/BEST_CHECKPOINT.json" \
+    "$output/result/BEST_ORBITAL_CHECKPOINT.txt"
 } >> "$output/provenance.txt"
 
 echo "C24_PRODUCT_PCA_FIXED_PREFIX_OPTIMIZATION_OK g=$ng output=$output"
