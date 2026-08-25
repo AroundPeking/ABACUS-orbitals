@@ -236,6 +236,48 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             evaluator.call_args.kwargs["occupied_capture_tolerance"], 0.2
         )
 
+    def test_real_coefficient_gradient_includes_complex_response_components(self):
+        dataset = self.three_level_dataset()
+        reference = torch.tensor([[[0.4 - 0.7j]]], dtype=torch.complex128)
+        dataset = replace(dataset, reference_response=reference)
+
+        def complex_response(_dataset, coefficients, **_kwargs):
+            coordinate = coefficients["C"][0][0, 0].to(torch.complex128)
+            response = ((1.2 + 0.8j) * coordinate).reshape(1, 1, 1)
+            return SimpleNamespace(
+                response=response,
+                minimum_occupied_capture=1.0,
+                maximum_overlap_condition=1.0,
+            )
+
+        coordinate = torch.tensor([[0.3]], dtype=torch.float64, requires_grad=True)
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "evaluate_periodic_galerkin_coefficient_response",
+            side_effect=complex_response,
+        ):
+            loss, _, _ = periodic_galerkin_fit._global_pi_loss(
+                (dataset,),
+                {"C": [coordinate]},
+            )
+            loss.backward()
+            analytic = float(coordinate.grad)
+
+            epsilon = 1.0e-6
+            losses = []
+            for displacement in (-epsilon, epsilon):
+                trial = torch.tensor(
+                    [[0.3 + displacement]], dtype=torch.float64
+                )
+                trial_loss, _, _ = periodic_galerkin_fit._global_pi_loss(
+                    (dataset,),
+                    {"C": [trial]},
+                )
+                losses.append(float(trial_loss))
+
+        finite_difference = (losses[1] - losses[0]) / (2.0 * epsilon)
+        self.assertAlmostEqual(analytic, finite_difference, places=8)
+
     def test_optimizer_prepares_constant_block_slices_once_per_kpoint(self):
         dataset = self.three_level_dataset()
         initial = {
