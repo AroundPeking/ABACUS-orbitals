@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=24:00:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-d69b17ae/logs/c24-q1-opt-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-d69b17ae/logs/c24-q1-opt-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5eee384/logs/c24-q1-opt-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5eee384/logs/c24-q1-opt-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C24_Q1_SIAB_OPT_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -16,12 +16,12 @@ trap 'status=$?; echo "C24_Q1_SIAB_OPT_FAILED line=$LINENO command=$BASH_COMMAND
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d69b17ae
+code=/data/home/df_iopcas_ghj/app/siab/periodic-c-d5eee384
 dataset=/ssd/work/df_iopcas_ghj/c-periodic-basis-opt-20260825/c-diamond-g24-fd8-q1-lowfreq-9ee4e4e0b-kpar8/OUT.C_DIAMOND_G24_FD8_Q1_LOWFREQ/STERNHEIMER_BASIS_OPT_V1
 initial=$code/SG15_v1.0/Orbitals_v2.0/C_TZDP/info/10/ORBITAL_RESULTS.txt
 optimizer=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/optimize_periodic_basis.py
-siab_commit=d69b17aea815235793a9c87f0bf83705140cc194
-output=/ssd/work/df_iopcas_ghj/c-periodic-basis-opt-20260825/optimize-c-tzdp-q1-lowfreq-d69b17ae
+siab_commit=d5eee3849c7367ef54f7740294695a0b25b227b2
+output=/ssd/work/df_iopcas_ghj/c-periodic-basis-opt-20260825/optimize-c-tzdp-q1-lowfreq-d5eee384
 
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
