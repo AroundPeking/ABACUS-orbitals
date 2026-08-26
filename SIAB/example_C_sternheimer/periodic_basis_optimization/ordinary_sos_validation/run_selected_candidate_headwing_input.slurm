@@ -75,8 +75,8 @@ done
 mkdir -p "$work" "$root"
 cp "$source/INPUT" "$source/STRU" "$source/KPT" \
   "$source/C_ONCV_PBE-1.0.upf" "$orbital" "$work/"
-ln -s "$get_diel" "$work/get_diel.py"
-ln -s "$output_librpa" "$work/output_librpa.py"
+cp "$get_diel" "$work/get_diel.py"
+cp "$output_librpa" "$work/output_librpa.py"
 cd "$work"
 
 set_input_key() {

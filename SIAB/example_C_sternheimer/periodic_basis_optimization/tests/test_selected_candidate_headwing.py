@@ -25,6 +25,10 @@ class SelectedCandidateHeadwingContractTest(unittest.TestCase):
         self.assertIn("9fb9028c59b1dbaf9cf66965280961fc2225d9eb", text)
         self.assertIn('cat "$pyatb_source/.git/HEAD"', text)
         self.assertNotIn('git -C "$pyatb_source"', text)
+        self.assertIn('cp "$get_diel" "$work/get_diel.py"', text)
+        self.assertIn('cp "$output_librpa" "$work/output_librpa.py"', text)
+        self.assertNotIn('ln -s "$get_diel"', text)
+        self.assertNotIn('ln -s "$output_librpa"', text)
         self.assertIn("pyatb_librpa_df/velocity_matrix", text)
         self.assertIn("headwing_basis=$expected_ao_count", text)
 
