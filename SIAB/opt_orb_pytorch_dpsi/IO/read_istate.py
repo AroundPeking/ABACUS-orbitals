@@ -4,6 +4,71 @@ import itertools
 
 # occ[ik][ib]
 def read_istate(file_name):
+	with open(file_name, "r") as file:
+		content = file.read()
+	if "Electronic state energy (eV) and occupations" in content:
+		return read_eig_occ(content)
+	return read_legacy_istate(file_name)
+
+
+def read_eig_occ(content):
+	ionic_steps = re.split(r"(?m)^\s*\d+\s+#\s*ionic step\s*$", content)
+	content = next((step for step in reversed(ionic_steps) if "Spin number" in step), "")
+	spin_match = re.search(r"Spin number\s+(\d+)", content)
+	if not spin_match:
+		raise ValueError("Missing 'Spin number' in eig_occ output")
+	nspin0 = int(spin_match.group(1))
+	if nspin0 not in (1, 2):
+		raise ValueError("Unsupported spin count in eig_occ output: %s" % nspin0)
+
+	blocks = re.split(r"(?m)^\s*spin=(\d+)\s+k-point=(\d+)/(\d+)[^\n]*$", content)
+	if len(blocks) == 1:
+		raise ValueError("Missing spin/k-point blocks in eig_occ output")
+
+	occ = [[] for _ in range(nspin0)]
+	expected_nk = None
+	seen = set()
+	for index in range(1, len(blocks), 4):
+		ispin = int(blocks[index])
+		ik = int(blocks[index + 1])
+		nk = int(blocks[index + 2])
+		block = blocks[index + 3]
+		if not 1 <= ispin <= nspin0:
+			raise ValueError("Invalid spin index in eig_occ output: %s" % ispin)
+		if expected_nk is None:
+			expected_nk = nk
+		elif nk != expected_nk:
+			raise ValueError("Inconsistent k-point count in eig_occ output")
+		key = (ispin, ik)
+		if key in seen:
+			raise ValueError("Duplicate spin/k-point block in eig_occ output: %s" % (key,))
+		seen.add(key)
+
+		values = []
+		for line in block.splitlines():
+			fields = line.split()
+			if len(fields) != 3:
+				continue
+			try:
+				int(fields[0])
+				values.append(float(fields[2]))
+			except ValueError:
+				continue
+		if not values:
+			raise ValueError("Missing occupations for spin %s k-point %s" % key)
+		occ[ispin - 1].append((ik, torch.Tensor(values)))
+
+	if expected_nk is None or len(seen) != nspin0 * expected_nk:
+		raise ValueError("Incomplete spin/k-point blocks in eig_occ output")
+	for ispin in range(nspin0):
+		occ[ispin].sort(key=lambda item: item[0])
+		if [ik for ik, _ in occ[ispin]] != list(range(1, expected_nk + 1)):
+			raise ValueError("Incomplete k-point sequence in eig_occ output")
+		occ[ispin] = [values for _, values in occ[ispin]]
+	return list(itertools.chain(*occ))
+
+
+def read_legacy_istate(file_name):
 	nspin0 = get_nspin0(file_name)
 	if nspin0==1:	occ = [[]]
 	elif nspin0==2:	occ = [[],[]]

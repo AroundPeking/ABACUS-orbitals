@@ -448,7 +448,7 @@ def prepare_SIAB_INPUT(iEcut, iRcut, iLevel):
     }
 
     if ( refBands_Level[iLevelm1] == "auto" ) :
-        refBands_Level[iLevelm1] = [ pwDataPath_STRU[STRUname][iBL]+"/istate.info" for iBL in range(nBL_STRU[STRUname]) ]
+        refBands_Level[iLevelm1] = [ pwDataPath_STRU[STRUname][iBL]+"/eig_occ.txt" for iBL in range(nBL_STRU[STRUname]) ]
         # refBandsFile_Level[iLevelm1] = [ pwDataPath_STRU[STRUname][iBL]+"/istate.info" for iBL in range(nBL_STRU[STRUname]) ]
         # INPUT_json["weight"] = { "stru": [1] * nBL_STRU[STRUname],
         #                      "bands_file": refBandsFile_Level[iLevelm1] }
