@@ -88,6 +88,7 @@ mkdir -p "$output"
   echo auxiliary_basis_source=product_pca
   echo pca_threshold=1e-4
   echo candidates=original_tzdp,seed_two_g,joint_two_g,seed_three_g,joint_three_g
+  echo occupied_capture_floor=0.9998982409775239
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
   sha256sum "$0" "$q3/manifest.dat" "$q3/status.dat" \
@@ -104,6 +105,7 @@ mkdir -p "$output"
     --candidate "joint-two-g:$joint_two_g:3,3,2,1,2" \
     --candidate "seed-three-g:$seed_three_g:3,3,2,1,3" \
     --candidate "joint-three-g:$joint_three_g:3,3,2,1,3" \
+    --occupied-capture-floor 0.9998982409775239 \
     --output "$output/COMPARISON_RESULT.json" \
     > "$output/compare.log" 2>&1
 
@@ -115,6 +117,7 @@ import sys
 
 report = json.load(open(sys.argv[1], encoding="ascii"))
 assert report["format_version"] == 1
+assert report["occupied_capture_floor"] == 0.9998982409775239
 assert len(report["datasets"]) == 1
 assert len(report["candidates"]) == 5
 for candidate in report["candidates"]:

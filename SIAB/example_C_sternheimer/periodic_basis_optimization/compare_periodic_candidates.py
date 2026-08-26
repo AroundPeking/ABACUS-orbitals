@@ -51,6 +51,18 @@ def parse_candidate(value):
     return label, path, nu
 
 
+def validate_occupied_capture_floor(value):
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+        or value <= 0.0
+        or value >= 1.0
+    ):
+        raise ValueError("occupied capture floor must be finite in (0, 1)")
+    return float(value)
+
+
 def trace_log_value(response):
     if response.ndim != 2 or response.shape[0] != response.shape[1]:
         raise ValueError("trace-log response must be square")
@@ -139,6 +151,7 @@ def parse_args(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--element", default="C")
     parser.add_argument("--radial-rows", type=int, default=31)
+    parser.add_argument("--occupied-capture-floor", type=float, default=0.999999)
     return parser.parse_args(argv)
 
 
@@ -146,6 +159,9 @@ def main(argv=None):
     args = parse_args(argv)
     dataset_paths = tuple(path.resolve() for path in args.dataset)
     candidate_specs = tuple(parse_candidate(value) for value in args.candidate)
+    occupied_capture_floor = validate_occupied_capture_floor(
+        args.occupied_capture_floor
+    )
     output = args.output.resolve()
     if args.radial_rows <= 0:
         raise ValueError("radial_rows must be positive")
@@ -192,7 +208,10 @@ def main(argv=None):
         maximum_condition = 1.0
         for dataset in datasets:
             result = evaluate_periodic_galerkin_coefficient_response(
-                dataset, coefficients, contraction_backend="dense"
+                dataset,
+                coefficients,
+                contraction_backend="dense",
+                occupied_capture_tolerance=1.0 - occupied_capture_floor,
             )
             metrics = response_metrics(
                 result.response,
@@ -248,6 +267,7 @@ def main(argv=None):
     report = {
         "format_version": 1,
         "scope": "Galerkin Pi and trace-log screening; independent SOS validation required",
+        "occupied_capture_floor": occupied_capture_floor,
         "datasets": [
             {
                 "path": str(path),

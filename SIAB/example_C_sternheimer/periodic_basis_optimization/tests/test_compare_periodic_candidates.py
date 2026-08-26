@@ -51,6 +51,14 @@ class ComparePeriodicCandidatesTest(unittest.TestCase):
         self.assertEqual(len(metrics["trace_log_candidate"]), 2)
         self.assertEqual(len(metrics["trace_log_reference"]), 2)
 
+    def test_validates_explicit_occupied_capture_floor(self):
+        self.assertEqual(MODULE.validate_occupied_capture_floor(0.9998), 0.9998)
+
+        for invalid in (0.0, -0.1, 1.0, 1.1, math.inf, math.nan, True):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "occupied capture floor"):
+                    MODULE.validate_occupied_capture_floor(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

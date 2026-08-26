@@ -41,6 +41,9 @@ class ProductPcaFixedPrefixProductionContractTest(unittest.TestCase):
         self.assertIn("joint-fixed-prefix-layout-checkpoint-500-3g", text)
         self.assertIn("heldout-q3-fixed-prefix-layout-checkpoint-500", text)
         self.assertIn("BEST_ORBITAL_CHECKPOINT.txt", text)
+        self.assertIn(
+            "--occupied-capture-floor 0.9998982409775239", text
+        )
         self.assertNotIn(" +  ", text)
 
 
