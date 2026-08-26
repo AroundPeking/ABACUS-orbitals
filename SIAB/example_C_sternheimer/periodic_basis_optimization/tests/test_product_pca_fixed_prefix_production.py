@@ -35,6 +35,10 @@ class ProductPcaFixedPrefixProductionContractTest(unittest.TestCase):
         text = script.read_text(encoding="ascii")
 
         self.assertIn("06f61e4c5d8aa514a391b268206d99a2e70c6075", text)
+        self.assertIn("SIAB_SOURCE_ROOT", text)
+        self.assertIn("SIAB_SOURCE_COMMIT", text)
+        self.assertIn("optimizer_siab_commit", text)
+        self.assertIn("comparison_source_commit", text)
         self.assertIn("selected_iq 43", text)
         self.assertIn("producer_job=3119906_3", text)
         self.assertIn("joint-fixed-prefix-layout-checkpoint-500-2g", text)

@@ -17,9 +17,10 @@ trap 'status=$?; echo "C24_PRODUCT_PCA_FIXED_PREFIX_HELDOUT_FAILED line=$LINENO 
 module load python/3.9.22
 
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
-code=/data/home/df_iopcas_ghj/app/siab/periodic-c-06f61e4c
+code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
-siab_commit=06f61e4c5d8aa514a391b268206d99a2e70c6075
+comparison_source_commit=${SIAB_SOURCE_COMMIT:?missing exact SIAB source commit}
+optimizer_siab_commit=06f61e4c5d8aa514a391b268206d99a2e70c6075
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q3=$producer_root/c-diamond-g24-fd8-nfreq6-q3-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q3_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 original=$campaign/seeds/C_TZDP_original.txt
@@ -35,8 +36,8 @@ output=$campaign/runs/product-pca-20260825/heldout-q3-fixed-prefix-layout-checkp
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 1
 test "$SLURM_CPUS_PER_TASK" = 40
-test "$(cat "$code/.git/HEAD")" = "$siab_commit"
-test "$(cat "$code/SIAB_COMMIT")" = "$siab_commit"
+test "$(cat "$code/.git/HEAD")" = "$comparison_source_commit"
+test "$(cat "$code/SIAB_COMMIT")" = "$comparison_source_commit"
 test ! -e "$output"
 test -s "$q3/manifest.dat"
 grep -qx 'status success' "$q3/status.dat"
@@ -80,7 +81,8 @@ mkdir -p "$output"
 {
   echo status=running
   echo purpose=periodic_c_product_pca_fixed_prefix_checkpointed_independent_q3_validation
-  echo siab_commit=$siab_commit
+  echo comparison_source_commit=$comparison_source_commit
+  echo optimizer_siab_commit=$optimizer_siab_commit
   echo producer_job=3119906_3
   echo dataset=q3
   echo full_q_index=43
