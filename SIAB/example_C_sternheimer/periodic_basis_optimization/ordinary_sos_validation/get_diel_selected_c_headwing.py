@@ -1,3 +1,79 @@
+import math
+from pathlib import Path
+import re
+
+
+KPOINT_HEADER = re.compile(
+    r"^spin=(?P<spin>\d+)\s+k-point=(?P<index>\d+)/(?P<total>\d+)\b"
+)
+
+
+def read_occupied_band_count(path, occupation_threshold=1.0e-12):
+    path = Path(path)
+    if occupation_threshold <= 0.0 or not math.isfinite(occupation_threshold):
+        raise ValueError("occupation threshold must be finite and positive")
+
+    spin_number = None
+    expected_kpoints = None
+    current = None
+    records = {}
+    for raw_line in path.read_text(encoding="ascii").splitlines():
+        line = raw_line.strip()
+        if line.startswith("Spin number "):
+            spin_number = int(line.split()[-1])
+            continue
+        header = KPOINT_HEADER.match(line)
+        if header:
+            spin = int(header.group("spin"))
+            index = int(header.group("index"))
+            total = int(header.group("total"))
+            if expected_kpoints is None:
+                expected_kpoints = total
+            if total != expected_kpoints or index < 1 or index > total:
+                raise ValueError("eig_occ contains inconsistent k-point headers")
+            current = (spin, index)
+            if current in records:
+                raise ValueError("eig_occ contains a duplicate spin/k-point record")
+            records[current] = []
+            continue
+        if current is None:
+            continue
+        fields = line.split()
+        if len(fields) != 3:
+            continue
+        try:
+            band = int(fields[0])
+            energy = float(fields[1])
+            occupation = float(fields[2])
+        except ValueError:
+            continue
+        if band != len(records[current]) + 1:
+            raise ValueError("eig_occ band indices must be consecutive")
+        if not math.isfinite(energy) or not math.isfinite(occupation):
+            raise ValueError("eig_occ contains non-finite band data")
+        if occupation < -occupation_threshold:
+            raise ValueError("eig_occ contains a negative occupation")
+        records[current].append(occupation)
+
+    if spin_number != 1:
+        raise ValueError("head/wing input requires one spin channel")
+    if expected_kpoints is None or len(records) != expected_kpoints:
+        raise ValueError("eig_occ does not contain every irreducible k point")
+    if any(spin != 1 for spin, _ in records):
+        raise ValueError("eig_occ contains an unexpected spin channel")
+
+    occupied_counts = []
+    for occupations in records.values():
+        occupied = [value > occupation_threshold for value in occupations]
+        count = sum(occupied)
+        if count <= 0 or occupied != [True] * count + [False] * (len(occupied) - count):
+            raise ValueError("eig_occ occupied bands must form a nonempty prefix")
+        occupied_counts.append(count)
+    if len(set(occupied_counts)) != 1:
+        raise ValueError("every k point must have the same occupied band count")
+    return occupied_counts[0]
+
+
 def get_omega(filename : str = 'LibRPA_freq.out'):
 
     with open(filename, 'r') as file:
@@ -27,12 +103,12 @@ def get_param(work_dir : str = './'):
     '''
     get lattice_vector from STRU,
     get fermi_energy(eV) from running_scf.log,
-    get occ_band from band_out.
+    get occ_band from the completed ABACUS eig_occ.txt.
     '''
     import os
     f_stru = os.path.join(work_dir, 'STRU')
     f_running = os.path.join(work_dir, "OUT.ABACUS/running_scf.log")
-    f_band = os.path.join(work_dir, 'band_out')
+    f_eig_occ = os.path.join(work_dir, 'OUT.ABACUS/eig_occ.txt')
 
     lattice_vector = []
     with open(f_stru, 'r') as file:
@@ -78,21 +154,7 @@ def get_param(work_dir : str = './'):
     if fermi_energy is None:
         raise ValueError(f"Failed to find Fermi energy in {f_running}")
 
-    occ_band = 0
-    with open(f_band, 'r') as file:
-        for line in file:
-            parts = line.split()
-            if len(parts) > 2:
-                try:
-                    # 检查第二列是否为占据数
-                    occ_value = float(parts[1])
-                    if occ_value == 0:
-                        break
-                    occ_band += 1  # 计数非零占据数的能带
-                except ValueError:
-                    continue  # 跳过无法转换为浮点数的行
-
-
+    occ_band = read_occupied_band_count(f_eig_occ)
     return lattice_vector, fermi_energy, occ_band
 
 def dat2out():

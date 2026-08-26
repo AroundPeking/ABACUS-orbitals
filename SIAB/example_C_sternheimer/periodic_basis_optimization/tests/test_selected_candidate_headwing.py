@@ -1,5 +1,17 @@
+import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
+
+
+GET_DIEL = (
+    Path(__file__).resolve().parents[1]
+    / "ordinary_sos_validation"
+    / "get_diel_selected_c_headwing.py"
+)
+SPEC = importlib.util.spec_from_file_location("get_diel_selected_c_headwing", GET_DIEL)
+GET_DIEL_MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(GET_DIEL_MODULE)
 
 
 class SelectedCandidateHeadwingContractTest(unittest.TestCase):
@@ -31,6 +43,11 @@ class SelectedCandidateHeadwingContractTest(unittest.TestCase):
         self.assertNotIn('ln -s "$output_librpa"', text)
         self.assertIn("pyatb_librpa_df/velocity_matrix", text)
         self.assertIn("headwing_basis=$expected_ao_count", text)
+        get_diel = (self.validation / "get_diel_selected_c_headwing.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("OUT.ABACUS/eig_occ.txt", get_diel)
+        self.assertNotIn("open(f_band", get_diel)
 
     def test_qavg_consumer_runs_sos_and_delta_with_one_headwing_input(self):
         text = (
@@ -50,6 +67,33 @@ class SelectedCandidateHeadwingContractTest(unittest.TestCase):
         self.assertIn("scope full_qavg_shared_selected_headwing", text)
         self.assertIn("headwing_convergence_gate pending", text)
         self.assertIn("basis_full_qavg_gate", text)
+
+    def test_reads_consistent_occupied_band_count_from_abacus_eig_occ(self):
+        text = """1 # ionic step
+Spin number 1
+spin=1 k-point=1/2 Cartesian=0 0 0
+1 -5.0 0.125
+2 -1.0 0.125
+3 2.0 0.0
+spin=1 k-point=2/2 Cartesian=0.5 0.5 0.5
+1 -4.0 1.0
+2 -0.5 1.0
+3 2.5 0.0
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "eig_occ.txt"
+            path.write_text(text, encoding="ascii")
+            self.assertEqual(
+                GET_DIEL_MODULE.read_occupied_band_count(path),
+                2,
+            )
+
+            path.write_text(
+                text.replace("2 -0.5 1.0", "2 -0.5 0.0"),
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(ValueError, "same occupied band count"):
+                GET_DIEL_MODULE.read_occupied_band_count(path)
 
 
 if __name__ == "__main__":
