@@ -23,7 +23,7 @@ abacus=$abacus_root/build_ifx/abacus_3p
 abacus_commit=dbb7671896910155bd9b4983ce72ca7caa451f19
 expected_abacus_sha=d05b3088acd5ec170f62027c35de69c22205dba82ac6799eb4afe877c8943708
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
-work=$campaign/runs/product-pca-20260825/highl-ewald-metric-control-dbb767189
+work=$campaign/runs/product-pca-20260825/highl-ewald-metric-control-dbb767189-compat1
 suffix=C_DIAMOND_SELECTED_HIGH_L_METRIC_CONTROL
 
 test "$SLURM_JOB_PARTITION" = p1
@@ -54,6 +54,11 @@ set_input_key() {
   fi
 }
 
+remove_input_key() {
+  local key=$1
+  sed -i -E "/^[[:space:]]*${key}([[:space:]]+|$)/d" INPUT
+}
+
 set_input_key suffix "$suffix"
 set_input_key symmetry -1
 set_input_key nbands 112
@@ -61,7 +66,7 @@ set_input_key kpar 1
 set_input_key rpa 1
 set_input_key out_librpa_reader_version 1
 set_input_key out_sternheimer_librpa 0
-set_input_key out_sternheimer_basis_opt 0
+remove_input_key out_sternheimer_basis_opt
 set_input_key exx_pca_threshold 1e-4
 set_input_key nx 24
 set_input_key ny 24
