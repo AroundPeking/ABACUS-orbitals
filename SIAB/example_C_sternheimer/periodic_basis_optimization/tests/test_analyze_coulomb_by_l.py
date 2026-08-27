@@ -48,6 +48,15 @@ class AnalyzeCoulombByLTest(unittest.TestCase):
             self.assertAlmostEqual(by_pair[(1, 1)]["error_frobenius"], np.sqrt(14.0))
             self.assertAlmostEqual(result["minimum_eigenvector_l_weights"]["0"], 1.0)
             self.assertAlmostEqual(result["maximum_eigenvector_l_weights"]["1"], 1.0)
+            by_maximum_l = {
+                entry["maximum_l"]: entry
+                for entry in result["principal_subspace_by_maximum_l"]
+            }
+            self.assertEqual(by_maximum_l[0]["dimension"], 1)
+            self.assertAlmostEqual(by_maximum_l[0]["error_relative_to_grid"], 0.0)
+            self.assertEqual(by_maximum_l[0]["negative_eigenvalue_count_below_minus_1e_8"], 0)
+            self.assertEqual(by_maximum_l[1]["dimension"], 4)
+            self.assertAlmostEqual(by_maximum_l[1]["error_frobenius"], np.sqrt(14.0))
 
     @staticmethod
     def _write_coulomb(path: Path, matrix: np.ndarray) -> None:

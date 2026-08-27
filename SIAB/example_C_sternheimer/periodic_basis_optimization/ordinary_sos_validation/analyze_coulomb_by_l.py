@@ -134,6 +134,36 @@ def summarize_coulomb_pair(
             )
 
     eigenvalues, eigenvectors = np.linalg.eigh(native)
+    principal_subspaces = []
+    for maximum_l in angular_momenta:
+        mask = labels <= maximum_l
+        native_subspace = native[np.ix_(mask, mask)]
+        grid_subspace = grid[np.ix_(mask, mask)]
+        error_subspace = native_subspace - grid_subspace
+        if maximum_l == angular_momenta[-1]:
+            native_subspace_eigenvalues = eigenvalues
+        else:
+            native_subspace_eigenvalues = np.linalg.eigvalsh(native_subspace)
+        grid_subspace_eigenvalues = np.linalg.eigvalsh(grid_subspace)
+        principal_subspaces.append(
+            {
+                "maximum_l": maximum_l,
+                "dimension": int(np.count_nonzero(mask)),
+                "native_frobenius": float(np.linalg.norm(native_subspace)),
+                "grid_frobenius": float(np.linalg.norm(grid_subspace)),
+                "error_frobenius": float(np.linalg.norm(error_subspace)),
+                "error_relative_to_grid": float(
+                    np.linalg.norm(error_subspace) / max(np.linalg.norm(grid_subspace), 1.0e-300)
+                ),
+                "native_minimum_eigenvalue": float(native_subspace_eigenvalues[0]),
+                "native_maximum_eigenvalue": float(native_subspace_eigenvalues[-1]),
+                "grid_minimum_eigenvalue": float(grid_subspace_eigenvalues[0]),
+                "grid_maximum_eigenvalue": float(grid_subspace_eigenvalues[-1]),
+                "negative_eigenvalue_count_below_minus_1e_8": int(
+                    np.count_nonzero(native_subspace_eigenvalues < -1.0e-8)
+                ),
+            }
+        )
     result = {
         "status": "success",
         "iq": native_data["iq"],
@@ -150,6 +180,7 @@ def summarize_coulomb_pair(
         "minimum_eigenvector_l_weights": _eigenvector_l_weights(eigenvectors[:, 0], labels),
         "maximum_eigenvector_l_weights": _eigenvector_l_weights(eigenvectors[:, -1], labels),
         "angular_momentum_blocks": blocks,
+        "principal_subspace_by_maximum_l": principal_subspaces,
     }
     if not all(math.isfinite(value) for value in result.values() if isinstance(value, float)):
         raise ValueError("non-finite Coulomb angular-momentum diagnostic")
