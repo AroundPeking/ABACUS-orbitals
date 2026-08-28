@@ -241,7 +241,7 @@ naux $expected_naux
 reference_ha $reference_ha
 EOF
 
-for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt; do
+for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat stru_out v1_Cs_data_0.txt; do
   test -s "$name"
 done
 {
@@ -249,7 +249,7 @@ done
   echo reference_ha=$reference_ha
   echo naux=$expected_naux
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$matrix" GRID_MATRIX_HEADER.json ATOM_REFERENCE.txt band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt
+  sha256sum "$matrix" GRID_MATRIX_HEADER.json ATOM_REFERENCE.txt band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat stru_out v1_Cs_data_0.txt
 } >> provenance.txt
 
 echo "C_SELECTED_ATOM_PRODUCER_OK work=$work reference_ha=$reference_ha"

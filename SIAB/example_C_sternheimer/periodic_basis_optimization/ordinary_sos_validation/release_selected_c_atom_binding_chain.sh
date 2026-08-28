@@ -8,6 +8,7 @@ base=$campaign/runs/product-pca-20260825
 code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 validation=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 producer_script=$validation/run_selected_c_atom_response_pca_producer_55d25e3c9.slurm
+acceptance_script=$validation/run_selected_c_atom_producer_acceptance_9f2e80d6.slurm
 sos_script=$validation/run_selected_c_atom_sos_d4810f73.slurm
 delta_script=$validation/run_selected_c_atom_matched_delta_55d25e3c9.slurm
 reader_script=$validation/run_selected_c_atom_matched_delta_reader_d4810f73.slurm
@@ -15,7 +16,8 @@ collector=$validation/collect_selected_c_binding_energy.py
 atom_root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
 failed_producer=$atom_root/producer
 failed_retry1=$atom_root/producer-retry1
-producer=$atom_root/producer-final
+source_producer=$atom_root/producer-final
+producer=$atom_root/producer-accepted
 sos=$atom_root/sos-nfreq6-d4810f73
 delta=$atom_root/matched-delta-nfreq6-55d25e3c9
 reader=$atom_root/matched-delta-reader-nfreq6-d4810f73
@@ -27,7 +29,7 @@ solid_delta_q1=$base/matched-delta-response-aware-fixed-prefix-nfreq6-55d25e3c9/
 expected_orbital_sha=3e7e31072a0a388b12397f9957e75502d4c75755534cb2db1c3cfe12e8f132b1
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 
-for file in "$producer_script" "$sos_script" "$delta_script" "$reader_script" "$collector"; do
+for file in "$producer_script" "$acceptance_script" "$sos_script" "$delta_script" "$reader_script" "$collector"; do
   test -s "$file"
 done
 test -x "$python"
@@ -101,11 +103,19 @@ if ! test -e "$producer"; then
   grep -Fqx 'reason The first periodic Sternheimer driver supports only nspin=1 insulators.' "$failed_retry1/OUT.C_ATOM_SELECTED_RESPONSE_PCA/STERNHEIMER_SIAB_STATUS.dat"
   read -r retry1_state retry1_exit < <(job_state "$(tr -d '[:space:]' < "$atom_root/PRODUCER_RETRY1_JOB_ID.txt")")
   test "$retry1_state" = FAILED && test "$retry1_exit" = 1:0
-  submit_unique_stage producer_final c_atom_pca_final "$producer_script" "$producer" "$atom_root/PRODUCER_FINAL_JOB_ID.txt"
+  test -d "$source_producer"
+  test -s "$source_producer/ATOM_REFERENCE.txt"
+  test -s "$source_producer/GRID_MATRIX_HEADER.json"
+  test -s "$atom_root/PRODUCER_FINAL_JOB_ID.txt"
+  test "$(tr -d '[:space:]' < "$atom_root/PRODUCER_FINAL_JOB_ID.txt")" = 3144040
+  read -r final_state final_exit < <(job_state 3144040)
+  test "$final_state" = FAILED && test "$final_exit" = 1:0
+  submit_unique_stage producer_acceptance c_atom_pca_accept "$acceptance_script" "$producer" "$atom_root/PRODUCER_ACCEPTANCE_JOB_ID.txt"
 fi
 grep -qx 'status=success' "$producer/provenance.txt"
 grep -qx 'naux=261' "$producer/provenance.txt"
-require_completed_job producer_final "$atom_root/PRODUCER_FINAL_JOB_ID.txt"
+grep -qx 'acceptance_kind=completed_physics_wrapper_only_failure' "$producer/provenance.txt"
+require_completed_job producer_acceptance "$atom_root/PRODUCER_ACCEPTANCE_JOB_ID.txt"
 
 if ! test -e "$sos"; then
   submit_unique_stage sos c_atom_selected_sos "$sos_script" "$sos" "$atom_root/SOS_JOB_ID.txt"

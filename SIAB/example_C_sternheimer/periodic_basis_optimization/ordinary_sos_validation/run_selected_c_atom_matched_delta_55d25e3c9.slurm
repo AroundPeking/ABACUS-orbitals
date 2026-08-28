@@ -18,7 +18,7 @@ module load oneapi/2024.2
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 base=$campaign/runs/product-pca-20260825
 atom_root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
-producer=$atom_root/producer-final
+producer=$atom_root/producer-accepted
 sos=$atom_root/sos-nfreq6-d4810f73
 selection_root=$base/selected-fixed-prefix-checkpoint-500
 selection=$selection_root/SELECTED_CANDIDATE.json

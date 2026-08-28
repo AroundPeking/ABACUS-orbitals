@@ -20,7 +20,7 @@ base=$campaign/runs/product-pca-20260825
 code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 validation=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 frequency_extractor=$validation/extract_librpa_frequency_grid.py
-producer=$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-final
+producer=$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-accepted
 selection=$base/selected-fixed-prefix-checkpoint-500/SELECTED_CANDIDATE.json
 librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel
 librpa=$librpa_root/chi0_main.exe
@@ -44,12 +44,13 @@ test "${#expected_librpa_sha}" = 64
 test "$(sha256sum "$librpa" | awk '{print $1}')" = "$expected_librpa_sha"
 test -d "$producer"
 grep -qx 'status=success' "$producer/provenance.txt"
+grep -qx 'acceptance_kind=completed_physics_wrapper_only_failure' "$producer/provenance.txt"
 grep -qx "naux=$expected_naux" "$producer/provenance.txt"
 grep -qx "selected_orbital_sha256=$expected_orbital_sha" "$producer/provenance.txt"
 test -s "$producer/ATOM_REFERENCE.txt" && test -s "$producer/GRID_MATRIX_HEADER.json"
 
 mkdir -p "$reader"
-for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt v1_coulomb_full_iq_1_rank0.dat; do
+for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat stru_out v1_Cs_data_0.txt v1_coulomb_full_iq_1_rank0.dat; do
   test -s "$producer/$name"
   ln -s "$producer/$name" "$reader/$name"
 done

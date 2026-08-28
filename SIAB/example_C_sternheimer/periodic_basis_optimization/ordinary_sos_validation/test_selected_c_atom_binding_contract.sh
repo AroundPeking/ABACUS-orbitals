@@ -4,13 +4,14 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
 producer=$root/run_selected_c_atom_response_pca_producer_55d25e3c9.slurm
+acceptance=$root/run_selected_c_atom_producer_acceptance_9f2e80d6.slurm
 sos=$root/run_selected_c_atom_sos_d4810f73.slurm
 delta=$root/run_selected_c_atom_matched_delta_55d25e3c9.slurm
 reader=$root/run_selected_c_atom_matched_delta_reader_d4810f73.slurm
 release=$root/release_selected_c_atom_binding_chain.sh
 collector=$root/collect_selected_c_binding_energy.py
 
-for file in "$producer" "$sos" "$delta" "$reader" "$release" "$collector"; do
+for file in "$producer" "$acceptance" "$sos" "$delta" "$reader" "$release" "$collector"; do
   test -s "$file"
 done
 
@@ -43,11 +44,29 @@ grep -q 'full_periodic_ewald' "$producer"
 grep -q 'assert header\["natoms"\] == 1' "$producer"
 grep -q 'assert header\["naux"\] == expected_naux' "$producer"
 ! grep -q 'C_10au_3s3p2d1f1g_1e-4.abfs' "$producer"
+grep -q 'KS_eigenvector_0.dat' "$producer"
+! grep -q 'KS_eigenvector_1.dat' "$producer"
+
+grep -q '^#SBATCH --partition=p1$' "$acceptance"
+grep -q '^#SBATCH --nodes=1$' "$acceptance"
+grep -q '^#SBATCH --ntasks=1$' "$acceptance"
+grep -q '^#SBATCH --cpus-per-task=1$' "$acceptance"
+grep -q '^source_job_id=3144040$' "$acceptance"
+grep -q '^source_producer=\$atom_root/producer-final$' "$acceptance"
+grep -q '^accepted=\$atom_root/producer-accepted$' "$acceptance"
+grep -q 'test "$source_state" = FAILED' "$acceptance"
+grep -q 'test "$source_exit" = 1:0' "$acceptance"
+grep -q 'C_SELECTED_ATOM_PRODUCER_FAILED line=245 command=test -s "$name" status=1' "$acceptance"
+grep -q 'assert header == (-12345679, 28, 1, 2, 56, 56, 1, 36)' "$acceptance"
+grep -q 'Exit status: 0' "$acceptance"
+grep -q 'status success' "$acceptance"
+grep -q 'KS_eigenvector_0.dat' "$acceptance"
+! grep -q 'KS_eigenvector_1.dat' "$acceptance"
 
 grep -q '^#SBATCH --nodes=1$' "$sos"
 grep -q '^librpa_commit=d4810f73aab20c36e69b1c353c945b77f40931c9$' "$sos"
 grep -q '^expected_naux=261$' "$sos"
-grep -q '^producer=\$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-final$' "$sos"
+grep -q '^producer=\$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-accepted$' "$sos"
 grep -q 'task = rpa' "$sos"
 grep -q 'nfreq = 6' "$sos"
 grep -q 'tfgrids_type = minimax' "$sos"
@@ -59,6 +78,8 @@ grep -q 'ATOM_SOS_FREQUENCY_GRID.dat' "$sos"
 grep -q 'side atom' "$sos"
 grep -q 'method sos' "$sos"
 grep -q 'scope body_only_no_analytic_headwing' "$sos"
+grep -q 'KS_eigenvector_0.dat' "$sos"
+! grep -q 'KS_eigenvector_1.dat' "$sos"
 
 grep -q '^#SBATCH --partition=p1$' "$delta"
 grep -q '^#SBATCH --nodes=16$' "$delta"
@@ -66,7 +87,7 @@ grep -q '^#SBATCH --ntasks=16$' "$delta"
 grep -q '^#SBATCH --cpus-per-task=40$' "$delta"
 grep -q '^#SBATCH --mem=190000$' "$delta"
 grep -q '^expected_naux=261$' "$delta"
-grep -q '^producer=\$atom_root/producer-final$' "$delta"
+grep -q '^producer=\$atom_root/producer-accepted$' "$delta"
 grep -q 'set_input_key nbands 56' "$delta"
 grep -q 'set_input_key ocp_set "3\*1 53\*0 1\*1 55\*0"' "$delta"
 grep -q 'set_input_key sternheimer_delta 1' "$delta"
@@ -88,7 +109,7 @@ grep -q 'cmp -s basis_aux_out' "$delta"
 
 grep -q '^#SBATCH --nodes=1$' "$reader"
 grep -q '^expected_naux=261$' "$reader"
-grep -q '^producer=\$atom_root/producer-final$' "$reader"
+grep -q '^producer=\$atom_root/producer-accepted$' "$reader"
 grep -q 'task = sternheimer_rpa' "$reader"
 grep -q 'nfreq = 6' "$reader"
 grep -q 'prefix_coul_full = v1_coulomb_full_iq_' "$reader"
@@ -109,9 +130,12 @@ grep -q 'refusing duplicate' "$release"
 grep -q 'collect_selected_c_binding_energy.py' "$release"
 grep -q '^failed_producer=\$atom_root/producer$' "$release"
 grep -q '^failed_retry1=\$atom_root/producer-retry1$' "$release"
-grep -q '^producer=\$atom_root/producer-final$' "$release"
+grep -q '^source_producer=\$atom_root/producer-final$' "$release"
+grep -q '^producer=\$atom_root/producer-accepted$' "$release"
 grep -q 'reason sternheimer_mpi_layout=global_equation requires frequency MPI and channel MPI' "$release"
 grep -q 'reason The first periodic Sternheimer driver supports only nspin=1 insulators.' "$release"
 grep -q 'PRODUCER_FINAL_JOB_ID.txt' "$release"
+grep -q 'PRODUCER_ACCEPTANCE_JOB_ID.txt' "$release"
+grep -q 'run_selected_c_atom_producer_acceptance_9f2e80d6.slurm' "$release"
 
 echo "C_SELECTED_ATOM_BINDING_CONTRACT_OK"
