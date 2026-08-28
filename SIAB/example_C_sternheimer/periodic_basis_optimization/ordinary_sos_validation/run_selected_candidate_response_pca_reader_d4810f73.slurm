@@ -212,7 +212,6 @@ assert total is not None and math.isfinite(total)
 assert len(contributions) == 64, len(contributions)
 maximum_imaginary = max(abs(value[1]) for value in contributions)
 assert maximum_imaginary <= 1.0e-10, maximum_imaginary
-assert abs(total) < 2.0, total
 print("status success")
 print("scope body_only_no_analytic_headwing")
 print("auxiliary_basis response_aware_fixed_prefix_product_pca")

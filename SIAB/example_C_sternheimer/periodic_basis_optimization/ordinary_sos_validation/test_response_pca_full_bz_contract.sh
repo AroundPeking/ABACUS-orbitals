@@ -26,6 +26,11 @@ grep -q 'test "$grid_coulomb_file_count" -eq 64' "$reader"
 grep -q 'assert dimensions == {expected_naux}' "$reader"
 grep -Eq "prefix_coul_full.*v1_coulomb_grid_iq_" "$reader"
 grep -Eq "replace_w_head.*f" "$reader"
+grep -q 'assert total is not None and math.isfinite(total)' "$reader"
+if grep -Fq 'assert abs(total) < 2.0' "$reader"; then
+  echo "reader still rejects finite energies by magnitude" >&2
+  exit 1
+fi
 ! grep -q 'grid-coulomb-selected-fixed-prefix-full-bz-ad29464fd' "$reader"
 
 echo "C_RESPONSE_PCA_FULL_BZ_CONTRACT_OK"
