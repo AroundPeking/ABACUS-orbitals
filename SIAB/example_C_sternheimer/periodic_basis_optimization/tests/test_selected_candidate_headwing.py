@@ -68,6 +68,27 @@ class SelectedCandidateHeadwingContractTest(unittest.TestCase):
         self.assertIn("headwing_convergence_gate pending", text)
         self.assertIn("basis_full_qavg_gate", text)
 
+    def test_response_pca_qavg_consumer_uses_matched_response_aware_bodies(self):
+        text = (
+            self.validation
+            / "run_selected_candidate_response_pca_matched_headwing_qavg_d4810f73.slurm"
+        ).read_text(encoding="ascii")
+
+        self.assertIn("ordinary-sos-response-aware-full-bz-nfreq6-d4810f73", text)
+        self.assertIn(
+            "matched-delta-response-aware-fixed-prefix-reader-nfreq6-d4810f73",
+            text,
+        )
+        self.assertIn("headwing-selected-fixed-prefix-ad29464fd/latest", text)
+        self.assertIn("auxiliary_basis response_aware_fixed_prefix_product_pca", text)
+        self.assertIn("frequency_grid_source response_aware_selected_sos", text)
+        self.assertIn("replace_w_head = true", text)
+        self.assertIn("rpa_headwing_mode = qavg", text)
+        self.assertIn("rpa_headwing_body_start = 1", text)
+        self.assertIn("scope full_qavg_shared_selected_headwing", text)
+        self.assertIn("basis_full_qavg_gate", text)
+        self.assertIn("headwing_convergence_gate pending", text)
+
     def test_reads_consistent_occupied_band_count_from_abacus_eig_occ(self):
         text = """1 # ionic step
 Spin number 1

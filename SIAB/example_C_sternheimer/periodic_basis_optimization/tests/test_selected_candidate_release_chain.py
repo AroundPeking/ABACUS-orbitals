@@ -45,6 +45,22 @@ class SelectedCandidateReleaseChainContractTest(unittest.TestCase):
         self.assertIn('afterok:"$consumer_job":"$headwing_job"', text)
         self.assertIn("QAVG_TEST_ONLY.txt", text)
 
+    def test_response_pca_delta_release_submits_matched_qavg_after_body(self):
+        text = (
+            self.validation
+            / "release_selected_candidate_response_pca_matched_delta_after_q1.sh"
+        ).read_text(encoding="ascii")
+
+        self.assertIn("HEADWING_JOB_ID", text)
+        self.assertIn(
+            "run_selected_candidate_response_pca_matched_headwing_qavg_d4810f73.slurm",
+            text,
+        )
+        self.assertIn("headwing_job=$headwing_job", text)
+        self.assertIn("qavg_job=$qavg_job", text)
+        self.assertIn('afterok:"$consumer_job":"$headwing_job"', text)
+        self.assertIn("QAVG_TEST_ONLY.txt", text)
+
 
 if __name__ == "__main__":
     unittest.main()
