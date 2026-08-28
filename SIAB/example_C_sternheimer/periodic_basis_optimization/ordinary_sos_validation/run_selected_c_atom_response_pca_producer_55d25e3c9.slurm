@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c_atom_selected_pca
+#SBATCH --job-name=c_atom_pca_retry1
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=1-00:00:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-selected-pca-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-selected-pca-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-retry1-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-retry1-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_SELECTED_ATOM_PRODUCER_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -29,7 +29,7 @@ expected_orbital_sha=3e7e31072a0a388b12397f9957e75502d4c75755534cb2db1c3cfe12e8f
 expected_naux=261
 fixed_nu=2,2,1,0,0
 root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
-work=$root/producer
+work=$root/producer-retry1
 suffix=C_ATOM_SELECTED_RESPONSE_PCA
 
 test "${SLURM_JOB_PARTITION:?}" = p1
@@ -125,8 +125,10 @@ set_input_key out_sternheimer_basis_opt 1
 remove_input_key out_sternheimer_siab
 set_input_key sternheimer_q_index 1
 set_input_key sternheimer_nfreq 6
+remove_input_key sternheimer_frequency_grid_file
 set_input_key sternheimer_frequency_mpi 0
 set_input_key sternheimer_channel_mpi 0
+set_input_key sternheimer_mpi_layout frequency_grouped
 set_input_key sternheimer_delta 1
 set_input_key sternheimer_fd_order 8
 set_input_key exx_pca_threshold 1e-4
