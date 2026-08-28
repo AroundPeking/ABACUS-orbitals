@@ -244,6 +244,34 @@ class NamedCandidateSlurmContractTest(unittest.TestCase):
         self.assertIn("refusing duplicate", release)
         self.assertNotIn("delta", release.lower())
 
+    def test_atom_restart_recovery_preserves_the_physical_target(self):
+        recovery = (
+            VALIDATION / "run_named_candidate_atom_restart_recovery_55d25e3c9.slurm"
+        ).read_text(encoding="ascii")
+
+        for marker in (
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=40",
+            "wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube",
+            "set_input_key init_wfc file",
+            "set_input_key init_chg file",
+            "set_input_key nelec 4",
+            "set_input_key nspin 2",
+            "set_input_key nupdown 2",
+            'set_input_key ocp_set "3*1 44*0 1*1 46*0"',
+            "set_input_key mixing_beta 0.3",
+            "set_input_key mixing_beta_mag 0.3",
+            "set_input_key rpa 1",
+            "#SCF IS CONVERGED#",
+            "initial-nonconverged-snapshot",
+            "status=success",
+        ):
+            self.assertIn(marker, recovery)
+
+        self.assertNotIn("sternheimer", recovery.lower())
+        self.assertNotIn("rm -rf", recovery)
+
 
 if __name__ == "__main__":
     unittest.main()
