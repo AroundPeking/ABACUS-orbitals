@@ -39,7 +39,7 @@ fi
 
 job_state() {
   local job_id=$1 active
-  active=$(squeue -h -j "$job_id" -o '%T' | head -1)
+  active=$(squeue -h -j "$job_id" -o '%T' 2>/dev/null | head -1 || true)
   if test -n "$active"; then
     printf '%s active\n' "$active"
     return
