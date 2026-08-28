@@ -72,7 +72,7 @@ submit_unique_stage() {
     exit 2
   fi
   refuse_named_active_job "$job_name"
-  sbatch --test-only --export=ALL,SIAB_SOURCE_ROOT="$code" "$script" > "$atom_root/${label}_TEST_ONLY.txt"
+  sbatch --test-only --export=ALL,SIAB_SOURCE_ROOT="$code" "$script" > "$atom_root/${label}_TEST_ONLY.txt" 2>&1
   output=$(sbatch --parsable --export=ALL,SIAB_SOURCE_ROOT="$code" "$script")
   job_id=${output%%;*}
   test "$job_id" -gt 0
