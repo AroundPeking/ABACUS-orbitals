@@ -20,7 +20,7 @@ base=$campaign/runs/product-pca-20260825
 code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 validation=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 frequency_extractor=$validation/extract_librpa_frequency_grid.py
-producer=$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-retry1
+producer=$base/selected-c-atom-response-aware-product-pca-55d25e3c9/producer-final
 selection=$base/selected-fixed-prefix-checkpoint-500/SELECTED_CANDIDATE.json
 librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel
 librpa=$librpa_root/chi0_main.exe
@@ -49,7 +49,7 @@ grep -qx "selected_orbital_sha256=$expected_orbital_sha" "$producer/provenance.t
 test -s "$producer/ATOM_REFERENCE.txt" && test -s "$producer/GRID_MATRIX_HEADER.json"
 
 mkdir -p "$reader"
-for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt v1_coulomb_grid_iq_1_rank0.dat; do
+for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt v1_coulomb_full_iq_1_rank0.dat; do
   test -s "$producer/$name"
   ln -s "$producer/$name" "$reader/$name"
 done
@@ -71,7 +71,7 @@ tfgrids_type = minimax
 parallel_routing = libri
 version_coul_reader = 1
 version_lri_reader = 1
-prefix_coul_full = v1_coulomb_grid_iq_
+prefix_coul_full = v1_coulomb_full_iq_
 prefix_lri_coeff = v1_Cs_data_
 use_scalapack_ecrpa = t
 use_shrink_abfs = f
@@ -109,6 +109,7 @@ export I_MPI_FABRICS=shm:ofi
   echo spin_state=fixed_triplet_nup3_ndown1
   echo qpoint_count=1
   echo coulomb_kernel=full_periodic_poisson
+  echo coulomb_matrix_source=full_periodic_ewald
   echo analytic_headwing=no_atom_supercell
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS

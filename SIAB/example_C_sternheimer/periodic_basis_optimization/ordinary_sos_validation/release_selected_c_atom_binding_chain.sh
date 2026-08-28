@@ -14,7 +14,8 @@ reader_script=$validation/run_selected_c_atom_matched_delta_reader_d4810f73.slur
 collector=$validation/collect_selected_c_binding_energy.py
 atom_root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
 failed_producer=$atom_root/producer
-producer=$atom_root/producer-retry1
+failed_retry1=$atom_root/producer-retry1
+producer=$atom_root/producer-final
 sos=$atom_root/sos-nfreq6-d4810f73
 delta=$atom_root/matched-delta-nfreq6-55d25e3c9
 reader=$atom_root/matched-delta-reader-nfreq6-d4810f73
@@ -94,11 +95,17 @@ if ! test -e "$producer"; then
   grep -Fqx 'reason sternheimer_mpi_layout=global_equation requires frequency MPI and channel MPI.' "$failed_producer/OUT.C_ATOM_SELECTED_RESPONSE_PCA/STERNHEIMER_SIAB_STATUS.dat"
   read -r failed_state failed_exit < <(job_state "$(tr -d '[:space:]' < "$atom_root/PRODUCER_JOB_ID.txt")")
   test "$failed_state" = FAILED && test "$failed_exit" = 1:0
-  submit_unique_stage producer_retry1 c_atom_pca_retry1 "$producer_script" "$producer" "$atom_root/PRODUCER_RETRY1_JOB_ID.txt"
+  test -d "$failed_retry1"
+  test -s "$failed_retry1/OUT.C_ATOM_SELECTED_RESPONSE_PCA/STERNHEIMER_SIAB_STATUS.dat"
+  grep -qx 'status failed' "$failed_retry1/OUT.C_ATOM_SELECTED_RESPONSE_PCA/STERNHEIMER_SIAB_STATUS.dat"
+  grep -Fqx 'reason The first periodic Sternheimer driver supports only nspin=1 insulators.' "$failed_retry1/OUT.C_ATOM_SELECTED_RESPONSE_PCA/STERNHEIMER_SIAB_STATUS.dat"
+  read -r retry1_state retry1_exit < <(job_state "$(tr -d '[:space:]' < "$atom_root/PRODUCER_RETRY1_JOB_ID.txt")")
+  test "$retry1_state" = FAILED && test "$retry1_exit" = 1:0
+  submit_unique_stage producer_final c_atom_pca_final "$producer_script" "$producer" "$atom_root/PRODUCER_FINAL_JOB_ID.txt"
 fi
 grep -qx 'status=success' "$producer/provenance.txt"
 grep -qx 'naux=261' "$producer/provenance.txt"
-require_completed_job producer_retry1 "$atom_root/PRODUCER_RETRY1_JOB_ID.txt"
+require_completed_job producer_final "$atom_root/PRODUCER_FINAL_JOB_ID.txt"
 
 if ! test -e "$sos"; then
   submit_unique_stage sos c_atom_selected_sos "$sos_script" "$sos" "$atom_root/SOS_JOB_ID.txt"

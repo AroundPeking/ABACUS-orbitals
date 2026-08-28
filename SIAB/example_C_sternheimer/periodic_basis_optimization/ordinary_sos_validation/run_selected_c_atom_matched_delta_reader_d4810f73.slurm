@@ -19,9 +19,8 @@ campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 base=$campaign/runs/product-pca-20260825
 code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 validation=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
-merge_script=$validation/merge_sternheimer_symmetry_manifests.py
 atom_root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
-producer=$atom_root/producer-retry1
+producer=$atom_root/producer-final
 sos=$atom_root/sos-nfreq6-d4810f73
 response=$atom_root/matched-delta-nfreq6-55d25e3c9
 frequency=$sos/ATOM_SOS_FREQUENCY_GRID.dat
@@ -39,7 +38,7 @@ test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
-test -s "$merge_script" && test -s "$frequency"
+test -d "$validation" && test -s "$frequency"
 test -x "$python" && test -x "$librpa" && test -s "$build_provenance"
 grep -qx "source_commit=$librpa_commit" "$build_provenance"
 expected_librpa_sha=$(tail -1 "$build_provenance" | awk '{print $1}')
@@ -52,16 +51,17 @@ frequency_sha=$(sha256sum "$frequency" | awk '{print $1}')
 grep -qx "frequency_grid_sha256=$frequency_sha" "$response/provenance.txt"
 
 mkdir -p "$reader"
-"$python" "$merge_script" --output-dir "$reader" "$response" > "$work/merge.out"
-for name in band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt; do
+for name in basis_aux_out basis_out basis_wfc_out; do
   test -s "$response/$name"
   ln -s "$response/$name" "$reader/$name"
 done
-test -s "$producer/v1_coulomb_grid_iq_1_rank0.dat"
-ln -s "$producer/v1_coulomb_grid_iq_1_rank0.dat" "$reader/v1_coulomb_grid_iq_1_rank0.dat"
-for name in v1_sternheimer_qpoints.dat v1_sternheimer_partial_manifest.dat v1_sternheimer_symmetry_routes.dat v1_sternheimer_qstar_routes.dat; do
-  test -s "$reader/$name"
+test -s "$producer/v1_coulomb_full_iq_1_rank0.dat"
+ln -s "$producer/v1_coulomb_full_iq_1_rank0.dat" "$reader/v1_coulomb_full_iq_1_rank0.dat"
+for matrix in "$response"/v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat; do
+  test -s "$matrix"
+  ln -s "$matrix" "$reader/$(basename "$matrix")"
 done
+test "$(find -L "$reader" -maxdepth 1 -type f -name 'v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat' | wc -l)" -eq 6
 cmp -s "$response/basis_aux_out" "$producer/basis_aux_out"
 cmp -s "$response/basis_out" "$producer/basis_out"
 cmp -s "$response/basis_wfc_out" "$producer/basis_wfc_out"
@@ -70,20 +70,12 @@ cat > "$work/librpa.in" <<EOF
 task = sternheimer_rpa
 input_dir = $reader/
 version_coul_reader = 1
-version_lri_reader = 1
-prefix_lri_coeff = v1_Cs_data_
 nfreq = 6
 sqrt_coulomb_threshold = 1e-5
-prefix_coul_full = v1_coulomb_grid_iq_
-fn_sternheimer_qpoints = v1_sternheimer_qpoints.dat
-fn_sternheimer_partial_manifest = v1_sternheimer_partial_manifest.dat
-fn_sternheimer_symmetry_routes = v1_sternheimer_symmetry_routes.dat
-fn_sternheimer_qstar_routes = v1_sternheimer_qstar_routes.dat
-use_rpa_gamma = true
-replace_w_head = false
-parallel_routing = libri
-use_symmetry_rpa = false
-use_kpara_scf_eigvec = true
+prefix_coul_full = v1_coulomb_full_iq_
+prefix_sternheimer_chi0 = v1_sternheimer_chi0_iq_
+sternheimer_iq = 1
+sternheimer_qweight = 1
 EOF
 
 find -L "$reader" -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > "$work/INPUT_SHA256.txt"
@@ -108,10 +100,11 @@ export I_MPI_FABRICS=shm:ofi
   echo spin_state=fixed_triplet_nup3_ndown1
   echo qpoint_count=1
   echo coulomb_kernel=full_periodic_poisson
+  echo coulomb_matrix_source=producer_full_periodic_ewald
   echo analytic_headwing=no_atom_supercell
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
-  sha256sum "$0" "$frequency" "$merge_script" "$work/librpa.in" "$work/INPUT_SHA256.txt" "$build_provenance" "$librpa"
+  sha256sum "$0" "$frequency" "$work/librpa.in" "$work/INPUT_SHA256.txt" "$build_provenance" "$librpa"
 } > "$work/provenance.txt"
 
 cd "$work"
@@ -144,7 +137,7 @@ PY
   echo status=success
   echo ecrpa_ha=$ecrpa_ha
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' librpa.time
-  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt merge.out
+  sha256sum librpa.in librpa.out RESULT_SUMMARY.txt INPUT_SHA256.txt
 } >> provenance.txt
 
 echo "C_SELECTED_ATOM_DELTA_RPA_OK work=$work ecrpa_ha=$ecrpa_ha"

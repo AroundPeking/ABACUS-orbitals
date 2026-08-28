@@ -18,7 +18,7 @@ module load oneapi/2024.2
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
 base=$campaign/runs/product-pca-20260825
 atom_root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
-producer=$atom_root/producer-retry1
+producer=$atom_root/producer-final
 sos=$atom_root/sos-nfreq6-d4810f73
 selection_root=$base/selected-fixed-prefix-checkpoint-500
 selection=$selection_root/SELECTED_CANDIDATE.json
@@ -91,13 +91,16 @@ set_input_key rpa 1
 set_input_key out_librpa_reader_version 1
 set_input_key out_sternheimer_librpa 1
 set_input_key out_sternheimer_basis_opt 0
-set_input_key sternheimer_q_index 1
+set_input_key sternheimer_q_index 0
 set_input_key sternheimer_nfreq 6
 set_input_key sternheimer_frequency_grid_file "$frequency_name"
 set_input_key sternheimer_frequency_mpi 1
 set_input_key sternheimer_channel_mpi 1
 set_input_key sternheimer_mpi_layout global_equation
 set_input_key sternheimer_delta 1
+set_input_key sternheimer_delta_virtual_source ks_bands
+set_input_key sternheimer_delta_max_states 0
+set_input_key sternheimer_grid_diagnostics 1
 set_input_key sternheimer_fd_order 8
 set_input_key exx_pca_threshold 1e-4
 set_input_key rpa_pca_fixed_nu "$fixed_nu"
@@ -142,7 +145,8 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL ABACUS_STERNHEIMER_FD_ST_MAX_ITER
   echo grid=135,135,135
   echo fd_order=8
   echo mpi_layout=global_equation
-  echo coulomb_kernel=full_periodic_poisson
+  echo perturbation_coulomb_kernel=atomic_ccp_1_over_r
+  echo postprocess_coulomb_kernel=full_periodic_poisson
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
   sha256sum "$0" "$abacus" "$selection" "$frequency_manifest" "$sos/RESULT_SUMMARY.txt" INPUT STRU KPT C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_selected_product_pca.orb "$frequency_name"
@@ -153,19 +157,25 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL ABACUS_STERNHEIMER_FD_ST_MAX_ITER
 report=OUT.${suffix}/STERNHEIMER_CHI0.dat
 test -s "$report"
 grep -qx 'status success' "$report"
-grep -qx 'format v1_partial' "$report"
-grep -qx 'sternheimer_q_index 1' "$report"
+grep -qx 'format librpa_v1' "$report"
 grep -qx 'nfreq 6' "$report"
 grep -qx "frequency_grid_file $frequency_name" "$report"
 grep -qx 'abfs_source product_pca' "$report"
-grep -qx 'perturbation_coulomb_kernel full_periodic_poisson' "$report"
-grep -qx 'sternheimer_mode delta' "$report"
+grep -qx 'sternheimer_response_spin_channels 1 2' "$report"
+grep -qx 'sternheimer_delta yes' "$report"
+grep -qx 'sternheimer_grid_diagnostics yes' "$report"
 grep -qx 'sternheimer_fd_order 8' "$report"
 grep -qx 'all_converged yes' "$report"
-test -s v1_sternheimer_partial_manifest_iq_1.dat
-test -s v1_sternheimer_symmetry_routes_iq_1.dat
-test -s v1_sternheimer_qstar_routes_iq_1.dat
-test -s v1_sternheimer_full_kpoints.dat
+test -s v1_sternheimer_chi0_index.dat
+grep -qx 'format_version 1' v1_sternheimer_chi0_index.dat
+grep -qx 'nq 1' v1_sternheimer_chi0_index.dat
+grep -qx 'nfreq 6' v1_sternheimer_chi0_index.dat
+test "$(find . -maxdepth 1 -type f -name 'v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat' | wc -l)" -eq 6
+test "$(find . -maxdepth 1 -type f -name 'v1_sternheimer_component_*_iq_1_ifreq_*_rank*.dat' | wc -l)" -eq 18
+for spin in 1 2; do
+  test -s "STERNHEIMER_DELTA_GRID_MATRICES_spin_${spin}.dat"
+  test -s "STERNHEIMER_DELTA_PERTURBATION_spin_${spin}.dat"
+done
 channels=$(awk '$1=="abfs_channels" {print $2}' "$report")
 test "$channels" = "$expected_naux"
 "$python" - "$report" <<'PY'
@@ -184,7 +194,7 @@ PY
 cmp -s basis_aux_out "$producer/basis_aux_out"
 cmp -s basis_out "$producer/basis_out"
 cmp -s basis_wfc_out "$producer/basis_wfc_out"
-cmp -s v1_coulomb_grid_iq_1_rank0.dat "$producer/v1_coulomb_grid_iq_1_rank0.dat"
+cmp -s v1_coulomb_full_iq_1_rank0.dat "$producer/v1_coulomb_full_iq_1_rank0.dat"
 
 reference_ha=$(awk '/Etot_without_rpa\(Ha\):/ {value=$2} END {print value}' abacus.out)
 producer_reference=$(awk '$1=="reference_ha" {print $2}' "$producer/ATOM_REFERENCE.txt")
@@ -203,7 +213,7 @@ PY
   echo all_converged=yes
   echo max_relative_residual=$(awk '$1=="max_solver_relative_residual" {print $2}' "$report")
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$report" basis_aux_out basis_out basis_wfc_out v1_coulomb_grid_iq_1_rank0.dat v1_sternheimer_partial_manifest_iq_1.dat v1_sternheimer_symmetry_routes_iq_1.dat v1_sternheimer_qstar_routes_iq_1.dat v1_sternheimer_full_kpoints.dat
+  sha256sum "$report" basis_aux_out basis_out basis_wfc_out v1_coulomb_full_iq_1_rank0.dat v1_sternheimer_chi0_index.dat v1_sternheimer_chi0_iq_1_ifreq_*_rank*.dat
 } >> provenance.txt
 
 echo "C_SELECTED_ATOM_DELTA_OK work=$work reference_ha=$reference_ha"

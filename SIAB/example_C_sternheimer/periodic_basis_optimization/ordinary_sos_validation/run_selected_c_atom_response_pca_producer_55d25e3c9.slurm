@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c_atom_pca_retry1
+#SBATCH --job-name=c_atom_pca_final
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=1-00:00:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-retry1-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-retry1-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-final-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-atom-pca-final-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_SELECTED_ATOM_PRODUCER_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -29,7 +29,7 @@ expected_orbital_sha=3e7e31072a0a388b12397f9957e75502d4c75755534cb2db1c3cfe12e8f
 expected_naux=261
 fixed_nu=2,2,1,0,0
 root=$base/selected-c-atom-response-aware-product-pca-55d25e3c9
-work=$root/producer-retry1
+work=$root/producer-final
 suffix=C_ATOM_SELECTED_RESPONSE_PCA
 
 test "${SLURM_JOB_PARTITION:?}" = p1
@@ -121,7 +121,7 @@ set_input_key init_chg atomic
 set_input_key rpa 1
 set_input_key out_librpa_reader_version 1
 set_input_key out_sternheimer_librpa 0
-set_input_key out_sternheimer_basis_opt 1
+set_input_key out_sternheimer_basis_opt 0
 remove_input_key out_sternheimer_siab
 set_input_key sternheimer_q_index 1
 set_input_key sternheimer_nfreq 6
@@ -152,8 +152,6 @@ export OMP_WAIT_POLICY=PASSIVE
 export OMP_STACKSIZE=2G
 export MKL_DYNAMIC=FALSE
 export I_MPI_FABRICS=shm:ofi
-export ABACUS_STERNHEIMER_FD_ST_ABFS_DIAG_ONLY=1
-
 {
   echo status=running
   echo purpose=selected_c_atom_zero_order_and_response_aware_product_pca
@@ -168,7 +166,8 @@ export ABACUS_STERNHEIMER_FD_ST_ABFS_DIAG_ONLY=1
   echo grid=135,135,135
   echo fd_order=8
   echo cell_angstrom=20,20,20
-  echo coulomb_kernel=exact_rhs_full_periodic_poisson
+  echo coulomb_kernel=full_periodic_poisson
+  echo coulomb_matrix_source=full_periodic_ewald
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
   sha256sum "$0" "$abacus" "$selection" INPUT STRU KPT C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_selected_product_pca.orb
@@ -176,12 +175,9 @@ export ABACUS_STERNHEIMER_FD_ST_ABFS_DIAG_ONLY=1
 
 /usr/bin/time -v -o abacus.time mpirun -np 1 "$abacus" > abacus.out 2>&1
 
-status_file=OUT.${suffix}/STERNHEIMER_SIAB_STATUS.dat
-matrix=v1_coulomb_grid_iq_1_rank0.dat
+matrix=v1_coulomb_full_iq_1_rank0.dat
 eig_occ=OUT.${suffix}/eig_occ.txt
-test -s "$status_file" && test -s "$matrix" && test -s "$eig_occ"
-grep -qx 'status abfs_diag_only' "$status_file"
-grep -qx 'grid_coulomb_v1_kernel exact_rhs_full_periodic_poisson' "$status_file"
+test -s "$matrix" && test -s "$eig_occ"
 grep -Fq "Response-aware RPA product PCA fixed radial profiles: $fixed_nu" abacus.out
 
 python3 - "$matrix" "$expected_naux" > GRID_MATRIX_HEADER.json <<'PY'
@@ -253,7 +249,7 @@ done
   echo reference_ha=$reference_ha
   echo naux=$expected_naux
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$matrix" "$status_file" GRID_MATRIX_HEADER.json ATOM_REFERENCE.txt band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt
+  sha256sum "$matrix" GRID_MATRIX_HEADER.json ATOM_REFERENCE.txt band_out basis_aux_out basis_out basis_wfc_out bz_sampling_out KS_eigenvector_0.dat KS_eigenvector_1.dat stru_out v1_Cs_data_0.txt
 } >> provenance.txt
 
 echo "C_SELECTED_ATOM_PRODUCER_OK work=$work reference_ha=$reference_ha"
