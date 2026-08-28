@@ -6,12 +6,13 @@ root=$(cd "$(dirname "$0")" && pwd)
 producer=$root/run_selected_c_atom_response_pca_producer_55d25e3c9.slurm
 acceptance=$root/run_selected_c_atom_producer_acceptance_9f2e80d6.slurm
 sos=$root/run_selected_c_atom_sos_d4810f73.slurm
+restart_gate=$root/run_selected_c_atom_restart_gate_55d25e3c9.slurm
 delta=$root/run_selected_c_atom_matched_delta_55d25e3c9.slurm
 reader=$root/run_selected_c_atom_matched_delta_reader_d4810f73.slurm
 release=$root/release_selected_c_atom_binding_chain.sh
 collector=$root/collect_selected_c_binding_energy.py
 
-for file in "$producer" "$acceptance" "$sos" "$delta" "$reader" "$release" "$collector"; do
+for file in "$producer" "$acceptance" "$sos" "$restart_gate" "$delta" "$reader" "$release" "$collector"; do
   test -s "$file"
 done
 
@@ -80,6 +81,32 @@ grep -q 'method sos' "$sos"
 grep -q 'scope body_only_no_analytic_headwing' "$sos"
 grep -q 'KS_eigenvector_0.dat' "$sos"
 ! grep -q 'KS_eigenvector_1.dat' "$sos"
+
+grep -q '^#SBATCH --partition=p1$' "$restart_gate"
+grep -q '^#SBATCH --nodes=16$' "$restart_gate"
+grep -q '^#SBATCH --ntasks=16$' "$restart_gate"
+grep -q '^#SBATCH --ntasks-per-node=1$' "$restart_gate"
+grep -q '^#SBATCH --cpus-per-task=40$' "$restart_gate"
+grep -q '^#SBATCH --mem=190000$' "$restart_gate"
+grep -q '^#SBATCH --time=00:30:00$' "$restart_gate"
+grep -q '^source_producer=\$atom_root/producer-final$' "$restart_gate"
+grep -q '^restart_source=\$source_producer/OUT.C_ATOM_SELECTED_RESPONSE_PCA$' "$restart_gate"
+grep -q '^work=\$atom_root/restart-zero-order-mpi16-55d25e3c9$' "$restart_gate"
+grep -q 'set_input_key init_wfc file' "$restart_gate"
+grep -q 'set_input_key init_chg file' "$restart_gate"
+grep -q 'set_input_key rpa 0' "$restart_gate"
+grep -q 'set_input_key out_sternheimer_librpa 0' "$restart_gate"
+grep -q 'set_input_key out_sternheimer_basis_opt 0' "$restart_gate"
+grep -q 'restart_input_snapshot' "$restart_gate"
+grep -q 'wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube' "$restart_gate"
+grep -q 'Read NAO wave functions from' "$restart_gate"
+grep -q 'Read in electron density\|Read electron density from file' "$restart_gate"
+grep -q '#SCF IS CONVERGED#' "$restart_gate"
+grep -q '!!SCF IS NOT CONVERGED!!' "$restart_gate"
+grep -q 'abs(reference_ev - restart_ev) <= 1.0e-8' "$restart_gate"
+grep -q 'assert states\[1\]\[:3\] == \[1.0, 1.0, 1.0\]' "$restart_gate"
+grep -q 'assert states\[2\]\[0\] == 1.0' "$restart_gate"
+grep -q 'status success' "$restart_gate"
 
 grep -q '^#SBATCH --partition=p1$' "$delta"
 grep -q '^#SBATCH --nodes=16$' "$delta"
