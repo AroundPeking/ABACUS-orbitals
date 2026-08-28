@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2g_atom_prod
+#SBATCH --job-name=c_basis_atom
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=1-00:00:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-atom-producer-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-atom-producer-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-atom-producer-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-atom-producer-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_NAMED_ATOM_PRODUCER_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -25,8 +25,6 @@ abacus_commit=55d25e3c9bb8255fb17bcdf127c653a72402a5d5
 expected_abacus_sha=25a9133c3facfe44d64d34f2696fe899b82e55be6e22c15c20ade0c00721a3d9
 work=$run_root/atom-producer
 suffix=C_ATOM_NAMED_CANDIDATE_PCA
-orbital_name=C_gga_10au_100Ry_joint_two_g.orb
-orbital=$candidate_root/$orbital_name
 
 test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
@@ -34,28 +32,32 @@ test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
 test -x "$abacus"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
-test -s "$manifest" && test -s "$orbital"
-mapfile -t candidate < <(python3 - "$manifest" "$orbital" <<'PY'
+test -s "$manifest"
+mapfile -t candidate < <(python3 - "$manifest" "$candidate_root" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="ascii"))
-orbital = pathlib.Path(sys.argv[2])
+orbital = pathlib.Path(sys.argv[2]) / payload["orbital_filename"]
 assert payload["status"] == "success" and payload["pre_sos_gate"] == "pass"
-assert payload["label"] == "joint-two-g"
-assert payload["nu"] == [3, 3, 2, 1, 2]
-assert payload["ao_count_cell"] == 94 and payload["ao_count_atom"] == 47
+assert len(payload["nu"]) == 5
+expected_atom = sum((2 * l + 1) * count for l, count in enumerate(payload["nu"]))
+assert payload["ao_count_atom"] == expected_atom
+assert payload["ao_count_cell"] == 2 * expected_atom
 assert payload["fixed_nu"] == [2, 2, 1, 0, 0]
 assert hashlib.sha256(orbital.read_bytes()).hexdigest() == payload["exported_orbital_sha256"]
+print(payload["orbital_filename"])
 print(payload["ao_count_atom"])
 print(",".join(map(str, payload["fixed_nu"])))
 print(payload["exported_orbital_sha256"])
 PY
 )
-ao_count_atom=${candidate[0]}
-fixed_nu=${candidate[1]}
-orbital_sha=${candidate[2]}
+orbital_name=${candidate[0]}
+ao_count_atom=${candidate[1]}
+fixed_nu=${candidate[2]}
+orbital_sha=${candidate[3]}
+orbital=$candidate_root/$orbital_name
 for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf; do test -s "$source/$asset"; done
 
 mkdir -p "$work"
@@ -111,7 +113,7 @@ set_input_key gamma_only 1
 set_input_key kpar 1
 set_input_key smearing_method fixed
 set_input_key ocp 1
-set_input_key ocp_set "3*1 44*0 1*1 46*0"
+set_input_key ocp_set "3*1 $((ao_count_atom - 3))*0 1*1 $((ao_count_atom - 1))*0"
 set_input_key init_wfc atomic
 set_input_key init_chg atomic
 set_input_key rpa 1

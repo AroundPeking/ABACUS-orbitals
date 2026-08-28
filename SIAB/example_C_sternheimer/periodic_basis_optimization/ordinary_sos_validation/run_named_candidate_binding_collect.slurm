@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2g_bind
+#SBATCH --job-name=c_basis_bind
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2000
 #SBATCH --time=00:15:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-binding-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-binding-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-binding-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-binding-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_NAMED_BINDING_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR

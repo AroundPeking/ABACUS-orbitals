@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2g_atom_sos
+#SBATCH --job-name=c_basis_asos
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=02:00:00
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-atom-sos-%j.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-atom-sos-%j.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-atom-sos-%j.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-atom-sos-%j.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_NAMED_ATOM_SOS_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR

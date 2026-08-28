@@ -14,7 +14,22 @@ from pathlib import Path
 
 
 FIXED_NU = [2, 2, 1, 0, 0]
-SUPPORTED = {"joint-two-g": ([3, 3, 2, 1, 2], 94, 2)}
+SUPPORTED = {
+    "joint-two-g": {
+        "nu": [3, 3, 2, 1, 2],
+        "ao_count_cell": 94,
+        "g_count": 2,
+        "overlap_factor": 10.0,
+        "eigenvalue_factor": 1.1,
+    },
+    "one-g-keep-g1": {
+        "nu": [3, 3, 2, 1, 1],
+        "ao_count_cell": 76,
+        "g_count": 1,
+        "overlap_factor": 3.0,
+        "eigenvalue_factor": 1.1,
+    },
+}
 
 
 def sha256(path: Path) -> str:
@@ -79,7 +94,10 @@ def prepare_candidate(
     if len(matches) != 1:
         raise ValueError("comparison report must contain the named candidate exactly once")
     candidate = matches[0]
-    expected_nu, expected_ao_count, expected_g = SUPPORTED[label]
+    contract = SUPPORTED[label]
+    expected_nu = contract["nu"]
+    expected_ao_count = contract["ao_count_cell"]
+    expected_g = contract["g_count"]
     if candidate.get("nu") != expected_nu or candidate.get("ao_count_cell") != expected_ao_count:
         raise ValueError("named candidate layout does not match the supported layout")
 
@@ -105,7 +123,12 @@ def prepare_candidate(
     eigenvalue_reference = _finite(
         reference_maximum_eigenvalue_ev, "reference maximum eigenvalue"
     )
-    if overlap >= 10.0 * overlap_reference or maximum_eigenvalue >= 1.1 * eigenvalue_reference:
+    overlap_ratio = overlap / overlap_reference
+    eigenvalue_ratio = maximum_eigenvalue / eigenvalue_reference
+    if (
+        overlap_ratio >= contract["overlap_factor"]
+        or eigenvalue_ratio >= contract["eigenvalue_factor"]
+    ):
         raise ValueError("candidate fails the pre-SOS physics gate")
 
     orbital_text = orbital_path.read_text(encoding="ascii")
@@ -119,7 +142,8 @@ def prepare_candidate(
             raise ValueError(f"candidate orbital is missing marker: {marker}")
 
     output_directory.mkdir(parents=True)
-    staged_orbital = output_directory / "C_gga_10au_100Ry_joint_two_g.orb"
+    orbital_filename = "C_gga_10au_100Ry_{}.orb".format(label.replace("-", "_"))
+    staged_orbital = output_directory / orbital_filename
     shutil.copyfile(orbital_path, staged_orbital)
     payload = {
         "status": "success",
@@ -141,12 +165,17 @@ def prepare_candidate(
         ),
         "maximum_overlap_condition": overlap,
         "reference_overlap_condition": overlap_reference,
+        "maximum_overlap_condition_ratio": overlap_ratio,
+        "maximum_overlap_condition_ratio_limit": contract["overlap_factor"],
         "maximum_eigenvalue_ev": maximum_eigenvalue,
         "reference_maximum_eigenvalue_ev": eigenvalue_reference,
+        "maximum_eigenvalue_ratio": eigenvalue_ratio,
+        "maximum_eigenvalue_ratio_limit": contract["eigenvalue_factor"],
         "pre_sos_gate": "pass",
         "coefficients": str(coefficients),
         "coefficients_sha256": sha256(coefficients),
         "source_orbital": str(orbital_path),
+        "orbital_filename": orbital_filename,
         "exported_orbital": str(staged_orbital),
         "exported_orbital_sha256": sha256(staged_orbital),
         "comparison": str(comparison_path),

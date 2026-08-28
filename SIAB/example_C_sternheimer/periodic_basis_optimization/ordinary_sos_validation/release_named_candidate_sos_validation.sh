@@ -23,7 +23,7 @@ if ! flock -n 9; then
   echo "refusing duplicate: release lock is held" >&2
   exit 2
 fi
-for job_name in c2g_atom_prod c2g_atom_sos c2g_solid_q c2g_solid_sos c2g_bind; do
+for job_name in c_basis_atom c_basis_asos c_basis_sq c_basis_ssos c_basis_bind; do
   if squeue -h -u "$USER" -o '%j' | grep -qx "$job_name"; then
     echo "refusing duplicate: active scheduler job $job_name already exists" >&2
     exit 2

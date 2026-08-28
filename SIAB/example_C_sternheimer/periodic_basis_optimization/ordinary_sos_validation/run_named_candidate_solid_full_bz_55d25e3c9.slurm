@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2g_solid_q
+#SBATCH --job-name=c_basis_sq
 #SBATCH --partition=p1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --mem=190000
 #SBATCH --time=1-00:00:00
 #SBATCH --array=1-64%8
-#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-solid-q-%A_%a.out
-#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c2g-solid-q-%A_%a.err
+#SBATCH --output=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-solid-q-%A_%a.out
+#SBATCH --error=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/logs/c-basis-solid-q-%A_%a.err
 
 set -euo pipefail
 trap 'status=$?; echo "C_NAMED_SOLID_Q_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -18,8 +18,6 @@ module load oneapi/2024.2
 candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
 manifest=$candidate_root/CANDIDATE.json
-orbital_name=C_gga_10au_100Ry_joint_two_g.orb
-orbital=$candidate_root/$orbital_name
 source=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1
 build_root=/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artifacts/job3137534
 abacus=$build_root/abacus_3p
@@ -33,24 +31,29 @@ test "${SLURM_JOB_PARTITION:?}" = p1 && test "${SLURM_NTASKS:?}" = 1 && test "${
 test "$ordinal" -ge 1 && test "$ordinal" -le 64
 test ! -e "$work"
 test -x "$abacus" && test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
-test -s "$manifest" && test -s "$orbital"
-mapfile -t candidate < <(python3 - "$manifest" "$orbital" <<'PY'
+test -s "$manifest"
+mapfile -t candidate < <(python3 - "$manifest" "$candidate_root" <<'PY'
 import hashlib, json, pathlib, sys
 payload = json.load(open(sys.argv[1], encoding="ascii"))
-orbital = pathlib.Path(sys.argv[2])
+orbital = pathlib.Path(sys.argv[2]) / payload["orbital_filename"]
 assert payload["status"] == "success" and payload["pre_sos_gate"] == "pass"
-assert payload["label"] == "joint-two-g" and payload["nu"] == [3, 3, 2, 1, 2]
-assert payload["ao_count_cell"] == 94 and payload["ao_count_atom"] == 47
+assert len(payload["nu"]) == 5
+expected_atom = sum((2 * l + 1) * count for l, count in enumerate(payload["nu"]))
+assert payload["ao_count_atom"] == expected_atom
+assert payload["ao_count_cell"] == 2 * expected_atom
 assert payload["fixed_nu"] == [2, 2, 1, 0, 0]
 assert hashlib.sha256(orbital.read_bytes()).hexdigest() == payload["exported_orbital_sha256"]
+print(payload["orbital_filename"])
 print(payload["ao_count_cell"])
 print(",".join(map(str, payload["fixed_nu"])))
 print(payload["exported_orbital_sha256"])
 PY
 )
-ao_count_cell=${candidate[0]}
-fixed_nu=${candidate[1]}
-orbital_sha=${candidate[2]}
+orbital_name=${candidate[0]}
+ao_count_cell=${candidate[1]}
+fixed_nu=${candidate[2]}
+orbital_sha=${candidate[3]}
+orbital=$candidate_root/$orbital_name
 for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf; do test -s "$source/$asset"; done
 
 mkdir -p "$work"

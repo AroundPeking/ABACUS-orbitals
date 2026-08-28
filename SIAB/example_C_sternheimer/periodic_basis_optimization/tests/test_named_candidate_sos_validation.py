@@ -153,6 +153,72 @@ class NamedCandidatePreparationTest(unittest.TestCase):
                     reference_maximum_eigenvalue_ev=301.0,
                 )
 
+    def test_prepares_one_g_manifest_for_the_strict_nested_candidate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coefficients = root / "coefficients.txt"
+            coefficients.write_text("coefficients\n", encoding="ascii")
+            orbital = root / "candidate.orb"
+            orbital.write_text(
+                "Energy Cutoff(Ry)           100.0\n"
+                "Radius Cutoff(a.u.)         10.0\n"
+                "Lmax                        4\n"
+                "Number of Gorbital-->       1\n",
+                encoding="ascii",
+            )
+            comparison = root / "comparison.json"
+            comparison.write_text(
+                json.dumps(
+                    {
+                        "format_version": 1,
+                        "datasets": [{"selected_iq": 43}],
+                        "candidates": [
+                            {
+                                "label": "one-g-keep-g1",
+                                "nu": [3, 3, 2, 1, 1],
+                                "ao_count_cell": 76,
+                                "coefficients": str(coefficients),
+                                "coefficients_sha256": hashlib.sha256(
+                                    coefficients.read_bytes()
+                                ).hexdigest(),
+                                "minimum_occupied_capture": 0.999995,
+                                "maximum_overlap_condition": 2.94e6,
+                                "global_weighted_relative_trace_log_error": 0.048,
+                                "global_weighted_relative_pi_error": 0.116,
+                            }
+                        ],
+                    }
+                ),
+                encoding="ascii",
+            )
+            spectrum = root / "spectrum.json"
+            spectrum.write_text(
+                json.dumps(
+                    {
+                        "label": "one-g-keep-g1",
+                        "ao_count_cell": 76,
+                        "maximum_overlap_condition": 2.94e6,
+                        "maximum_eigenvalue_ev": 297.2,
+                    }
+                ),
+                encoding="ascii",
+            )
+
+            result = self.module.prepare_candidate(
+                comparison_path=comparison,
+                spectrum_path=spectrum,
+                orbital_path=orbital,
+                output_directory=root / "candidate",
+                label="one-g-keep-g1",
+                occupied_capture_floor=0.999898,
+                reference_overlap_condition=2.876e6,
+                reference_maximum_eigenvalue_ev=301.1,
+            )
+
+            self.assertEqual(result["ao_count_atom"], 38)
+            self.assertEqual(result["orbital_filename"], "C_gga_10au_100Ry_one_g_keep_g1.orb")
+            self.assertLess(result["maximum_overlap_condition_ratio"], 3.0)
+
 
 class SosOnlyBindingCollectorTest(unittest.TestCase):
     def setUp(self):
@@ -243,6 +309,17 @@ class NamedCandidateSlurmContractTest(unittest.TestCase):
         self.assertIn("afterok", release)
         self.assertIn("refusing duplicate", release)
         self.assertNotIn("delta", release.lower())
+
+        for name in (
+            "run_named_candidate_atom_producer_55d25e3c9.slurm",
+            "run_named_candidate_solid_full_bz_55d25e3c9.slurm",
+        ):
+            text = (VALIDATION / name).read_text(encoding="ascii")
+            self.assertIn('payload["orbital_filename"]', text)
+            self.assertNotIn("joint-two-g", text)
+            self.assertNotIn("C_gga_10au_100Ry_joint_two_g.orb", text)
+
+        self.assertNotIn("c2g_", release)
 
         binding = (VALIDATION / "run_named_candidate_binding_collect.slurm").read_text(
             encoding="ascii"
