@@ -244,6 +244,13 @@ class NamedCandidateSlurmContractTest(unittest.TestCase):
         self.assertIn("refusing duplicate", release)
         self.assertNotIn("delta", release.lower())
 
+        binding = (VALIDATION / "run_named_candidate_binding_collect.slurm").read_text(
+            encoding="ascii"
+        )
+        self.assertIn("python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python", binding)
+        self.assertIn('"$python" "$collector"', binding)
+        self.assertIn('"$python" - "$work/RESULT.json"', binding)
+
     def test_atom_restart_recovery_preserves_the_physical_target(self):
         recovery = (
             VALIDATION / "run_named_candidate_atom_restart_recovery_55d25e3c9.slurm"

@@ -18,18 +18,20 @@ run_root=${RUN_ROOT:?missing immutable run root}
 code=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 manifest=$candidate_root/CANDIDATE.json
 collector=$code/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/collect_named_candidate_sos_binding.py
+python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 atom=$run_root/atom-sos/RESULT_SUMMARY.txt
 solid=$run_root/solid-sos/RESULT_SUMMARY.txt
 work=$run_root/binding
 reference_ev_per_c=6.902326
 
 test ! -e "$work"
+test -x "$python"
 test -s "$manifest" && test -s "$collector" && test -s "$atom" && test -s "$solid"
 grep -qx 'status success' "$atom"
 grep -qx 'status success' "$solid"
 mkdir -p "$work"
-python3 "$collector" --atom-sos "$atom" --solid-sos "$solid" --delta-reference-ev-per-c "$reference_ev_per_c" --output "$work/RESULT.json" > "$work/collector.out"
-python3 - "$work/RESULT.json" <<'PY' > "$work/RESULT_SUMMARY.txt"
+"$python" "$collector" --atom-sos "$atom" --solid-sos "$solid" --delta-reference-ev-per-c "$reference_ev_per_c" --output "$work/RESULT.json" > "$work/collector.out"
+"$python" - "$work/RESULT.json" <<'PY' > "$work/RESULT_SUMMARY.txt"
 import json, math, sys
 payload = json.load(open(sys.argv[1], encoding="ascii"))
 assert payload["status"] == "success"
