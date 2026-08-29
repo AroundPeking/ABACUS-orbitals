@@ -29,6 +29,13 @@ SUPPORTED = {
         "overlap_factor": 3.0,
         "eigenvalue_factor": 1.1,
     },
+    "joint-atom-solid": {
+        "nu": [3, 3, 2, 1, 1],
+        "ao_count_cell": 76,
+        "g_count": 1,
+        "overlap_factor": 3.0,
+        "eigenvalue_factor": 1.1,
+    },
 }
 
 
