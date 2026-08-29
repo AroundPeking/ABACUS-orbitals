@@ -56,11 +56,21 @@ class SternheimerSourcePairTest(unittest.TestCase):
 
     def test_rejects_overlap_maximum_absolute_difference(self):
         overlap = self.response.overlap.clone()
-        overlap[0, 0] += 2.0e-14
+        overlap[0, 0] += 2.0e-13
         response = replace(self.response, overlap=overlap)
 
         with self.assertRaisesRegex(ValueError, "maximum absolute difference"):
             pair_response_and_source(response, self.source)
+
+    def test_accepts_roundoff_scaled_to_large_overlap(self):
+        source_overlap = self.source.overlap.clone() * 50.0
+        response_overlap = source_overlap.clone()
+        response_overlap[0, 0] += 7.0e-14
+
+        pair_response_and_source(
+            replace(self.response, overlap=response_overlap),
+            replace(self.source, overlap=source_overlap),
+        )
 
     def test_rejects_overlap_relative_difference_independently(self):
         source_overlap = torch.eye(4, dtype=torch.complex128) * 1.0e-2
@@ -74,7 +84,6 @@ class SternheimerSourcePairTest(unittest.TestCase):
 
     def test_rejects_each_physical_provenance_difference(self):
         replacements = {
-            "auxiliary_basis_sha256": "e" * 64,
             "cell_bohr": [21.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 20.0],
             "ecut_ry": 50.0,
             "kernel": "cut_coulomb",
@@ -96,6 +105,28 @@ class SternheimerSourcePairTest(unittest.TestCase):
                 source = replace(self.source, provenance=provenance)
                 with self.assertRaisesRegex(ValueError, key):
                     pair_response_and_source(self.response, source)
+
+    def test_accepts_legacy_auxiliary_hash_for_identical_whitened_space(self):
+        provenance = dict(self.source.provenance)
+        provenance["auxiliary_basis_sha256"] = "e" * 64
+        pair = pair_response_and_source(
+            self.response,
+            replace(self.source, provenance=provenance),
+        )
+
+        self.assertEqual(len(pair.provenance_warnings), 1)
+        self.assertIn("auxiliary_basis_sha256", pair.provenance_warnings[0])
+
+    def test_rejects_auxiliary_hash_and_whitened_space_difference(self):
+        provenance = dict(self.source.provenance)
+        provenance["auxiliary_basis_sha256"] = "e" * 64
+        provenance["coulomb_transform_sha256"] = "f" * 64
+
+        with self.assertRaisesRegex(ValueError, "auxiliary_basis_sha256"):
+            pair_response_and_source(
+                self.response,
+                replace(self.source, provenance=provenance),
+            )
 
     def test_rejects_missing_physical_provenance(self):
         provenance = dict(self.source.provenance)

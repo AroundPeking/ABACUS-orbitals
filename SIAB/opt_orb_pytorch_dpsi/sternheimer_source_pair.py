@@ -30,8 +30,16 @@ _EXECUTION_PROVENANCE_KEYS = (
     "omp_threads",
 )
 _OVERLAP_RELATIVE_TOLERANCE = 1.0e-13
-_OVERLAP_MAX_ABSOLUTE_TOLERANCE = 1.0e-14
+_OVERLAP_ABSOLUTE_TOLERANCE = 1.0e-14
 _OCCUPATION_ABSOLUTE_TOLERANCE = 1.0e-14
+_AUXILIARY_SPACE_IDENTITY_KEYS = (
+    "auxiliary_whitening",
+    "raw_auxiliary_dimension",
+    "whitened_auxiliary_rank",
+    "discarded_auxiliary_rank",
+    "coulomb_relative_threshold",
+    "coulomb_transform_sha256",
+)
 
 
 @dataclass(frozen=True)
@@ -134,13 +142,22 @@ def _validate_overlap(response_overlap, source_overlap):
     difference = response_overlap - source_overlap
     if difference.numel() == 0:
         maximum_absolute = 0.0
+        maximum_scale = 0.0
     else:
         maximum_absolute = float(torch.max(torch.abs(difference)))
-    if maximum_absolute > _OVERLAP_MAX_ABSOLUTE_TOLERANCE:
+        maximum_scale = max(
+            float(torch.max(torch.abs(response_overlap))),
+            float(torch.max(torch.abs(source_overlap))),
+        )
+    maximum_allowed = (
+        _OVERLAP_ABSOLUTE_TOLERANCE
+        + _OVERLAP_RELATIVE_TOLERANCE * maximum_scale
+    )
+    if maximum_absolute > maximum_allowed:
         raise ValueError(
             "response/source overlap maximum absolute difference "
             f"{maximum_absolute:.17g} exceeds "
-            f"{_OVERLAP_MAX_ABSOLUTE_TOLERANCE:.1e}"
+            f"scale-aware tolerance {maximum_allowed:.17g}"
         )
 
     difference_norm = float(torch.linalg.vector_norm(difference))
@@ -158,6 +175,7 @@ def _validate_overlap(response_overlap, source_overlap):
 
 
 def _compare_provenance(response, source):
+    warnings = []
     for key in _PHYSICAL_PROVENANCE_KEYS:
         missing_from = []
         if key not in response:
@@ -170,9 +188,17 @@ def _compare_provenance(response, source):
                 + " and ".join(missing_from)
             )
         if not _values_equal(response[key], source[key]):
-            raise ValueError(f"physical provenance differs: {key}")
+            if key != "auxiliary_basis_sha256" or not _same_auxiliary_space(
+                response,
+                source,
+            ):
+                raise ValueError(f"physical provenance differs: {key}")
+            warnings.append(
+                "physical provenance definition differs: "
+                "auxiliary_basis_sha256; accepted because the complete "
+                "whitened Coulomb space identity is equal"
+            )
 
-    warnings = []
     for key in _EXECUTION_PROVENANCE_KEYS:
         response_value = response.get(key)
         source_value = source.get(key)
@@ -191,6 +217,15 @@ def _compare_provenance(response, source):
         if not _values_equal(response[key], source[key]):
             raise ValueError(f"provenance differs: {key}")
     return tuple(warnings)
+
+
+def _same_auxiliary_space(response, source):
+    for key in _AUXILIARY_SPACE_IDENTITY_KEYS:
+        if key not in response or key not in source:
+            return False
+        if not _values_equal(response[key], source[key]):
+            return False
+    return True
 
 
 def _positive_integer_provenance(provenance, key):
