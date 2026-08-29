@@ -18,7 +18,6 @@ trap 'status=$?; echo "C_ATOM_SOLID_BALANCED_OPT_FAILED line=$LINENO command=$BA
 : "${RUN_ROOT:?}"
 : "${RUN_MODE:?}"
 : "${EXPECTED_SIAB_COMMIT:?}"
-: "${PYTHON_EXE:?}"
 
 case "$RUN_MODE" in
   pilot)
@@ -42,9 +41,24 @@ test "${SLURM_NNODES:?}" = 1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_NTASKS_PER_NODE:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
-test -x "$PYTHON_EXE"
 test "$(cat "$REPO_ROOT/.git/HEAD")" = "$EXPECTED_SIAB_COMMIT"
 test ! -e "$RUN_ROOT"
+
+module load python/3.9.22
+runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
+python_exe=$(command -v python3)
+test -x "$python_exe"
+test -s "$runtime/site-packages/torch/lib/libtorch_cpu.so"
+export PYTHONPATH=$runtime/lib-dynload:$runtime/site-packages:$REPO_ROOT/SIAB/opt_orb_pytorch_dpsi
+export LD_LIBRARY_PATH=$runtime/lib:${LD_LIBRARY_PATH:-}
+"$python_exe" - <<'PY'
+import torch
+
+
+parameter = torch.nn.Parameter(torch.tensor([0.0], dtype=torch.float64))
+torch.optim.Adam([parameter], lr=1.0e-3)
+print("validated torch optimizer runtime", torch.__version__)
+PY
 
 producer_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q1=$producer_root/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q1_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
@@ -75,7 +89,7 @@ done
 grep -qx 'selected_iq 1' "$q1/manifest.dat"
 grep -qx 'selected_iq 22' "$q2/manifest.dat"
 
-"$PYTHON_EXE" - "$pair_gate" "$atomic_response" "$atomic_source" <<'PY'
+"$python_exe" - "$pair_gate" "$atomic_response" "$atomic_source" <<'PY'
 import hashlib
 import json
 import sys
@@ -114,13 +128,14 @@ mkdir -p "$RUN_ROOT"
   echo atomic_frequency_count=16
   echo solid_frequency_count=6
   echo maximum_steps=$max_steps
+  echo python_executable=$python_exe
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$SLURM_CPUS_PER_TASK
   sha256sum "$0" "$optimizer" "$initial" "$atomic_response" "$atomic_source" \
-    "$pair_gate" "$q1/manifest.dat" "$q2/manifest.dat"
+    "$pair_gate" "$q1/manifest.dat" "$q2/manifest.dat" \
+    "$runtime/site-packages/torch/lib/libtorch_cpu.so"
 } > "$RUN_ROOT/provenance.txt"
 
-export PYTHONPATH=$REPO_ROOT/SIAB/opt_orb_pytorch_dpsi${PYTHONPATH:+:$PYTHONPATH}
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -129,7 +144,7 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
 /usr/bin/time -v -o "$RUN_ROOT/optimize.time" \
-  "$PYTHON_EXE" -u "$optimizer" \
+  "$python_exe" -u "$optimizer" \
     --dataset "$q1" \
     --dataset-family C_solid \
     --dataset "$q2" \
@@ -159,7 +174,7 @@ export OMP_PLACES=cores
 grep -q '"status": "success"' "$RUN_ROOT/result/STATUS.json"
 test -s "$RUN_ROOT/result/OPTIMIZATION_RESULT.json"
 test -s "$RUN_ROOT/result/ORBITAL_RESULTS.txt"
-"$PYTHON_EXE" - "$RUN_ROOT/result/OPTIMIZATION_RESULT.json" <<'PY'
+"$python_exe" - "$RUN_ROOT/result/OPTIMIZATION_RESULT.json" <<'PY'
 import json
 import math
 import sys
