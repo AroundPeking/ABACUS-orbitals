@@ -145,7 +145,7 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
                     "candidate basis does not capture the fixed occupied manifold"
                 )
             loss = (coordinate - 1.0) ** 2
-            return loss, capture, 1.0
+            return loss, capture, 1.0, {"periodic": loss}
 
         with mock.patch.object(
             periodic_galerkin_fit,
@@ -203,7 +203,8 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
                 raise RuntimeError(
                     "candidate basis does not capture the fixed occupied manifold"
                 )
-            return (coordinate - 1.0) ** 2, capture, 1.0
+            loss = (coordinate - 1.0) ** 2
+            return loss, capture, 1.0, {"periodic": loss}
 
         with mock.patch.object(
             periodic_galerkin_fit,
@@ -266,7 +267,7 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             "evaluate_periodic_galerkin_coefficient_response",
             return_value=result,
         ) as evaluator:
-            loss, capture, condition = periodic_galerkin_fit._global_pi_loss(
+            loss, capture, condition, family_losses = periodic_galerkin_fit._global_pi_loss(
                 (dataset,),
                 {"C": [torch.eye(3, 2, dtype=torch.float64)]},
                 occupied_capture_tolerance=0.2,
@@ -275,10 +276,82 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
         self.assertEqual(float(loss), 0.0)
         self.assertEqual(capture, 0.95)
         self.assertEqual(condition, 3.0)
+        self.assertEqual(float(family_losses["periodic"]), 0.0)
         self.assertEqual(evaluator.call_args.kwargs["contraction_backend"], "block")
         self.assertEqual(
             evaluator.call_args.kwargs["occupied_capture_tolerance"], 0.2
         )
+
+    def test_global_loss_normalizes_atom_and_solid_families_separately(self):
+        solid_q1 = self.three_level_dataset()
+        solid_q2 = replace(solid_q1, q_weight=2.0)
+        solid_q1 = replace(
+            solid_q1,
+            reference_response=torch.ones((1, 1, 1), dtype=torch.complex128),
+        )
+        solid_q2 = replace(
+            solid_q2,
+            reference_response=10.0
+            * torch.ones((1, 1, 1), dtype=torch.complex128),
+        )
+        responses = iter(
+            (
+                torch.zeros((1, 1, 1), dtype=torch.complex128),
+                9.0 * torch.ones((1, 1, 1), dtype=torch.complex128),
+            )
+        )
+
+        def evaluate(dataset, _coefficients, **_kwargs):
+            response = next(responses)
+            return SimpleNamespace(
+                response=response,
+                minimum_occupied_capture=0.97,
+                maximum_overlap_condition=4.0,
+            )
+
+        atom = SimpleNamespace(
+            evaluate=lambda _coefficients: SimpleNamespace(
+                loss=torch.tensor(0.25, dtype=torch.float64),
+                max_candidate_condition=7.0,
+            )
+        )
+        with mock.patch.object(
+            periodic_galerkin_fit,
+            "evaluate_periodic_galerkin_coefficient_response",
+            side_effect=evaluate,
+        ):
+            loss, capture, condition, family_losses = (
+                periodic_galerkin_fit._global_pi_loss(
+                    (solid_q1, solid_q2),
+                    {"C": [torch.eye(3, 2, dtype=torch.float64)]},
+                    dataset_families=("C_solid", "C_solid"),
+                    additional_family_evaluators={"C_atom": atom},
+                )
+            )
+
+        expected_solid = (1.0 + 2.0 * 1.0) / (1.0 + 2.0 * 100.0)
+        self.assertAlmostEqual(float(family_losses["C_solid"]), expected_solid)
+        self.assertAlmostEqual(float(family_losses["C_atom"]), 0.25)
+        self.assertAlmostEqual(float(loss), 0.5 * (expected_solid + 0.25))
+        self.assertEqual(capture, 0.97)
+        self.assertEqual(condition, 7.0)
+
+    def test_global_loss_rejects_invalid_or_duplicate_family_names(self):
+        dataset = self.three_level_dataset()
+        coefficients = {"C": [torch.eye(3, 2, dtype=torch.float64)]}
+        with self.assertRaisesRegex(ValueError, "dataset_families"):
+            periodic_galerkin_fit._global_pi_loss(
+                (dataset,),
+                coefficients,
+                dataset_families=("C_solid", "extra"),
+            )
+        with self.assertRaisesRegex(ValueError, "family name"):
+            periodic_galerkin_fit._global_pi_loss(
+                (dataset,),
+                coefficients,
+                dataset_families=("C_solid",),
+                additional_family_evaluators={"C_solid": object()},
+            )
 
     def test_real_coefficient_gradient_includes_complex_response_components(self):
         dataset = self.three_level_dataset()
@@ -300,7 +373,7 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             "evaluate_periodic_galerkin_coefficient_response",
             side_effect=complex_response,
         ):
-            loss, _, _ = periodic_galerkin_fit._global_pi_loss(
+            loss, _, _, _ = periodic_galerkin_fit._global_pi_loss(
                 (dataset,),
                 {"C": [coordinate]},
             )
@@ -313,7 +386,7 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
                 trial = torch.tensor(
                     [[0.3 + displacement]], dtype=torch.float64
                 )
-                trial_loss, _, _ = periodic_galerkin_fit._global_pi_loss(
+                trial_loss, _, _, _ = periodic_galerkin_fit._global_pi_loss(
                     (dataset,),
                     {"C": [trial]},
                 )
@@ -399,6 +472,47 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
             )
 
         self.assertEqual(prepare.call_count, len(dataset.kpoints))
+
+    def test_optimizer_records_balanced_family_losses(self):
+        dataset = self.three_level_dataset()
+        initial = {
+            "C": [
+                torch.tensor(
+                    [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]],
+                    dtype=torch.float64,
+                )
+            ]
+        }
+
+        class AtomicEvaluator:
+            def evaluate(self, coefficients):
+                coordinate = coefficients["C"][0][2, 1]
+                return SimpleNamespace(
+                    loss=(coordinate - 0.5) ** 2 + 0.1,
+                    max_candidate_condition=2.0,
+                )
+
+        result = optimize_periodic_galerkin_basis(
+            (dataset,),
+            initial,
+            fixed_nu={"C": (1,)},
+            dataset_families=("C_solid",),
+            additional_family_evaluators={"C_atom": AtomicEvaluator()},
+            learning_rate=0.02,
+            max_steps=3,
+            minimum_steps=0,
+            plateau_patience=3,
+            plateau_relative_improvement=1.0e-8,
+        )
+
+        self.assertEqual(set(result.initial_family_losses), {"C_atom", "C_solid"})
+        self.assertEqual(set(result.best_family_losses), {"C_atom", "C_solid"})
+        self.assertTrue(
+            all(
+                set(record["family_losses"]) == {"C_atom", "C_solid"}
+                for record in result.history
+            )
+        )
 
     def test_rejects_fixed_prefix_larger_than_candidate_channel(self):
         dataset = self.three_level_dataset()

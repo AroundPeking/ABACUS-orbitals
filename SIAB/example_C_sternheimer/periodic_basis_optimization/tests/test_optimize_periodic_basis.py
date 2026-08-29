@@ -69,6 +69,60 @@ class OptimizePeriodicBasisTest(unittest.TestCase):
 
         self.assertEqual(args.omitted_reference_projection_validation, "layout")
 
+    def test_parses_joint_atom_solid_family_inputs(self):
+        args = MODULE.parse_args(
+            [
+                "--dataset",
+                "q1",
+                "--dataset-family",
+                "C_solid",
+                "--dataset",
+                "q2",
+                "--dataset-family",
+                "C_solid",
+                "--atomic-response",
+                "atom/sternheimer_matrix.dat",
+                "--atomic-source",
+                "atom/STERNHEIMER_SIAB_SOURCE_V1.dat",
+                "--atomic-family",
+                "C_atom",
+                "--initial",
+                "initial.txt",
+                "--output-directory",
+                "result",
+                "--siab-commit",
+                "a" * 40,
+            ]
+        )
+
+        self.assertEqual(args.dataset_family, ["C_solid", "C_solid"])
+        self.assertEqual(args.atomic_family, "C_atom")
+        self.assertEqual(args.atomic_response, Path("atom/sternheimer_matrix.dat"))
+        self.assertEqual(
+            args.atomic_source,
+            Path("atom/STERNHEIMER_SIAB_SOURCE_V1.dat"),
+        )
+
+    def test_normalizes_legacy_and_explicit_dataset_families(self):
+        self.assertEqual(
+            MODULE.normalize_dataset_families(None, 2),
+            ("periodic", "periodic"),
+        )
+        self.assertEqual(
+            MODULE.normalize_dataset_families(["C_solid", "C_solid"], 2),
+            ("C_solid", "C_solid"),
+        )
+        with self.assertRaisesRegex(ValueError, "dataset-family"):
+            MODULE.normalize_dataset_families(["C_solid"], 2)
+
+    def test_requires_atomic_response_and_source_together(self):
+        with self.assertRaisesRegex(ValueError, "together"):
+            MODULE.validate_atomic_pair_options(Path("response"), None)
+        self.assertFalse(MODULE.validate_atomic_pair_options(None, None))
+        self.assertTrue(
+            MODULE.validate_atomic_pair_options(Path("response"), Path("source"))
+        )
+
     def test_fixed_prefix_must_not_exceed_candidate_counts(self):
         self.assertEqual(
             MODULE.parse_channel_counts("2,2,1,0,0", (3, 3, 2, 0, 0)),

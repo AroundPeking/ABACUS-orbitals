@@ -23,6 +23,10 @@ from periodic_galerkin_basis import (  # noqa: E402
 )
 from periodic_galerkin_data import read_periodic_galerkin_dataset  # noqa: E402
 from periodic_galerkin_fit import optimize_periodic_galerkin_basis  # noqa: E402
+from IO.read_sternheimer import read_sternheimer  # noqa: E402
+from IO.read_sternheimer_source import read_sternheimer_source  # noqa: E402
+from projected_pi import ProjectedPiEvaluator  # noqa: E402
+from sternheimer_source_pair import pair_response_and_source  # noqa: E402
 
 
 def sha256(path):
@@ -68,6 +72,10 @@ def parse_channel_counts(value, candidate_nu):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, action="append", required=True)
+    parser.add_argument("--dataset-family", action="append")
+    parser.add_argument("--atomic-response", type=Path)
+    parser.add_argument("--atomic-source", type=Path)
+    parser.add_argument("--atomic-family", default="C_atom")
     parser.add_argument("--initial", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--siab-commit", required=True)
@@ -101,6 +109,43 @@ def parse_args(argv=None):
         default=1.0e-8,
     )
     return parser.parse_args(argv)
+
+
+def normalize_dataset_families(values, count):
+    if type(count) is not int or count <= 0:
+        raise ValueError("dataset count must be a positive integer")
+    if values is None:
+        return ("periodic",) * count
+    values = tuple(values)
+    if len(values) != count:
+        raise ValueError("one --dataset-family is required per --dataset")
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise ValueError("dataset-family names must be nonempty")
+    return values
+
+
+def validate_atomic_pair_options(response, source):
+    if (response is None) != (source is None):
+        raise ValueError("atomic response and source must be provided together")
+    return response is not None
+
+
+def validate_atomic_periodic_contract(response, datasets, *, element, radial_rows):
+    reference = datasets[0]
+    provenance = response.provenance
+    for field, expected in (
+        ("pseudopotential_sha256", reference.pseudopotential_sha256),
+        ("orbital_sha256", reference.orbital_sha256),
+    ):
+        if provenance.get(field) != expected:
+            raise ValueError("atomic and periodic response provenance differs: " + field)
+    if provenance.get("kernel") != "full_coulomb":
+        raise ValueError("atomic response must use the full periodic Poisson kernel")
+    if any(
+        block.element != element or block.n_primitive != radial_rows
+        for block in response.blocks
+    ):
+        raise ValueError("atomic response primitive blocks do not match the candidate basis")
 
 
 def validate_dataset_contract(datasets):
@@ -164,6 +209,14 @@ def main(argv=None):
     initial_path = args.initial.resolve()
     output = args.output_directory.resolve()
     dataset_paths = tuple(path.resolve() for path in args.dataset)
+    dataset_families = normalize_dataset_families(
+        args.dataset_family,
+        len(dataset_paths),
+    )
+    has_atomic_pair = validate_atomic_pair_options(
+        args.atomic_response,
+        args.atomic_source,
+    )
     if output.exists():
         raise FileExistsError(output)
     if (
@@ -186,6 +239,34 @@ def main(argv=None):
         for path in dataset_paths
     )
     validate_dataset_contract(datasets)
+    additional_family_evaluators = {}
+    atomic_pair = None
+    atomic_paths = None
+    if has_atomic_pair:
+        atomic_response_path = args.atomic_response.resolve()
+        atomic_source_path = args.atomic_source.resolve()
+        for path in (atomic_response_path, atomic_source_path):
+            if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
+                raise ValueError("atomic response/source must be nonempty regular files")
+        if (
+            not isinstance(args.atomic_family, str)
+            or not args.atomic_family.strip()
+            or args.atomic_family in set(dataset_families)
+        ):
+            raise ValueError("atomic family name must be nonempty and distinct")
+        atomic_response = read_sternheimer(atomic_response_path)
+        atomic_source = read_sternheimer_source(atomic_source_path)
+        atomic_pair = pair_response_and_source(atomic_response, atomic_source)
+        validate_atomic_periodic_contract(
+            atomic_response,
+            datasets,
+            element=args.element,
+            radial_rows=args.radial_rows,
+        )
+        additional_family_evaluators[args.atomic_family] = ProjectedPiEvaluator(
+            atomic_pair,
+        )
+        atomic_paths = (atomic_response_path, atomic_source_path)
     initial = read_periodic_optimizer_coefficients(
         initial_path,
         element=args.element,
@@ -205,6 +286,8 @@ def main(argv=None):
             "status": "running",
             "siab_commit": siab_commit,
             "dataset_physics_hashes": [dataset.physics_hash for dataset in datasets],
+            "dataset_families": list(dataset_families),
+            "atomic_family": args.atomic_family if atomic_pair is not None else None,
         },
     )
 
@@ -241,6 +324,8 @@ def main(argv=None):
                 ),
                 occupied_capture_reference=args.occupied_capture_reference,
                 block_cache_workers=args.block_cache_workers,
+                dataset_families=dataset_families,
+                additional_family_evaluators=additional_family_evaluators,
                 progress_callback=record_progress,
                 best_callback=record_best,
             )
@@ -284,7 +369,26 @@ def main(argv=None):
             "siab_commit": siab_commit,
             "abacus_commit": datasets[0].abacus_commit,
             "dataset_paths": [str(path) for path in dataset_paths],
+            "dataset_families": list(dataset_families),
             "dataset_physics_hashes": [dataset.physics_hash for dataset in datasets],
+            "atomic_family": args.atomic_family if atomic_pair is not None else None,
+            "atomic_response": (
+                str(atomic_paths[0]) if atomic_paths is not None else None
+            ),
+            "atomic_response_sha256": (
+                sha256(atomic_paths[0]) if atomic_paths is not None else None
+            ),
+            "atomic_source": (
+                str(atomic_paths[1]) if atomic_paths is not None else None
+            ),
+            "atomic_source_sha256": (
+                sha256(atomic_paths[1]) if atomic_paths is not None else None
+            ),
+            "atomic_provenance_warnings": (
+                list(atomic_pair.provenance_warnings)
+                if atomic_pair is not None
+                else []
+            ),
             "initial_coefficients": str(initial_path),
             "initial_coefficients_sha256": sha256(initial_path),
             "output_coefficients": str(coefficient_path),
@@ -295,8 +399,10 @@ def main(argv=None):
             "nu": list(nu),
             "fixed_nu": list(fixed_nu),
             "initial_loss": fit.initial_loss,
+            "initial_family_losses": fit.initial_family_losses,
             "initial_relative_pi_error": math.sqrt(fit.initial_loss),
             "best_loss": fit.best_loss,
+            "best_family_losses": fit.best_family_losses,
             "best_relative_pi_error": math.sqrt(fit.best_loss),
             "best_step": fit.best_step,
             "steps_completed": fit.steps_completed,

@@ -23,7 +23,9 @@ class PeriodicGalerkinFitResult:
     coefficients: dict
     history: tuple
     initial_loss: float
+    initial_family_losses: dict
     best_loss: float
+    best_family_losses: dict
     best_step: int
     steps_completed: int
     stop_reason: str
@@ -145,12 +147,34 @@ def _global_pi_loss(
     coefficients,
     *,
     occupied_capture_tolerance=1.0e-6,
+    dataset_families=None,
+    additional_family_evaluators=None,
 ):
-    numerator = torch.zeros((), dtype=torch.float64)
-    denominator = torch.zeros((), dtype=torch.float64)
+    if dataset_families is None:
+        dataset_families = ("periodic",) * len(datasets)
+    else:
+        dataset_families = tuple(dataset_families)
+    if len(dataset_families) != len(datasets):
+        raise ValueError("dataset_families must match datasets")
+    if any(not isinstance(name, str) or not name.strip() for name in dataset_families):
+        raise ValueError("each family name must be nonempty")
+    if additional_family_evaluators is None:
+        additional_family_evaluators = {}
+    elif not isinstance(additional_family_evaluators, dict):
+        raise ValueError("additional_family_evaluators must be a dictionary")
+    if any(
+        not isinstance(name, str) or not name.strip()
+        for name in additional_family_evaluators
+    ):
+        raise ValueError("each family name must be nonempty")
+    if set(dataset_families) & set(additional_family_evaluators):
+        raise ValueError("each family name must identify exactly one loss family")
+
+    numerators = {}
+    denominators = {}
     minimum_capture = math.inf
     maximum_condition = 1.0
-    for dataset in datasets:
+    for dataset, family in zip(datasets, dataset_families):
         result = evaluate_periodic_galerkin_coefficient_response(
             dataset,
             coefficients,
@@ -159,17 +183,52 @@ def _global_pi_loss(
         )
         weight = dataset.frequency_weights_ha[:, None, None]
         q_weight = dataset.q_weight
-        numerator = numerator + q_weight * torch.sum(
+        numerator = q_weight * torch.sum(
             weight * torch.abs(result.response - dataset.reference_response) ** 2
         )
-        denominator = denominator + q_weight * torch.sum(
+        denominator = q_weight * torch.sum(
             weight * torch.abs(dataset.reference_response) ** 2
         )
+        numerators[family] = numerators.get(
+            family, torch.zeros((), dtype=torch.float64)
+        ) + numerator
+        denominators[family] = denominators.get(
+            family, torch.zeros((), dtype=torch.float64)
+        ) + denominator
         minimum_capture = min(minimum_capture, result.minimum_occupied_capture)
         maximum_condition = max(maximum_condition, result.maximum_overlap_condition)
-    if float(denominator.detach()) == 0.0:
-        raise RuntimeError("periodic exact Pi has zero norm")
-    return numerator / denominator, minimum_capture, maximum_condition
+
+    family_losses = {}
+    for family in dict.fromkeys(dataset_families):
+        denominator = denominators[family]
+        if float(denominator.detach()) == 0.0:
+            raise RuntimeError("periodic exact Pi has zero norm")
+        family_losses[family] = numerators[family] / denominator
+    for family, evaluator in additional_family_evaluators.items():
+        if not hasattr(evaluator, "evaluate") or not callable(evaluator.evaluate):
+            raise ValueError("additional family evaluator must define evaluate")
+        result = evaluator.evaluate(coefficients)
+        loss = getattr(result, "loss", None)
+        condition = getattr(result, "max_candidate_condition", None)
+        if (
+            not isinstance(loss, torch.Tensor)
+            or loss.ndim != 0
+            or not bool(torch.isfinite(loss))
+        ):
+            raise RuntimeError("additional family loss must be a finite scalar")
+        if (
+            not isinstance(condition, (int, float))
+            or isinstance(condition, bool)
+            or not math.isfinite(condition)
+            or condition < 1.0
+        ):
+            raise RuntimeError("additional family condition must be finite and at least one")
+        family_losses[family] = loss
+        maximum_condition = max(maximum_condition, float(condition))
+    if not family_losses:
+        raise RuntimeError("joint response objective has no physical family")
+    loss = torch.stack(tuple(family_losses.values())).mean()
+    return loss, minimum_capture, maximum_condition, family_losses
 
 
 def _clone_coefficients(coefficients):
@@ -292,6 +351,8 @@ def optimize_periodic_galerkin_basis(
     occupied_capture_degradation_tolerance=1.0e-8,
     occupied_capture_reference="initial_candidate",
     block_cache_workers=1,
+    dataset_families=None,
+    additional_family_evaluators=None,
     progress_callback=None,
     best_callback=None,
 ):
@@ -352,9 +413,27 @@ def optimize_periodic_galerkin_basis(
     )
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
 
+    loss_options = {}
+    if dataset_families is not None:
+        loss_options["dataset_families"] = tuple(dataset_families)
+    if additional_family_evaluators:
+        loss_options["additional_family_evaluators"] = dict(
+            additional_family_evaluators
+        )
+
+    def evaluate_loss(coefficients, occupied_capture_tolerance):
+        return _global_pi_loss(
+            datasets,
+            coefficients,
+            occupied_capture_tolerance=occupied_capture_tolerance,
+            **loss_options,
+        )
+
     history = []
     initial_loss = None
+    initial_family_losses = None
     best_loss = math.inf
+    best_family_losses = None
     best_step = 0
     best_coefficients = None
     significant_loss = math.inf
@@ -370,18 +449,20 @@ def optimize_periodic_galerkin_basis(
     for step in range(max_steps + 1):
         coefficients = _assemble(fixed, variable)
         if pending_evaluation is None:
-            loss, minimum_capture, maximum_condition = _global_pi_loss(
-                datasets,
+            loss, minimum_capture, maximum_condition, family_losses = evaluate_loss(
                 coefficients,
-                occupied_capture_tolerance=(
+                (
                     1.0 - 1.0e-12
                     if occupied_capture_tolerance is None
                     else occupied_capture_tolerance
                 ),
             )
         else:
-            loss, minimum_capture, maximum_condition = pending_evaluation
+            loss, minimum_capture, maximum_condition, family_losses = pending_evaluation
             pending_evaluation = None
+        family_loss_values = {
+            name: float(value.detach()) for name, value in family_losses.items()
+        }
         if initial_minimum_occupied_capture is None:
             initial_minimum_occupied_capture = minimum_capture
             if reference_minimum_occupied_capture is None:
@@ -400,9 +481,11 @@ def optimize_periodic_galerkin_basis(
             raise RuntimeError("periodic Pi loss is non-finite")
         if initial_loss is None:
             initial_loss = loss_value
+            initial_family_losses = dict(family_loss_values)
             significant_loss = loss_value
         if loss_value < best_loss:
             best_loss = loss_value
+            best_family_losses = dict(family_loss_values)
             best_step = step
             best_coefficients = _clone_coefficients(coefficients)
             if best_callback is not None:
@@ -419,6 +502,11 @@ def optimize_periodic_galerkin_basis(
                 "step": step,
                 "loss": loss_value,
                 "relative_pi_error": math.sqrt(loss_value),
+                "family_losses": dict(family_loss_values),
+                "family_relative_pi_errors": {
+                    name: math.sqrt(value)
+                    for name, value in family_loss_values.items()
+                },
                 "minimum_occupied_capture": minimum_capture,
                 "maximum_overlap_condition": maximum_condition,
                 "occupied_capture_floor": occupied_capture_floor,
@@ -463,10 +551,9 @@ def optimize_periodic_galerkin_basis(
             try:
                 _retract_variables(fixed, variable)
                 trial_coefficients = _assemble(fixed, variable)
-                pending_evaluation = _global_pi_loss(
-                    datasets,
+                pending_evaluation = evaluate_loss(
                     trial_coefficients,
-                    occupied_capture_tolerance=occupied_capture_tolerance,
+                    occupied_capture_tolerance,
                 )
             except RuntimeError as error:
                 if str(error) != (
@@ -492,7 +579,9 @@ def optimize_periodic_galerkin_basis(
         coefficients=best_coefficients,
         history=tuple(history),
         initial_loss=initial_loss,
+        initial_family_losses=initial_family_losses,
         best_loss=best_loss,
+        best_family_losses=best_family_losses,
         best_step=best_step,
         steps_completed=history[-1]["step"],
         stop_reason=stop_reason,
