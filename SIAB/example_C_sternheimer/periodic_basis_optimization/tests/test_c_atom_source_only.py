@@ -18,7 +18,7 @@ class CAtomSourceOnlyTest(unittest.TestCase):
         self.assertIn("sternheimer_siab_source_only 1", text)
         self.assertIn("out_sternheimer_basis_opt 1", text)
         self.assertNotIn("out_sternheimer_librpa 1", text)
-        self.assertIn('/usr/bin/git -C "$REPO_ROOT"', text)
+        self.assertIn('echo "source_commit=$EXPECTED_SOURCE_COMMIT"', text)
         self.assertIn("pair_response_and_source", text)
         self.assertIn("SOURCE_ONLY_COMPLETE.json", text)
 

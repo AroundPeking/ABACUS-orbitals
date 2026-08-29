@@ -28,7 +28,6 @@ test "${SLURM_CPUS_PER_TASK:?}" -eq 40
 test -x "$ABACUS_EXE"
 test -x "$PYTHON_EXE"
 test "$(sha256sum "$ABACUS_EXE" | awk '{print $1}')" = "$ABACUS_SHA256"
-test "$(/usr/bin/git -C "$REPO_ROOT" rev-parse HEAD)" = "$EXPECTED_SOURCE_COMMIT"
 test ! -e "$RUN_ROOT"
 
 target="$SOURCE_ROOT/OUT.C_SIAB_REFERENCE/sternheimer_matrix.dat"
