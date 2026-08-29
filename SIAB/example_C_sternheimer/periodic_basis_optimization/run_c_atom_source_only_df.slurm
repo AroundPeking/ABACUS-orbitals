@@ -20,26 +20,56 @@ set -euo pipefail
 : "${EXPECTED_TARGET_SHA256:?}"
 : "${PYTHON_EXE:?}"
 
-test "${SLURM_JOB_PARTITION:?}" = p1
-test "${SLURM_NNODES:?}" -eq 4
-test "${SLURM_NTASKS:?}" -eq 4
-test "${SLURM_NTASKS_PER_NODE:?}" -eq 1
-test "${SLURM_CPUS_PER_TASK:?}" -eq 40
-test -x "$ABACUS_EXE"
-test -x "$PYTHON_EXE"
-test "$(sha256sum "$ABACUS_EXE" | awk '{print $1}')" = "$ABACUS_SHA256"
-test ! -e "$RUN_ROOT"
+preflight_fail() {
+  echo "preflight failed: $*" >&2
+  exit 2
+}
+
+require_equal() {
+  local label=$1 actual=$2 expected=$3
+  test "$actual" = "$expected" || \
+    preflight_fail "$label expected '$expected', got '$actual'"
+}
+
+require_executable() {
+  test -x "$1" || preflight_fail "not executable: $1"
+}
+
+require_absent() {
+  test ! -e "$1" || preflight_fail "path already exists: $1"
+}
+
+require_nonempty() {
+  test -s "$1" || preflight_fail "missing or empty file: $1"
+}
+
+require_sha256() {
+  local path=$1 expected=$2 actual
+  command -v sha256sum >/dev/null 2>&1 || preflight_fail "sha256sum is unavailable"
+  actual=$(sha256sum "$path" | awk '{print $1}')
+  require_equal "SHA256($path)" "$actual" "$expected"
+}
+
+require_equal "SLURM_JOB_PARTITION" "${SLURM_JOB_PARTITION:?}" p1
+require_equal "SLURM_NNODES" "${SLURM_NNODES:?}" 4
+require_equal "SLURM_NTASKS" "${SLURM_NTASKS:?}" 4
+require_equal "SLURM_NTASKS_PER_NODE" "${SLURM_NTASKS_PER_NODE:?}" 1
+require_equal "SLURM_CPUS_PER_TASK" "${SLURM_CPUS_PER_TASK:?}" 40
+require_executable "$ABACUS_EXE"
+require_executable "$PYTHON_EXE"
+require_sha256 "$ABACUS_EXE" "$ABACUS_SHA256"
+require_absent "$RUN_ROOT"
 
 target="$SOURCE_ROOT/OUT.C_SIAB_REFERENCE/sternheimer_matrix.dat"
-test -s "$target"
-test "$(sha256sum "$target" | awk '{print $1}')" = "$EXPECTED_TARGET_SHA256"
+require_nonempty "$target"
+require_sha256 "$target" "$EXPECTED_TARGET_SHA256"
 for name in INPUT STRU KPT fixed_frequency_grid_nfreq16.dat SOURCE_EIG_OCC.txt \
   C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb \
   C_10au_3s3p2d1f1g_1e-4.abfs; do
-  test -s "$SOURCE_ROOT/$name"
+  require_nonempty "$SOURCE_ROOT/$name"
 done
 for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
-  test -s "$SOURCE_ROOT/OUT.C_SIAB_REFERENCE/$name"
+  require_nonempty "$SOURCE_ROOT/OUT.C_SIAB_REFERENCE/$name"
 done
 
 mkdir -p "$RUN_ROOT/OUT.C_ATOM_SIAB_SOURCE"

@@ -21,6 +21,10 @@ class CAtomSourceOnlyTest(unittest.TestCase):
         self.assertIn('echo "source_commit=$EXPECTED_SOURCE_COMMIT"', text)
         self.assertIn("pair_response_and_source", text)
         self.assertIn("SOURCE_ONLY_COMPLETE.json", text)
+        self.assertIn('preflight failed:', text)
+        self.assertIn('require_equal "SLURM_NTASKS_PER_NODE"', text)
+        self.assertIn('require_sha256 "$ABACUS_EXE"', text)
+        self.assertIn('require_nonempty "$SOURCE_ROOT/$name"', text)
 
     def test_submitter_refuses_duplicate_receipt_or_result(self):
         text = SUBMITTER.read_text(encoding="ascii")
