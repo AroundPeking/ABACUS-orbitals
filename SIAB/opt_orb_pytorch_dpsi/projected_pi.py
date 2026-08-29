@@ -132,10 +132,10 @@ def evaluate_rpa_sensitivity(
         weighted_error = weight_sqrt @ (candidate - reference) @ weight_sqrt
         weighted_reference = weight_sqrt @ reference @ weight_sqrt
         sensitivity_error.append(
-            torch.sum(torch.abs(weighted_error) ** 2).real
+            torch.sum(torch.abs(weighted_error) ** 2)
         )
         sensitivity_reference_norm.append(
-            torch.sum(torch.abs(weighted_reference) ** 2).real
+            torch.sum(torch.abs(weighted_reference) ** 2)
         )
         trace_log_difference.append(
             torch.sum(torch.log(candidate_dielectric) + candidate_eigenvalue)
@@ -241,7 +241,7 @@ class ProjectedPiEvaluator:
         reference_norm = torch.sum(
             torch.abs(reference_pi) ** 2,
             dim=(1, 2),
-        ).real
+        )
         if not bool(torch.all(torch.isfinite(reference_norm))):
             raise RuntimeError("primitive-reference norm must be finite")
         if not bool(torch.all(reference_norm > 0.0)):
@@ -288,7 +288,7 @@ class ProjectedPiEvaluator:
         error_norm = torch.sum(
             torch.abs(candidate_pi - self._reference_pi) ** 2,
             dim=(1, 2),
-        ).real
+        )
         if not bool(torch.all(torch.isfinite(error_norm))):
             raise RuntimeError("projected-Pi squared error must be finite")
         frequency_loss = error_norm / self._reference_norm

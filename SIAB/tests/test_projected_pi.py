@@ -263,6 +263,7 @@ class ProjectedPiTest(unittest.TestCase):
         source = Path(projected_pi.__file__).read_text()
 
         self.assertNotIn(".mH", source)
+        self.assertNotIn(".real", source)
 
     def test_matches_direct_complex_matrix_formula(self):
         result = ProjectedPiEvaluator(self.pair).evaluate(
