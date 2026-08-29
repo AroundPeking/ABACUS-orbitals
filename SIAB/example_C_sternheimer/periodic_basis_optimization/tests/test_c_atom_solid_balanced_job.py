@@ -5,6 +5,7 @@ import unittest
 HERE = Path(__file__).resolve().parents[1]
 RUNNER = HERE / "run_c_atom_solid_balanced_one_g_df.slurm"
 SUBMITTER = HERE / "submit_c_atom_solid_balanced_one_g_df.sh"
+PROJECTED_PI = HERE.parents[1] / "opt_orb_pytorch_dpsi" / "projected_pi.py"
 
 
 class CAtomSolidBalancedJobTest(unittest.TestCase):
@@ -16,6 +17,7 @@ class CAtomSolidBalancedJobTest(unittest.TestCase):
         self.assertIn("module load python/3.9.22", text)
         self.assertIn("/data/home/df_iopcas_ghj/app/python/siab-torch19-py39", text)
         self.assertIn("torch.optim.Adam", text)
+        self.assertIn("runpy.run_path", text)
         self.assertIn("--nu 3,3,2,1,1", text)
         self.assertIn("--fixed-nu 2,2,1,0,0", text)
         self.assertEqual(text.count("--dataset-family C_solid"), 2)
@@ -34,6 +36,10 @@ class CAtomSolidBalancedJobTest(unittest.TestCase):
         self.assertIn('test ! -e "$run_root"', text)
         self.assertIn("sbatch --test-only", text)
         self.assertIn("sbatch --parsable", text)
+
+    def test_atomic_evaluator_defers_annotations_for_python39(self):
+        text = PROJECTED_PI.read_text(encoding="ascii")
+        self.assertTrue(text.startswith("from __future__ import annotations\n"))
 
 
 if __name__ == "__main__":

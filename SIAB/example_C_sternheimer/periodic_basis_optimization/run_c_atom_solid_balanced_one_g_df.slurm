@@ -44,6 +44,7 @@ test "${SLURM_CPUS_PER_TASK:?}" = 40
 test "$(cat "$REPO_ROOT/.git/HEAD")" = "$EXPECTED_SIAB_COMMIT"
 test ! -e "$RUN_ROOT"
 
+optimizer=$REPO_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/optimize_periodic_basis.py
 module load python/3.9.22
 runtime=/data/home/df_iopcas_ghj/app/python/siab-torch19-py39
 python_exe=$(command -v python3)
@@ -51,10 +52,14 @@ test -x "$python_exe"
 test -s "$runtime/site-packages/torch/lib/libtorch_cpu.so"
 export PYTHONPATH=$runtime/lib-dynload:$runtime/site-packages:$REPO_ROOT/SIAB/opt_orb_pytorch_dpsi
 export LD_LIBRARY_PATH=$runtime/lib:${LD_LIBRARY_PATH:-}
-"$python_exe" - <<'PY'
+"$python_exe" - "$optimizer" <<'PY'
+import runpy
+import sys
+
 import torch
 
 
+runpy.run_path(sys.argv[1], run_name="siab_optimizer_import_smoke")
 parameter = torch.nn.Parameter(torch.tensor([0.0], dtype=torch.float64))
 torch.optim.Adam([parameter], lr=1.0e-3)
 print("validated torch optimizer runtime", torch.__version__)
@@ -69,7 +74,6 @@ atomic_response=/data/home/df_iopcas_ghj/gw/260823/c-atom-siab-reference-fixedoc
 atomic_response_sha=e976c164595758029cb91ebe3913af6865780ef95fdb48954c07075bd0c7e3ff
 atomic_source=$ATOM_PAIR_ROOT/OUT.C_ATOM_SIAB_SOURCE/STERNHEIMER_SIAB_SOURCE_V1.dat
 pair_gate=$ATOM_PAIR_ROOT/SOURCE_ONLY_COMPLETE.json
-optimizer=$REPO_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/optimize_periodic_basis.py
 
 test -s "$optimizer"
 test -s "$initial"
