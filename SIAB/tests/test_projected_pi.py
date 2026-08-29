@@ -259,6 +259,11 @@ class ProjectedPiTest(unittest.TestCase):
         self.pair, self.d, self.q = make_pair()
         self.coefficient = coefficients()["H"][0]
 
+    def test_runtime_path_avoids_tensor_mh_for_torch_1_9(self):
+        source = Path(projected_pi.__file__).read_text()
+
+        self.assertNotIn(".mH", source)
+
     def test_matches_direct_complex_matrix_formula(self):
         result = ProjectedPiEvaluator(self.pair).evaluate(
             coefficients(self.coefficient)

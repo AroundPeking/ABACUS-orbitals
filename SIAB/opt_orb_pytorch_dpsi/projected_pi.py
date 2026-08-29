@@ -11,6 +11,10 @@ from sternheimer_source_pair import SternheimerResponseSourcePair
 from sternheimer_spillage import assemble_orbital_coefficients
 
 
+def _adjoint(value):
+    return value.transpose(-2, -1).conj()
+
+
 @dataclass(frozen=True)
 class ProjectedPiResult:
     loss: torch.Tensor
@@ -85,7 +89,7 @@ def evaluate_rpa_sensitivity(
             raise RuntimeError(f"{name} Pi must be finite")
         matrix_norm = torch.linalg.matrix_norm(values, dim=(-2, -1))
         hermitian_error = torch.linalg.matrix_norm(
-            values - values.mH,
+            values - _adjoint(values),
             dim=(-2, -1),
         )
         hermitian_threshold = 10.0 * relative_tolerance * torch.maximum(
@@ -94,7 +98,7 @@ def evaluate_rpa_sensitivity(
         )
         if bool(torch.any(hermitian_error > hermitian_threshold)):
             raise RuntimeError(f"{name} Pi is materially non-Hermitian")
-        hermitian_inputs.append((values + values.mH) / 2.0)
+        hermitian_inputs.append((values + _adjoint(values)) / 2.0)
 
     reference_pi, candidate_pi = hermitian_inputs
     sensitivity_error = []
@@ -123,7 +127,7 @@ def evaluate_rpa_sensitivity(
             @ torch.diag(torch.sqrt(g / maximum_g)).to(
                 reference_eigenvector.dtype
             )
-            @ reference_eigenvector.mH
+            @ _adjoint(reference_eigenvector)
         )
         weighted_error = weight_sqrt @ (candidate - reference) @ weight_sqrt
         weighted_reference = weight_sqrt @ reference @ weight_sqrt
@@ -229,11 +233,11 @@ class ProjectedPiEvaluator:
             for occupied_index in range(self._d.shape[0]):
                 value = value + self._occupation[occupied_index] * (
                     d_s_plus[occupied_index]
-                    @ self._q[frequency_index, occupied_index].mH
+                    @ _adjoint(self._q[frequency_index, occupied_index])
                 )
             reference_a.append(value)
         reference_a = torch.stack(reference_a)
-        reference_pi = reference_a + reference_a.mH
+        reference_pi = reference_a + _adjoint(reference_a)
         reference_norm = torch.sum(
             torch.abs(reference_pi) ** 2,
             dim=(1, 2),
@@ -252,7 +256,7 @@ class ProjectedPiEvaluator:
         if coefficient_matrix.shape[1] == 0:
             raise RuntimeError("candidate orbital basis must be nonempty")
         candidate_overlap = (
-            coefficient_matrix.mH
+            _adjoint(coefficient_matrix)
             @ self.pair.response.overlap
             @ coefficient_matrix
         )
@@ -272,7 +276,7 @@ class ProjectedPiEvaluator:
             )
             for occupied_index in range(d_projected.shape[0]):
                 solved = torch.cholesky_solve(
-                    q_projected[frequency_index, occupied_index].mH,
+                    _adjoint(q_projected[frequency_index, occupied_index]),
                     factor,
                 )
                 value = value + self._occupation[occupied_index] * (
@@ -280,7 +284,7 @@ class ProjectedPiEvaluator:
                 )
             candidate_a.append(value)
         candidate_a = torch.stack(candidate_a)
-        candidate_pi = candidate_a + candidate_a.mH
+        candidate_pi = candidate_a + _adjoint(candidate_a)
         error_norm = torch.sum(
             torch.abs(candidate_pi - self._reference_pi) ** 2,
             dim=(1, 2),
@@ -529,7 +533,7 @@ def _organize_response(pair, occupied_states):
 
 
 def _primitive_pseudoinverse(overlap, relative_rank_tolerance):
-    hermitian = (overlap + overlap.mH) / 2.0
+    hermitian = (overlap + _adjoint(overlap)) / 2.0
     eigenvalues, eigenvectors = torch.linalg.eigh(hermitian)
     largest = float(torch.max(eigenvalues))
     if not math.isfinite(largest) or largest <= 0.0:
@@ -545,13 +549,13 @@ def _primitive_pseudoinverse(overlap, relative_rank_tolerance):
     inverse = (
         retained_vectors
         @ torch.diag(1.0 / eigenvalues[keep]).to(torch.complex128)
-        @ retained_vectors.mH
+        @ _adjoint(retained_vectors)
     )
     return inverse, rank
 
 
 def _factor_candidate_overlap(overlap, condition_limit):
-    hermitian = (overlap + overlap.mH) / 2.0
+    hermitian = (overlap + _adjoint(overlap)) / 2.0
     factor, info = torch.linalg.cholesky_ex(hermitian)
     if int(info.item()) != 0:
         raise RuntimeError("candidate overlap is not positive definite")
