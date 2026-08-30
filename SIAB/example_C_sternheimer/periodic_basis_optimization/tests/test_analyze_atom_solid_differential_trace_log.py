@@ -15,6 +15,25 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AnalyzeAtomSolidDifferentialTraceLogTest(unittest.TestCase):
+    def test_requires_matching_atomic_gauge_wavefunction_files(self):
+        response, source = MODULE.validate_atomic_gauge_options(
+            [Path("response-spin1"), Path("response-spin2")],
+            [Path("source-spin1"), Path("source-spin2")],
+        )
+        self.assertEqual(len(response), 2)
+        self.assertEqual(len(source), 2)
+
+        with self.assertRaisesRegex(ValueError, "provided together"):
+            MODULE.validate_atomic_gauge_options(
+                [Path("response-spin1")],
+                [],
+            )
+        with self.assertRaisesRegex(ValueError, "same spin count"):
+            MODULE.validate_atomic_gauge_options(
+                [Path("response-spin1"), Path("response-spin2")],
+                [Path("source-spin1")],
+            )
+
     def test_builds_raw_star_partial_and_star_normalized_proxies(self):
         proxies = MODULE.build_differential_proxies(
             atom_difference=0.20,

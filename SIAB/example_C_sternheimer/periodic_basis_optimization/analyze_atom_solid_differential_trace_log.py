@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 import math
@@ -22,6 +23,10 @@ from compare_periodic_candidates import (  # noqa: E402
     response_metrics,
     sha256,
     validate_occupied_capture_floor,
+)
+from atomic_occupied_gauge import (  # noqa: E402
+    derive_occupied_gauge,
+    rotate_source_rows_to_response_gauge,
 )
 from IO.read_sternheimer import read_sternheimer  # noqa: E402
 from IO.read_sternheimer_source import read_sternheimer_source  # noqa: E402
@@ -191,6 +196,20 @@ def parse_known_error(value):
     return fields[0].strip(), error
 
 
+def validate_atomic_gauge_options(response_wfs, source_wfs):
+    response_wfs = tuple(response_wfs or ())
+    source_wfs = tuple(source_wfs or ())
+    if bool(response_wfs) != bool(source_wfs):
+        raise ValueError(
+            "atomic response/source gauge wavefunctions must be provided together"
+        )
+    if len(response_wfs) != len(source_wfs):
+        raise ValueError(
+            "atomic response/source gauge wavefunctions must have the same spin count"
+        )
+    return response_wfs, source_wfs
+
+
 def hash_numeric_sequences(*sequences):
     payload = json.dumps(
         [[float(value) for value in sequence] for sequence in sequences],
@@ -212,6 +231,8 @@ def parse_args(argv=None):
     parser.add_argument("--full-q-count", type=int, default=64)
     parser.add_argument("--atomic-response", type=Path, required=True)
     parser.add_argument("--atomic-source", type=Path, required=True)
+    parser.add_argument("--atomic-response-wfs", type=Path, action="append")
+    parser.add_argument("--atomic-source-wfs", type=Path, action="append")
     parser.add_argument("--candidate", action="append", required=True)
     parser.add_argument("--known-sos-binding-error-ev", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
@@ -256,6 +277,15 @@ def main(argv=None):
     for path in (atomic_response_path, atomic_source_path):
         if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
             raise ValueError("atomic response/source must be nonempty regular files")
+    atomic_response_wfs, atomic_source_wfs = validate_atomic_gauge_options(
+        args.atomic_response_wfs,
+        args.atomic_source_wfs,
+    )
+    for path in (*atomic_response_wfs, *atomic_source_wfs):
+        if not path.is_file() or path.is_symlink() or path.stat().st_size == 0:
+            raise ValueError(
+                "atomic gauge wavefunctions must be nonempty regular files"
+            )
 
     datasets = tuple(
         prepare_periodic_occupied_reference(
@@ -275,6 +305,21 @@ def main(argv=None):
 
     atomic_response = read_sternheimer(atomic_response_path)
     atomic_source = read_sternheimer_source(atomic_source_path)
+    atomic_gauge = None
+    if atomic_response_wfs:
+        atomic_gauge = derive_occupied_gauge(
+            atomic_response_wfs,
+            atomic_source_wfs,
+        )
+        atomic_source = replace(
+            atomic_source,
+            d=rotate_source_rows_to_response_gauge(
+                atomic_source.d,
+                atomic_source.occupied_state,
+                atomic_source.auxiliary_channel,
+                atomic_gauge.transform,
+            ),
+        )
     atomic_pair = pair_response_and_source(atomic_response, atomic_source)
     validate_atomic_periodic_contract(
         atomic_response,
@@ -392,6 +437,32 @@ def main(argv=None):
         "atomic_response_sha256": sha256(atomic_response_path),
         "atomic_source": str(atomic_source_path),
         "atomic_source_sha256": sha256(atomic_source_path),
+        "atomic_gauge_alignment": (
+            {
+                "scope": (
+                    "source rows rotated into response occupied-state gauge; "
+                    "original input files are unchanged"
+                ),
+                "response_wfs": [str(path.resolve()) for path in atomic_response_wfs],
+                "response_wfs_sha256": [sha256(path) for path in atomic_response_wfs],
+                "source_wfs": [str(path.resolve()) for path in atomic_source_wfs],
+                "source_wfs_sha256": [sha256(path) for path in atomic_source_wfs],
+                "occupied_counts_by_spin": list(atomic_gauge.occupied_counts),
+                "subspace_residuals_by_spin": list(
+                    atomic_gauge.subspace_residuals
+                ),
+                "unitarity_errors_by_spin": list(atomic_gauge.unitarity_errors),
+                "maximum_subspace_residual": (
+                    atomic_gauge.maximum_subspace_residual
+                ),
+                "maximum_unitarity_error": atomic_gauge.maximum_unitarity_error,
+                "maximum_occupied_eigenvalue_difference_ry": (
+                    atomic_gauge.maximum_eigenvalue_difference_ry
+                ),
+            }
+            if atomic_gauge is not None
+            else None
+        ),
         "periodic_datasets": [
             {
                 "path": str(path),
