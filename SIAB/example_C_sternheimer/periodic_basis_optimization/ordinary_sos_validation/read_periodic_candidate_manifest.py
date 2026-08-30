@@ -19,10 +19,13 @@ def read_candidate(root: Path) -> dict:
     legacy = root / "TRUNCATION.json"
     if staged.is_file() and not legacy.exists():
         payload = json.loads(staged.read_text(encoding="ascii"))
-        if payload.get("status") != "success" or payload.get("profile") != "relaxed_dzp":
+        if payload.get("status") != "success" or payload.get("profile") not in {
+            "relaxed_dzp",
+            "fixed_dzp",
+        }:
             raise ValueError("unsupported staged candidate")
         if payload.get("nu") != [3, 3, 2, 0, 0] or payload.get("ao_count_atom") != 22:
-            raise ValueError("staged relaxed DZP layout mismatch")
+            raise ValueError("staged DZP layout mismatch")
         orbital = (root / payload["orbital_filename"]).resolve(strict=True)
         expected_sha = payload["orbital_sha256"]
         layout = "3s3p2d"

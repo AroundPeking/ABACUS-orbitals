@@ -41,7 +41,7 @@ import sys
 payload = json.load(open(sys.argv[1], encoding="ascii"))
 root = pathlib.Path(sys.argv[2]).resolve()
 assert payload["status"] == "success"
-assert payload["profile"] == "relaxed_dzp"
+assert payload["profile"] in {"relaxed_dzp", "fixed_dzp"}
 assert payload["nu"] == [3, 3, 2, 0, 0]
 assert payload["ao_count_atom"] == 22
 orbital = (root / payload["orbital_filename"]).resolve()
