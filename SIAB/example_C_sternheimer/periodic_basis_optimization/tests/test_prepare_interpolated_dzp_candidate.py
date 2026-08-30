@@ -269,6 +269,66 @@ class PrepareInterpolatedDzpCandidateTest(unittest.TestCase):
                 str(secondary.resolve()),
             )
 
+    def test_combines_one_secondary_zeta_without_moving_its_fixed_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            original = parent / "original.txt"
+            primary = parent / "primary.txt"
+            secondary = parent / "secondary.txt"
+            root = parent / "candidate"
+            generator = torch.Generator().manual_seed(41)
+            initial = {
+                "C": [
+                    torch.randn(31, 3, generator=generator, dtype=torch.float64),
+                    torch.randn(31, 3, generator=generator, dtype=torch.float64),
+                    torch.randn(31, 2, generator=generator, dtype=torch.float64),
+                    torch.empty(31, 0, dtype=torch.float64),
+                    torch.empty(31, 0, dtype=torch.float64),
+                ]
+            }
+            primary_selected = {
+                "C": [channel + 0.01 for channel in initial["C"]]
+            }
+            secondary_selected = {
+                "C": [channel - 0.02 for channel in initial["C"]]
+            }
+            write_periodic_optimizer_coefficients(original, initial)
+            write_periodic_optimizer_coefficients(primary, primary_selected)
+            write_periodic_optimizer_coefficients(secondary, secondary_selected)
+
+            result = prepare_candidate(
+                original=original,
+                optimized=primary,
+                root=root,
+                channel_alphas=(0.5, -1.0, -1.5, 0.0, 0.0),
+                secondary_optimized=secondary,
+                secondary_zeta_alphas=(
+                    (0.0, 0.0, 0.25),
+                    (0.0, 0.0, 0.0),
+                    (0.0, 0.0),
+                    (),
+                    (),
+                ),
+            )
+
+            restored = read_periodic_optimizer_coefficients(
+                root / result["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 0, 0),
+            )
+            expected_s = initial["C"][0] + 0.5 * (
+                primary_selected["C"][0] - initial["C"][0]
+            )
+            expected_s[:, 2] += 0.25 * (
+                secondary_selected["C"][0][:, 2] - initial["C"][0][:, 2]
+            )
+            self.assertTrue(torch.allclose(restored["C"][0], expected_s))
+            self.assertEqual(
+                result["secondary_zeta_alphas"],
+                [[0.0, 0.0, 0.25], [0.0, 0.0, 0.0], [0.0, 0.0], [], []],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import torch
+
 
 HERE = Path(__file__).resolve().parent
 SIAB_ROOT = HERE.parents[1]
@@ -77,6 +79,32 @@ def _validated_optional_channel_alphas(optimized, channel_alphas):
     return values
 
 
+def _validated_optional_zeta_alphas(optimized, channel_alphas, zeta_alphas):
+    if zeta_alphas is None:
+        return _validated_optional_channel_alphas(optimized, channel_alphas), None
+    if optimized is None:
+        raise ValueError(
+            "secondary_optimized and secondary_zeta_alphas must be provided together"
+        )
+    if channel_alphas is not None:
+        raise ValueError(
+            "provide only one of secondary_channel_alphas or secondary_zeta_alphas"
+        )
+    try:
+        values = tuple(tuple(float(value) for value in channel) for channel in zeta_alphas)
+    except TypeError as error:
+        raise ValueError("secondary_zeta_alphas must define one row per channel") from error
+    if len(values) != len(NU) or any(
+        len(channel) != count for channel, count in zip(values, NU)
+    ):
+        raise ValueError("secondary_zeta_alphas must match the s,p,d,f,g zeta counts")
+    if any(not math.isfinite(value) for channel in values for value in channel):
+        raise ValueError("secondary zeta search alphas must be finite")
+    if not any(value != 0.0 for channel in values for value in channel):
+        raise ValueError("secondary_zeta_alphas must contain a nonzero component")
+    return None, values
+
+
 def prepare_candidate(
     *,
     original: Path,
@@ -86,14 +114,17 @@ def prepare_candidate(
     channel_alphas=None,
     secondary_optimized: Path | None = None,
     secondary_channel_alphas=None,
+    secondary_zeta_alphas=None,
 ) -> dict:
     alpha, resolved_channel_alphas = _validated_channel_alphas(
         alpha,
         channel_alphas,
     )
-    resolved_secondary_alphas = _validated_optional_channel_alphas(
-        secondary_optimized,
-        secondary_channel_alphas,
+    (
+        resolved_secondary_alphas,
+        resolved_secondary_zeta_alphas,
+    ) = _validated_optional_zeta_alphas(
+        secondary_optimized, secondary_channel_alphas, secondary_zeta_alphas
     )
     original = Path(original).resolve(strict=True)
     optimized = Path(optimized).resolve(strict=True)
@@ -131,9 +162,17 @@ def prepare_candidate(
             secondary_channel = secondary["C"][channel_index]
             if initial_channel.shape != secondary_channel.shape:
                 raise ValueError("secondary coefficient channel layouts differ")
-            candidate_channel = candidate_channel + resolved_secondary_alphas[
-                channel_index
-            ] * (secondary_channel - initial_channel)
+            secondary_difference = secondary_channel - initial_channel
+            if resolved_secondary_zeta_alphas is None:
+                candidate_channel = candidate_channel + resolved_secondary_alphas[
+                    channel_index
+                ] * secondary_difference
+            else:
+                weights = torch.tensor(
+                    resolved_secondary_zeta_alphas[channel_index],
+                    dtype=candidate_channel.dtype,
+                ).reshape(1, -1)
+                candidate_channel = candidate_channel + weights * secondary_difference
         coefficients["C"].append(candidate_channel)
 
     temporary = Path(tempfile.mkdtemp(prefix=root.name + ".tmp-", dir=root.parent))
@@ -176,14 +215,23 @@ def prepare_candidate(
         if secondary_optimized is not None:
             payload.update(
                 {
-                    "direction": "original_plus_two_channel_resolved_directions",
-                    "secondary_channel_alphas": list(resolved_secondary_alphas),
+                    "direction": (
+                        "original_plus_two_channel_resolved_directions"
+                        if resolved_secondary_zeta_alphas is None
+                        else "original_plus_channel_and_zeta_resolved_directions"
+                    ),
                     "secondary_optimized_coefficients": str(secondary_optimized),
                     "secondary_optimized_coefficients_sha256": sha256(
                         secondary_optimized
                     ),
                 }
             )
+            if resolved_secondary_zeta_alphas is None:
+                payload["secondary_channel_alphas"] = list(resolved_secondary_alphas)
+            else:
+                payload["secondary_zeta_alphas"] = [
+                    list(channel) for channel in resolved_secondary_zeta_alphas
+                ]
         manifest = temporary / "CANDIDATE.json"
         manifest.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -198,11 +246,18 @@ def prepare_candidate(
             f"optimized_coefficients_sha256={payload['optimized_coefficients_sha256']}\n"
         ]
         if secondary_optimized is not None:
+            if resolved_secondary_zeta_alphas is None:
+                secondary_description = "secondary_channel_alphas=" + ",".join(
+                    f"{value:.16g}" for value in resolved_secondary_alphas
+                )
+            else:
+                secondary_description = "secondary_zeta_alphas=" + ";".join(
+                    ",".join(f"{value:.16g}" for value in channel)
+                    for channel in resolved_secondary_zeta_alphas
+                )
             provenance_lines.append(
-                "secondary_channel_alphas="
-                + ",".join(f"{value:.16g}" for value in resolved_secondary_alphas)
-                + "\n"
-                + "secondary_optimized_coefficients_sha256="
+                secondary_description
+                + "\nsecondary_optimized_coefficients_sha256="
                 + payload["secondary_optimized_coefficients_sha256"]
                 + "\n"
             )
@@ -235,9 +290,14 @@ def main() -> None:
         help="comma-separated reverse coefficients for s,p,d,f,g",
     )
     parser.add_argument("--secondary-optimized", type=Path)
-    parser.add_argument(
+    secondary_direction = parser.add_mutually_exclusive_group()
+    secondary_direction.add_argument(
         "--secondary-channel-alphas",
         help="comma-separated coefficients for a second s,p,d,f,g direction",
+    )
+    secondary_direction.add_argument(
+        "--secondary-zeta-alphas",
+        help="JSON rows of per-zeta coefficients for the second s,p,d,f,g direction",
     )
     args = parser.parse_args()
     result = prepare_candidate(
@@ -254,6 +314,11 @@ def main() -> None:
         secondary_channel_alphas=(
             tuple(field.strip() for field in args.secondary_channel_alphas.split(","))
             if args.secondary_channel_alphas is not None
+            else None
+        ),
+        secondary_zeta_alphas=(
+            json.loads(args.secondary_zeta_alphas)
+            if args.secondary_zeta_alphas is not None
             else None
         ),
     )
