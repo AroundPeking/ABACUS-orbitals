@@ -18,13 +18,14 @@ source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 collector=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/collect_threshold_candidate_qstar_binding.py
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 work=$run_root/binding
-atom=$run_root/atom/RESULT_SUMMARY.txt
+atom_root=${ATOM_SOS_ROOT:-$run_root/atom}
+atom=$atom_root/RESULT_SUMMARY.txt
 solid_root=${SOLID_SOS_ROOT:-$run_root/solid-sos}
 solid=$solid_root/RESULT_SUMMARY.txt
 
 test ! -e "$work"
 test -s "$collector" && test -x "$python"
-grep -qx 'success' "$run_root/atom/STATUS"
+grep -qx 'success' "$atom_root/STATUS"
 grep -qx 'success' "$solid_root/STATUS"
 test -s "$atom" && test -s "$solid"
 mkdir -p "$work"
@@ -44,6 +45,7 @@ PY
 {
   echo status=success
   echo atom_job=${ATOM_JOB_ID:?missing atom job id}
+  echo atom_sos_root=$atom_root
   echo qstar_array_job=${QSTAR_ARRAY_JOB_ID:?missing q-star array job id}
   echo solid_sos_job=${SOLID_SOS_JOB_ID:?missing solid SOS job id}
   echo solid_sos_root=$solid_root

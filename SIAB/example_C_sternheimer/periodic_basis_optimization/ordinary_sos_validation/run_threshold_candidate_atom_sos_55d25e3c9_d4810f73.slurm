@@ -29,7 +29,8 @@ python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 extractor=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/extract_librpa_frequency_grid.py
 manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 suffix=C_ATOM_THRESHOLD_CANDIDATE_PCA
-work=$run_root/atom
+work=${ATOM_SOS_ROOT:-$run_root/atom}
+restart_source=${ATOM_RESTART_SOURCE:-}
 
 test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
@@ -53,6 +54,17 @@ for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf; do test -s "$source/$asset"; don
 mkdir -p "$work"
 cp "$source/INPUT" "$source/STRU" "$source/KPT" "$source/C_ONCV_PBE-1.0.upf" "$orbital" "$work/"
 cd "$work"
+
+if [[ -n "$restart_source" ]]; then
+  expected_restart=$run_root/pbe-gate/atom/OUT.C_CANDIDATE_PBE_ATOM
+  test "$(readlink -f "$restart_source")" = "$(readlink -f "$expected_restart")"
+  mkdir -p "OUT.$suffix" restart_input_snapshot
+  for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
+    test -s "$restart_source/$name"
+    cp "$restart_source/$name" "OUT.$suffix/$name"
+    cp "$restart_source/$name" "restart_input_snapshot/$name"
+  done
+fi
 
 set_input_key() {
   local key=$1 value=$2
@@ -103,8 +115,13 @@ set_input_key kpar 1
 set_input_key smearing_method fixed
 set_input_key ocp 1
 set_input_key ocp_set "3*1 $((nbands - 3))*0 1*1 $((nbands - 1))*0"
-set_input_key init_wfc atomic
-set_input_key init_chg atomic
+if [[ -n "$restart_source" ]]; then
+  set_input_key init_wfc file
+  set_input_key init_chg file
+else
+  set_input_key init_wfc atomic
+  set_input_key init_chg atomic
+fi
 set_input_key rpa 1
 set_input_key out_librpa_reader_version 1
 set_input_key out_sternheimer_librpa 0
@@ -154,6 +171,11 @@ export I_MPI_FABRICS=shm:ofi
   echo grid=135,135,135
   echo spin_state=fixed_triplet_nup3_ndown1
   echo n_bands_chi0=-1
+  if [[ -n "$restart_source" ]]; then
+    echo restart_source=$restart_source
+    echo restart_loaded=pending
+    sha256sum restart_input_snapshot/*
+  fi
   sha256sum "$0" "$abacus" "$librpa" "$build_provenance" "$extractor" "$manifest_reader" "$manifest" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
 } > provenance.txt
 
@@ -165,6 +187,25 @@ eig_occ=$out/eig_occ.txt
 test -s "$matrix" && test -s "$eig_occ" && test -s "$out/running_scf.log"
 grep -q '#SCF IS CONVERGED#' "$out/running_scf.log"
 ! grep -q '!!SCF IS NOT CONVERGED!!' "$out/running_scf.log"
+if [[ -n "$restart_source" ]]; then
+  for spin in 1 2; do
+    grep -Eq "Read NAO wave functions from .*wfs${spin}_nao.txt" abacus.out
+    grep -Eq "Read in electron density: .*chgs${spin}\.cube|Read electron density from file: .*chgs${spin}\.cube" "$out/running_scf.log"
+  done
+  reference_pbe_ev=$(cat "$run_root/pbe-gate/atom/PBE_ENERGY_EV")
+  restart_pbe_ev=$(awk '/!FINAL_ETOT_IS/ {value=$(NF-1)} END {print value}' "$out/running_scf.log")
+  "$python" - "$reference_pbe_ev" "$restart_pbe_ev" <<'PY'
+import math, sys
+reference, restart = map(float, sys.argv[1:])
+assert math.isfinite(reference) and math.isfinite(restart)
+assert abs(reference - restart) <= 1.0e-8, (reference, restart)
+PY
+  {
+    echo restart_loaded=yes
+    echo reference_pbe_ev=$reference_pbe_ev
+    echo restart_pbe_ev=$restart_pbe_ev
+  } >> provenance.txt
+fi
 "$python" - "$matrix" "$eig_occ" "$nbands" <<'PY'
 import json, math, pathlib, re, struct, sys
 with open(sys.argv[1], "rb") as handle:
@@ -263,6 +304,10 @@ EOF
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/abacus_wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/abacus_max_rss_kb=/p' abacus.time
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/librpa_wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/librpa_max_rss_kb=/p' librpa.time
   sha256sum "$matrix" GRID_MATRIX_HEADER.json RESULT_SUMMARY.txt INPUT_SHA256.txt ATOM_SOS_FREQUENCY_GRID.dat ATOM_SOS_FREQUENCY_GRID.json librpa.in librpa.out
+  if [[ -n "$restart_source" ]]; then
+    echo 'restart_loaded yes'
+    sha256sum restart_input_snapshot/*
+  fi
 } >> provenance.txt
 printf 'success\n' > STATUS
 echo "C_THRESHOLD_ATOM_SOS_OK root=$work reference_ha=$reference_ha ecrpa_ha=$ecrpa_ha naux=$naux"
