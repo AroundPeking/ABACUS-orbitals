@@ -16,6 +16,7 @@ STAGED_LAYOUTS = {
     "nested_tzdp_3s2p1d": ([3, 2, 1], 14, "3s2p1d"),
     "nested_tzdp_2s3p1d": ([2, 3, 1], 16, "2s3p1d"),
     "nested_tzdp_2s2p2d": ([2, 2, 2], 18, "2s2p2d"),
+    "nested_tzdp_3s3p1d": ([3, 3, 1], 17, "3s3p1d"),
 }
 
 

@@ -70,6 +70,19 @@ class PrepareNestedTzdpCandidateTest(unittest.TestCase):
             self.assertEqual((root / "STATUS").read_text(encoding="ascii"), "success\n")
             self.assertIn("status=success\n", (root / "provenance.txt").read_text(encoding="ascii"))
 
+    def test_writes_minimal_combined_sp_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "source.orb"
+            root = parent / "candidate"
+            source.write_text(FIXTURE, encoding="ascii")
+
+            result = prepare_candidate(source, root, target_nu=[3, 3, 1])
+
+            self.assertEqual(result["profile"], "nested_tzdp_3s3p1d")
+            self.assertEqual(result["nu"], [3, 3, 1])
+            self.assertEqual(result["ao_count_atom"], 17)
+
     def test_rejects_non_whitelisted_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
