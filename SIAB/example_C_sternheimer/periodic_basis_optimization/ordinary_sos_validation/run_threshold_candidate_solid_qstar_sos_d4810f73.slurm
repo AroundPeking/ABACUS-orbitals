@@ -152,7 +152,7 @@ grep -q '^| Total EcRPA:' librpa.out
   --sparse-output "allband=$work/librpa.out" \
   --output-root "$work/qstar-gate" \
   --binding-tolerance-kcal-mol-per-c 0.1 \
-  --provenance "source_commit=$(cat "$source_root/DEPLOYED_GIT_COMMIT")" \
+  --provenance "source_commit=$(cat "$source_root/.git/HEAD")" \
   --provenance "qstar_array_job=$QSTAR_ARRAY_JOB_ID" > qstar_gate.out
 grep -qx 'success' qstar-gate/STATUS
 ecrpa_ha=$("$python" - qstar-gate/RESULT.json <<'PY'
