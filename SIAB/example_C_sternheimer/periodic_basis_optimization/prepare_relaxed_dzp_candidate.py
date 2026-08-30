@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a relaxed 3s3p2d C candidate after independent low-cost gates."""
+"""Stage a 3s3p2d C candidate after independent low-cost gates."""
 
 from __future__ import annotations
 
@@ -14,8 +14,21 @@ from pathlib import Path
 
 
 NU = [3, 3, 2, 0, 0]
-FIXED_NU = [1, 1, 0, 0, 0]
 AO_COUNT_ATOM = 22
+PROFILES = {
+    "relaxed_dzp": {
+        "label": "relaxed-dzp",
+        "fixed_nu": [1, 1, 0, 0, 0],
+        "occupied_capture_reference": "initial_candidate",
+        "orbital_filename": "C_gga_10au_100Ry_3s3p2d_relaxed_response.orb",
+    },
+    "fixed_dzp": {
+        "label": "fixed-dzp",
+        "fixed_nu": [2, 2, 1, 0, 0],
+        "occupied_capture_reference": "fixed_prefix",
+        "orbital_filename": "C_gga_10au_100Ry_3s3p2d_fixed_response.orb",
+    },
+}
 
 
 def sha256(path: Path) -> str:
@@ -58,6 +71,7 @@ def prepare_candidate(
     candidate_spectrum_path: Path,
     orbital_path: Path,
     output_directory: Path,
+    profile: str = "relaxed_dzp",
 ) -> dict:
     optimizer_result_path = Path(optimizer_result_path).resolve(strict=True)
     comparison_path = Path(comparison_path).resolve(strict=True)
@@ -67,14 +81,19 @@ def prepare_candidate(
     output_directory = Path(output_directory).resolve()
     if output_directory.exists() or output_directory.is_symlink():
         raise FileExistsError(output_directory)
+    try:
+        contract = PROFILES[profile]
+    except KeyError as error:
+        raise ValueError(f"unsupported DZP candidate profile: {profile}") from error
+    candidate_label = contract["label"]
 
     optimizer = json.loads(optimizer_result_path.read_text(encoding="ascii"))
     if optimizer.get("format_version") != 1:
         raise ValueError("optimizer result must use format version 1")
-    if optimizer.get("nu") != NU or optimizer.get("fixed_nu") != FIXED_NU:
-        raise ValueError("optimizer layout is not relaxed DZP")
-    if optimizer.get("occupied_capture_reference") != "initial_candidate":
-        raise ValueError("occupied capture must be referenced to the initial TZDP candidate")
+    if optimizer.get("nu") != NU or optimizer.get("fixed_nu") != contract["fixed_nu"]:
+        raise ValueError(f"optimizer layout is not {profile}")
+    if optimizer.get("occupied_capture_reference") != contract["occupied_capture_reference"]:
+        raise ValueError(f"occupied capture reference is not valid for {profile}")
     for family in ("C_atom", "C_solid"):
         initial = _finite(optimizer["initial_family_losses"][family], f"initial {family} loss")
         best = _finite(optimizer["best_family_losses"][family], f"best {family} loss")
@@ -93,29 +112,29 @@ def prepare_candidate(
     if len(comparison.get("datasets", [])) != 1 or comparison["datasets"][0].get("selected_iq") != 43:
         raise ValueError("comparison is not the independent q3 gate")
     records = {record.get("label"): record for record in comparison.get("candidates", [])}
-    if set(records) != {"original-tzdp", "relaxed-dzp"}:
-        raise ValueError("comparison must contain original and relaxed DZP exactly once")
+    if set(records) != {"original-tzdp", candidate_label}:
+        raise ValueError("comparison must contain original and selected DZP exactly once")
     original = records["original-tzdp"]
-    relaxed = records["relaxed-dzp"]
-    if relaxed.get("nu") != NU or relaxed.get("ao_count_cell") != 2 * AO_COUNT_ATOM:
-        raise ValueError("relaxed q3 candidate has the wrong AO layout")
-    if relaxed.get("coefficients_sha256") != coefficient_sha:
+    selected = records[candidate_label]
+    if selected.get("nu") != NU or selected.get("ao_count_cell") != 2 * AO_COUNT_ATOM:
+        raise ValueError("selected q3 candidate has the wrong AO layout")
+    if selected.get("coefficients_sha256") != coefficient_sha:
         raise ValueError("q3 comparison used different coefficients")
     for metric in (
         "global_weighted_relative_pi_error",
         "global_weighted_relative_trace_log_error",
     ):
-        if _finite(relaxed[metric], f"relaxed {metric}") >= _finite(
+        if _finite(selected[metric], f"selected {metric}") >= _finite(
             original[metric], f"original {metric}"
         ):
-            raise ValueError(f"relaxed DZP does not improve q3 {metric}")
-    capture = _finite(relaxed["minimum_occupied_capture"], "q3 occupied capture")
+            raise ValueError(f"selected DZP does not improve q3 {metric}")
+    capture = _finite(selected["minimum_occupied_capture"], "q3 occupied capture")
     if capture < 0.9998982409775239:
-        raise ValueError("relaxed DZP fails the occupied-capture safety floor")
+        raise ValueError("selected DZP fails the occupied-capture safety floor")
 
     original_spectrum = json.loads(original_spectrum_path.read_text(encoding="ascii"))
     candidate_spectrum = json.loads(candidate_spectrum_path.read_text(encoding="ascii"))
-    for report, label in ((original_spectrum, "original-tzdp"), (candidate_spectrum, "relaxed-dzp")):
+    for report, label in ((original_spectrum, "original-tzdp"), (candidate_spectrum, candidate_label)):
         if report.get("format_version") != 1 or report.get("label") != label:
             raise ValueError(f"invalid {label} spectrum report")
         if report.get("nu") != NU or report.get("ao_count_cell") != 2 * AO_COUNT_ATOM:
@@ -127,7 +146,7 @@ def prepare_candidate(
         candidate_spectrum["maximum_eigenvalue_ev"], "candidate maximum eigenvalue"
     ) / _finite(original_spectrum["maximum_eigenvalue_ev"], "original maximum eigenvalue")
     if condition_ratio >= 3.0 or eigenvalue_ratio >= 1.5:
-        raise ValueError("relaxed DZP fails overlap or virtual-spectrum gate")
+        raise ValueError("selected DZP fails overlap or virtual-spectrum gate")
 
     orbital_text = orbital_path.read_text(encoding="ascii")
     for marker in (
@@ -142,25 +161,25 @@ def prepare_candidate(
             raise ValueError(f"exported orbital is missing marker: {marker}")
 
     output_directory.mkdir(parents=True)
-    orbital_filename = "C_gga_10au_100Ry_3s3p2d_relaxed_response.orb"
+    orbital_filename = contract["orbital_filename"]
     staged_orbital = output_directory / orbital_filename
     shutil.copyfile(orbital_path, staged_orbital)
     payload = {
         "status": "success",
         "format_version": 1,
-        "profile": "relaxed_dzp",
-        "label": "relaxed-dzp",
+        "profile": profile,
+        "label": candidate_label,
         "nu": NU,
-        "fixed_nu": FIXED_NU,
+        "fixed_nu": contract["fixed_nu"],
         "ao_count_atom": AO_COUNT_ATOM,
         "ao_count_cell": 2 * AO_COUNT_ATOM,
         "coefficients": str(coefficients),
         "coefficients_sha256": coefficient_sha,
         "orbital_filename": orbital_filename,
         "orbital_sha256": sha256(staged_orbital),
-        "heldout_q3_pi_error": _finite(relaxed["global_weighted_relative_pi_error"], "q3 Pi error"),
+        "heldout_q3_pi_error": _finite(selected["global_weighted_relative_pi_error"], "q3 Pi error"),
         "heldout_q3_trace_log_error": _finite(
-            relaxed["global_weighted_relative_trace_log_error"], "q3 trace-log error"
+            selected["global_weighted_relative_trace_log_error"], "q3 trace-log error"
         ),
         "minimum_occupied_capture": capture,
         "maximum_overlap_condition_ratio": condition_ratio,
@@ -175,7 +194,7 @@ def prepare_candidate(
     _atomic_json(manifest, payload)
     (output_directory / "provenance.txt").write_text(
         "status=success\n"
-        "purpose=stage_relaxed_dzp_candidate_for_pbe_then_sos\n"
+        f"purpose=stage_{profile}_candidate_for_pbe_then_sos\n"
         "pre_pbe_gate=pass\n"
         f"candidate_manifest_sha256={sha256(manifest)}\n"
         f"orbital_sha256={payload['orbital_sha256']}\n",
@@ -192,6 +211,7 @@ def main() -> None:
     parser.add_argument("--candidate-spectrum", required=True, type=Path)
     parser.add_argument("--orbital", required=True, type=Path)
     parser.add_argument("--output-directory", required=True, type=Path)
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="relaxed_dzp")
     args = parser.parse_args()
     result = prepare_candidate(
         optimizer_result_path=args.optimizer_result,
@@ -200,6 +220,7 @@ def main() -> None:
         candidate_spectrum_path=args.candidate_spectrum,
         orbital_path=args.orbital,
         output_directory=args.output_directory,
+        profile=args.profile,
     )
     print(json.dumps(result, sort_keys=True, allow_nan=False))
 

@@ -77,7 +77,7 @@ class PrepareRelaxedDzpCandidateTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def prepare(self):
+    def prepare(self, profile="relaxed_dzp"):
         return prepare_candidate(
             optimizer_result_path=self.optimizer,
             comparison_path=self.comparison,
@@ -85,6 +85,7 @@ class PrepareRelaxedDzpCandidateTest(unittest.TestCase):
             candidate_spectrum_path=self.candidate_spectrum,
             orbital_path=self.orbital,
             output_directory=self.root / "selected",
+            profile=profile,
         )
 
     def test_stages_candidate_with_pbe_gate_contract(self):
@@ -108,6 +109,29 @@ class PrepareRelaxedDzpCandidateTest(unittest.TestCase):
         self.candidate_spectrum.write_text(json.dumps(payload), encoding="ascii")
         with self.assertRaisesRegex(ValueError, "overlap or virtual-spectrum"):
             self.prepare()
+
+    def test_stages_fixed_prefix_dzp_profile(self):
+        optimizer = json.loads(self.optimizer.read_text(encoding="ascii"))
+        optimizer["fixed_nu"] = [2, 2, 1, 0, 0]
+        optimizer["occupied_capture_reference"] = "fixed_prefix"
+        self.optimizer.write_text(json.dumps(optimizer), encoding="ascii")
+
+        comparison = json.loads(self.comparison.read_text(encoding="ascii"))
+        comparison["candidates"][1]["label"] = "fixed-dzp"
+        self.comparison.write_text(json.dumps(comparison), encoding="ascii")
+
+        spectrum = json.loads(self.candidate_spectrum.read_text(encoding="ascii"))
+        spectrum["label"] = "fixed-dzp"
+        self.candidate_spectrum.write_text(json.dumps(spectrum), encoding="ascii")
+
+        result = self.prepare(profile="fixed_dzp")
+        self.assertEqual(result["profile"], "fixed_dzp")
+        self.assertEqual(result["fixed_nu"], [2, 2, 1, 0, 0])
+        self.assertEqual(result["label"], "fixed-dzp")
+        self.assertEqual(
+            result["orbital_filename"],
+            "C_gga_10au_100Ry_3s3p2d_fixed_response.orb",
+        )
 
 
 if __name__ == "__main__":
