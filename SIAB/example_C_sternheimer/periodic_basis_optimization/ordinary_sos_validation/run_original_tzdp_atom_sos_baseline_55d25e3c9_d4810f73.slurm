@@ -15,6 +15,7 @@ trap 'status=$?; echo "C_TZDP_ATOM_SOS_FAILED line=$LINENO command=$BASH_COMMAND
 module load oneapi/2024.2
 
 run_root=${RUN_ROOT:?missing immutable run root}
+restart_source=${RESTART_SOURCE:-}
 source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 source=/data/home/df_iopcas_ghj/gw/260823/c-atom-siab-reference-fixedocc-p1-8cf890e8
 build_root=/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artifacts/job3137534
@@ -118,13 +119,27 @@ set_input_key sternheimer_mpi_layout frequency_grouped
 set_input_key sternheimer_delta 1
 set_input_key sternheimer_fd_order 8
 set_input_key exx_pca_threshold 1e-4
-set_input_key rpa_pca_fixed_nu 2,2,1,0,0
+set_input_key rpa_pca_fixed_nu 2,2,1
 set_input_key exx_singularity_correction massidda
 set_input_key exx_ccp_rmesh_times 1
 set_input_key rpa_ccp_rmesh_times 1
 set_input_key nx 135
 set_input_key ny 135
 set_input_key nz 135
+if test -n "$restart_source"; then
+  restart_out=$restart_source/OUT.C_ATOM_ORIGINAL_TZDP_PCA
+  test -d "$restart_source" && test ! -L "$restart_source"
+  grep -q '#SCF IS CONVERGED#' "$restart_out/running_scf.log"
+  ! grep -q '!!SCF IS NOT CONVERGED!!' "$restart_out/running_scf.log"
+  mkdir -p "OUT.$suffix" restart_input_snapshot
+  for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
+    test -s "$restart_out/$name"
+    cp "$restart_out/$name" "OUT.$suffix/$name"
+    cp "$restart_out/$name" restart_input_snapshot/$name
+  done
+  set_input_key init_wfc file
+  set_input_key init_chg file
+fi
 
 export LD_LIBRARY_PATH=/data/home/df_iopcas_ghj/app/elpa-build/lib:/data/app/libxc/6.2.2-intel/lib:${LD_LIBRARY_PATH:-}
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -148,7 +163,8 @@ export I_MPI_FABRICS=shm:ofi
   echo orbital_basis=C_TZDP_10au_3s3p2d
   echo orbital_sha256=$expected_orbital_sha
   echo pca_threshold=1e-4
-  echo fixed_nu=2,2,1,0,0
+  echo fixed_nu=2,2,1
+  echo restart_source=${restart_source:-none}
   echo grid=135,135,135
   echo fd_order=8
   echo spin_state=fixed_triplet_nup3_ndown1
@@ -156,6 +172,7 @@ export I_MPI_FABRICS=shm:ofi
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
   sha256sum "$0" "$abacus" "$librpa" "$build_provenance" "$extractor" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
+  if test -n "$restart_source"; then sha256sum restart_input_snapshot/*; fi
 } > provenance.txt
 
 /usr/bin/time -v -o abacus.time mpirun -np 1 "$abacus" > abacus.out 2>&1
@@ -166,7 +183,13 @@ eig_occ=$out/eig_occ.txt
 test -s "$matrix" && test -s "$eig_occ" && test -s "$out/running_scf.log"
 grep -q '#SCF IS CONVERGED#' "$out/running_scf.log"
 ! grep -q '!!SCF IS NOT CONVERGED!!' "$out/running_scf.log"
-grep -Fq 'Response-aware RPA product PCA fixed radial profiles: 2,2,1,0,0' abacus.out
+grep -Fq 'Response-aware RPA product PCA fixed radial profiles: 2,2,1' abacus.out
+if test -n "$restart_source"; then
+  for spin in 1 2; do
+    grep -Eq "Read NAO wave functions from .*wfs${spin}_nao.txt" abacus.out
+    grep -Eq "Read in electron density: .*chgs${spin}\.cube|Read electron density from file: .*chgs${spin}\.cube" "$out/running_scf.log"
+  done
+fi
 
 "$python" - "$matrix" > GRID_MATRIX_HEADER.json <<'PY'
 import json
