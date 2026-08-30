@@ -83,6 +83,19 @@ class PrepareNestedTzdpCandidateTest(unittest.TestCase):
             self.assertEqual(result["nu"], [3, 3, 1])
             self.assertEqual(result["ao_count_atom"], 17)
 
+    def test_writes_d_complete_s_only_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "source.orb"
+            root = parent / "candidate"
+            source.write_text(FIXTURE, encoding="ascii")
+
+            result = prepare_candidate(source, root, target_nu=[3, 2, 2])
+
+            self.assertEqual(result["profile"], "nested_tzdp_3s2p2d")
+            self.assertEqual(result["nu"], [3, 2, 2])
+            self.assertEqual(result["ao_count_atom"], 19)
+
     def test_rejects_non_whitelisted_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

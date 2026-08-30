@@ -20,6 +20,7 @@ APPROVED_LAYOUTS = {
     (2, 3, 1): ("nested_tzdp_2s3p1d", "2s3p1d", 16),
     (2, 2, 2): ("nested_tzdp_2s2p2d", "2s2p2d", 18),
     (3, 3, 1): ("nested_tzdp_3s3p1d", "3s3p1d", 17),
+    (3, 2, 2): ("nested_tzdp_3s2p2d", "3s2p2d", 19),
 }
 
 
