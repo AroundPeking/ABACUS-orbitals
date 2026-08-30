@@ -12,5 +12,6 @@ grep -q 'set_input_key mixing_beta 0.1' "$runner"
 grep -q 'set_input_key mixing_beta_mag 0.1' "$runner"
 grep -q 'set_input_key mixing_gg0 0.0' "$runner"
 grep -q 'set_input_key mixing_gg0_mag 0.0' "$runner"
+grep -q 'CANDIDATE_ROOT=.*RUN_ROOT=.*SIAB_SOURCE_ROOT=' "$runner"
 grep -q '#SCF IS CONVERGED#' "$runner"
 echo NO_F_THRESHOLD_ATOM_RESTART_CONTRACT_OK

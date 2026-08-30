@@ -14,10 +14,12 @@ set -euo pipefail
 trap 'status=$?; echo "C_NO_F_ATOM_RESTART_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
 
 campaign=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c
+source_root=/data/home/df_iopcas_ghj/app/siab/periodic-c-ce2801f3
+candidate_root=$campaign/runs/product-pca-20260825/joint-atom-solid-no-f-candidate-570a6d79
 run_root=$campaign/runs/product-pca-20260825/joint-atom-solid-no-f-threshold-q12-control
 restart_source=$run_root/atom/OUT.C_ATOM_THRESHOLD_CANDIDATE_PCA
 base=$run_root/patched-atom.sh
-patched=$run_root/patched-atom-restart.sh
+patched=$run_root/patched-atom-restart-v2.sh
 
 test -s "$base"
 for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
@@ -46,7 +48,7 @@ grep -q 'set_input_key mixing_beta 0.1' "$patched"
 grep -q 'set_input_key mixing_gg0_mag 0.0' "$patched"
 grep -q 'purpose=no_f_threshold_c_atom_restart_all_band_sos' "$patched"
 
-bash "$patched"
+env CANDIDATE_ROOT="$candidate_root" RUN_ROOT="$run_root" SIAB_SOURCE_ROOT="$source_root" bash "$patched"
 
 work=$run_root/atom-restart
 grep -qx 'success' "$work/STATUS"
