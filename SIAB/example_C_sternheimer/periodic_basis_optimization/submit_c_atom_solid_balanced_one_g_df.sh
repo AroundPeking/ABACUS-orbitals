@@ -6,10 +6,15 @@ set -euo pipefail
 : "${ATOM_PAIR_ROOT:?}"
 : "${RUN_ROOT:?}"
 
-mode=${1:?usage: submit_c_atom_solid_balanced_one_g_df.sh pilot|production}
+mode=${1:?usage: submit_c_atom_solid_balanced_one_g_df.sh pilot|production [one_g|no_f]}
 case "$mode" in
   pilot|production) ;;
   *) echo "unsupported run mode: $mode" >&2; exit 2 ;;
+esac
+profile=${2:-one_g}
+case "$profile" in
+  one_g|no_f) ;;
+  *) echo "unsupported candidate profile: $profile" >&2; exit 2 ;;
 esac
 
 script=$REPO_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/run_c_atom_solid_balanced_one_g_df.slurm
@@ -23,9 +28,9 @@ test ! -e "$run_root"
 
 source_commit=$(/usr/bin/git -C "$REPO_ROOT" rev-parse HEAD)
 test -n "$source_commit"
-exports="ALL,REPO_ROOT=$REPO_ROOT,CAMPAIGN_ROOT=$CAMPAIGN_ROOT,ATOM_PAIR_ROOT=$ATOM_PAIR_ROOT,RUN_ROOT=$run_root,RUN_MODE=$mode,EXPECTED_SIAB_COMMIT=$source_commit"
+exports="ALL,REPO_ROOT=$REPO_ROOT,CAMPAIGN_ROOT=$CAMPAIGN_ROOT,ATOM_PAIR_ROOT=$ATOM_PAIR_ROOT,RUN_ROOT=$run_root,RUN_MODE=$mode,CANDIDATE_PROFILE=$profile,EXPECTED_SIAB_COMMIT=$source_commit"
 
 sbatch --test-only --export="$exports" "$script"
 job_id=$(sbatch --parsable --export="$exports" "$script")
 printf '%s\n' "$job_id" > "$receipt"
-printf 'submitted C atom-solid balanced %s job %s\n' "$mode" "$job_id"
+printf 'submitted C atom-solid balanced %s %s job %s\n' "$mode" "$profile" "$job_id"
