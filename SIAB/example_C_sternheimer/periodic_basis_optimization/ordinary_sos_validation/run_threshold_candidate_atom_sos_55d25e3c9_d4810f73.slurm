@@ -27,6 +27,7 @@ librpa_commit=d4810f73aab20c36e69b1c353c945b77f40931c9
 build_provenance=$librpa_root/PROVENANCE-d4810f73.txt
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 extractor=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/extract_librpa_frequency_grid.py
+manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 suffix=C_ATOM_THRESHOLD_CANDIDATE_PCA
 work=$run_root/atom
 
@@ -34,28 +35,18 @@ test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
-test -s "$candidate_root/TRUNCATION.json"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
 test -x "$abacus" && test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
-test -x "$librpa" && test -s "$build_provenance" && test -s "$extractor"
+test -x "$librpa" && test -s "$build_provenance" && test -s "$extractor" && test -s "$manifest_reader"
 grep -qx "source_commit=$librpa_commit" "$build_provenance"
 expected_librpa_sha=$(tail -1 "$build_provenance" | awk '{print $1}')
 test "$(sha256sum "$librpa" | awk '{print $1}')" = "$expected_librpa_sha"
-mapfile -t candidate < <("$python" - "$candidate_root/TRUNCATION.json" "$candidate_root" <<'PY'
-import hashlib, json, pathlib, sys
-payload = json.load(open(sys.argv[1], encoding="ascii"))
-root = pathlib.Path(sys.argv[2]).resolve()
-orbital = pathlib.Path(payload["output"]).resolve()
-assert orbital.parent == root
-assert payload["source_nu"] == [3, 3, 2, 1, 1]
-assert payload["output_nu"] == [3, 3, 2, 1]
-assert payload["output_nao"] == 29
-print(orbital.name)
-print(hashlib.sha256(orbital.read_bytes()).hexdigest())
-PY
-)
-orbital_name=${candidate[0]}
-orbital_sha=${candidate[1]}
+mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
+manifest=${candidate[0]}
+orbital_name=${candidate[1]}
+orbital_sha=${candidate[2]}
+nbands=${candidate[3]}
+orbital_layout=${candidate[4]}
 orbital=$candidate_root/$orbital_name
 for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf; do test -s "$source/$asset"; done
 
@@ -105,13 +96,13 @@ set_input_key calculation scf
 set_input_key nelec 4
 set_input_key nspin 2
 set_input_key nupdown 2
-set_input_key nbands 29
+set_input_key nbands "$nbands"
 set_input_key symmetry 0
 set_input_key gamma_only 1
 set_input_key kpar 1
 set_input_key smearing_method fixed
 set_input_key ocp 1
-set_input_key ocp_set "3*1 26*0 1*1 28*0"
+set_input_key ocp_set "3*1 $((nbands - 3))*0 1*1 $((nbands - 1))*0"
 set_input_key init_wfc atomic
 set_input_key init_chg atomic
 set_input_key rpa 1
@@ -156,14 +147,14 @@ export I_MPI_FABRICS=shm:ofi
   echo abacus_sha256=$expected_abacus_sha
   echo librpa_commit=$librpa_commit
   echo librpa_sha256=$expected_librpa_sha
-  echo orbital_layout=3s3p2d1f
+  echo orbital_layout=$orbital_layout
   echo selected_orbital_sha256=$orbital_sha
   echo pca_threshold=1e-4
   echo auxiliary_basis_rule=product_pca_threshold_only
   echo grid=135,135,135
   echo spin_state=fixed_triplet_nup3_ndown1
   echo n_bands_chi0=-1
-  sha256sum "$0" "$abacus" "$librpa" "$build_provenance" "$extractor" "$candidate_root/TRUNCATION.json" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
+  sha256sum "$0" "$abacus" "$librpa" "$build_provenance" "$extractor" "$manifest_reader" "$manifest" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
 } > provenance.txt
 
 /usr/bin/time -v -o abacus.time mpirun -np 1 "$abacus" > abacus.out 2>&1
@@ -174,7 +165,7 @@ eig_occ=$out/eig_occ.txt
 test -s "$matrix" && test -s "$eig_occ" && test -s "$out/running_scf.log"
 grep -q '#SCF IS CONVERGED#' "$out/running_scf.log"
 ! grep -q '!!SCF IS NOT CONVERGED!!' "$out/running_scf.log"
-"$python" - "$matrix" "$eig_occ" <<'PY'
+"$python" - "$matrix" "$eig_occ" "$nbands" <<'PY'
 import json, math, pathlib, re, struct, sys
 with open(sys.argv[1], "rb") as handle:
     marker, iq, naux, value_flag, natoms, nblocks = struct.unpack("<6i", handle.read(24))
@@ -188,7 +179,7 @@ for line in pathlib.Path(sys.argv[2]).read_text(encoding="utf-8", errors="replac
     fields = line.split()
     if spin in states and len(fields) == 3 and fields[0].isdigit():
         states[spin].append(float(fields[2]))
-assert all(len(values) == 29 for values in states.values())
+assert all(len(values) == int(sys.argv[3]) for values in states.values())
 assert states[1][:3] == [1.0, 1.0, 1.0] and all(abs(value) <= 1e-12 for value in states[1][3:])
 assert states[2][0] == 1.0 and all(abs(value) <= 1e-12 for value in states[2][1:])
 print(json.dumps({"status": "success", "naux": naux, "occupations": [sum(states[1]), sum(states[2])]}, indent=2, sort_keys=True))

@@ -23,6 +23,7 @@ reader=$work/reader_v1
 zero_writer=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/sparse_qstar_coulomb.py
 qstar_gate=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/sparse_qstar_sos_gate.py
 extractor=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/extract_librpa_frequency_grid.py
+manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 librpa_root=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel
 librpa=$librpa_root/chi0_main.exe
@@ -34,20 +35,15 @@ test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
-test -s "$candidate_root/TRUNCATION.json"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
-test -s "$zero_writer" && test -s "$qstar_gate" && test -s "$extractor"
+test -s "$zero_writer" && test -s "$qstar_gate" && test -s "$extractor" && test -s "$manifest_reader"
 test -x "$librpa" && test -s "$build_provenance"
 grep -qx "source_commit=$librpa_commit" "$build_provenance"
 expected_librpa_sha=$(tail -1 "$build_provenance" | awk '{print $1}')
 test "$(sha256sum "$librpa" | awk '{print $1}')" = "$expected_librpa_sha"
-orbital_sha=$("$python" - "$candidate_root/TRUNCATION.json" <<'PY'
-import hashlib, json, pathlib, sys
-payload = json.load(open(sys.argv[1], encoding="ascii"))
-assert payload["output_nu"] == [3, 3, 2, 1] and payload["output_nao"] == 29
-print(hashlib.sha256(pathlib.Path(payload["output"]).read_bytes()).hexdigest())
-PY
-)
+mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
+manifest=${candidate[0]}
+orbital_sha=${candidate[2]}
 
 mkdir -p "$reader" "$work/zero-manifests"
 q1=$grid_root/q1
@@ -144,7 +140,7 @@ export I_MPI_FABRICS=shm:ofi
   echo kmesh=4,4,4
   echo qstar_indices=1,2,3,6,7,8,11,28
   echo coulomb_kernel=exact_rhs_full_periodic_poisson
-  sha256sum "$0" "$candidate_root/TRUNCATION.json" "$zero_writer" "$qstar_gate" "$extractor" "$work/librpa.in" "$work/INPUT_SHA256.txt" "$build_provenance" "$librpa"
+  sha256sum "$0" "$manifest_reader" "$manifest" "$zero_writer" "$qstar_gate" "$extractor" "$work/librpa.in" "$work/INPUT_SHA256.txt" "$build_provenance" "$librpa"
 } > "$work/provenance.txt"
 
 cd "$work"

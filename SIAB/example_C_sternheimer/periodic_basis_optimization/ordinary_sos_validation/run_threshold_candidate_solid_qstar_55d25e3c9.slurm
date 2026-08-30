@@ -22,6 +22,7 @@ abacus=/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artif
 abacus_commit=55d25e3c9bb8255fb17bcdf127c653a72402a5d5
 expected_abacus_sha=25a9133c3facfe44d64d34f2696fe899b82e55be6e22c15c20ade0c00721a3d9
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
+manifest_reader=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 q_indices=(1 2 3 6 7 8 11 28)
 task=${SLURM_ARRAY_TASK_ID:?missing q-star task}
 full_q_index=${q_indices[$((task - 1))]}
@@ -33,24 +34,15 @@ test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test "$task" -ge 1 && test "$task" -le 8
 test ! -e "$work"
-test -s "$candidate_root/TRUNCATION.json"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
 test -x "$abacus" && test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
-mapfile -t candidate < <("$python" - "$candidate_root/TRUNCATION.json" "$candidate_root" <<'PY'
-import hashlib, json, pathlib, sys
-payload = json.load(open(sys.argv[1], encoding="ascii"))
-root = pathlib.Path(sys.argv[2]).resolve()
-orbital = pathlib.Path(payload["output"]).resolve()
-assert orbital.parent == root
-assert payload["source_nu"] == [3, 3, 2, 1, 1]
-assert payload["output_nu"] == [3, 3, 2, 1]
-assert payload["output_nao"] == 29
-print(orbital.name)
-print(hashlib.sha256(orbital.read_bytes()).hexdigest())
-PY
-)
-orbital_name=${candidate[0]}
-orbital_sha=${candidate[1]}
+test -s "$manifest_reader"
+mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
+manifest=${candidate[0]}
+orbital_name=${candidate[1]}
+orbital_sha=${candidate[2]}
+nbands=$((2 * candidate[3]))
+orbital_layout=${candidate[4]}
 orbital=$candidate_root/$orbital_name
 for asset in INPUT STRU KPT C_ONCV_PBE-1.0.upf; do test -s "$source/$asset"; done
 
@@ -97,7 +89,7 @@ grep -qx "$orbital_name" STRU
 ! grep -q '^ABFS_ORBITAL$' STRU
 set_input_key suffix "$suffix"
 set_input_key symmetry -1
-set_input_key nbands 58
+set_input_key nbands "$nbands"
 set_input_key kpar 1
 set_input_key rpa 1
 set_input_key out_librpa_reader_version 1
@@ -132,14 +124,14 @@ export ABACUS_STERNHEIMER_FD_ST_ABFS_DIAG_ONLY=1
   echo abacus_commit=$abacus_commit
   echo abacus_sha256=$expected_abacus_sha
   echo selected_orbital_sha256=$orbital_sha
-  echo orbital_layout=3s3p2d1f
+  echo orbital_layout=$orbital_layout
   echo full_q_index=$full_q_index
   echo qstar_task=$task
   echo pca_threshold=1e-4
   echo auxiliary_basis_rule=product_pca_threshold_only
   echo grid=24,24,24
   echo kmesh=4,4,4
-  sha256sum "$0" "$abacus" "$candidate_root/TRUNCATION.json" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
+  sha256sum "$0" "$abacus" "$manifest_reader" "$manifest" INPUT STRU KPT C_ONCV_PBE-1.0.upf "$orbital_name"
 } > provenance.txt
 
 /usr/bin/time -v -o abacus.time mpirun -np 1 "$abacus" > abacus.out 2>&1

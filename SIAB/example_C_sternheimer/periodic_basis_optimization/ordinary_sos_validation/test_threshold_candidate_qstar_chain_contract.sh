@@ -13,8 +13,8 @@ for path in "$atom" "$solid_q" "$solid_sos" "$collector" "$submitter"; do
   test -s "$path"
 done
 
-grep -q 'output_nu.*\[3, 3, 2, 1\]' "$atom"
-grep -q 'set_input_key nbands 29' "$atom"
+grep -q 'read_periodic_candidate_manifest.py' "$atom"
+grep -q 'set_input_key nbands "$nbands"' "$atom"
 grep -q 'remove_input_key rpa_pca_fixed_nu' "$atom"
 grep -q 'set_input_key exx_pca_threshold 1e-4' "$atom"
 grep -q 'n_bands_chi0 = -1' "$atom"
@@ -22,7 +22,8 @@ grep -q 'libRPA finished successfully' "$atom"
 
 grep -qx '#SBATCH --array=1-8%8' "$solid_q"
 grep -q 'q_indices=(1 2 3 6 7 8 11 28)' "$solid_q"
-grep -q 'set_input_key nbands 58' "$solid_q"
+grep -q 'read_periodic_candidate_manifest.py' "$solid_q"
+grep -q 'set_input_key nbands "$nbands"' "$solid_q"
 grep -q 'remove_input_key rpa_pca_fixed_nu' "$solid_q"
 grep -q 'set_input_key exx_pca_threshold 1e-4' "$solid_q"
 grep -q 'exact_rhs_full_periodic_poisson' "$solid_q"

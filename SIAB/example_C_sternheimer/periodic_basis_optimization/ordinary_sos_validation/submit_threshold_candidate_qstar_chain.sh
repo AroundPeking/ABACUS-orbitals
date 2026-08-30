@@ -12,7 +12,7 @@ source_root=$3
 scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 
 test -d "$candidate_root" && test ! -e "$run_root" && test -d "$source_root"
-test -s "$candidate_root/TRUNCATION.json"
+test -s "$candidate_root/TRUNCATION.json" || test -s "$candidate_root/CANDIDATE.json"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
 for script in \
   run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm \
