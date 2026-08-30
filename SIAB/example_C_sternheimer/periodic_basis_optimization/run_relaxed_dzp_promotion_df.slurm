@@ -43,7 +43,7 @@ promoter=$REPO_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/prepa
 for path in "$optimization" "$candidate" "$checkpoint" "$original" "$q3/manifest.dat" "$q3/status.dat" "$comparator" "$analyzer" "$exporter" "$promoter"; do
   test -s "$path"
 done
-grep -qx 'status success' "$OPTIMIZER_ROOT/provenance.txt"
+grep -qx 'status=success' "$OPTIMIZER_ROOT/provenance.txt"
 grep -qx 'status success' "$q3/status.dat"
 grep -qx 'all_converged yes' "$q3/status.dat"
 grep -qx 'selected_iq 43' "$q3/manifest.dat"

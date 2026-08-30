@@ -20,6 +20,17 @@ class RelaxedDzpPromotionJobTest(unittest.TestCase):
         self.assertIn("--occupied-capture-floor 0.9998982409775239", text)
         self.assertIn('test ! -e "$CANDIDATE_ROOT"', text)
 
+    def test_job_accepts_optimizer_key_value_provenance(self):
+        text = SCRIPT.read_text(encoding="ascii")
+        self.assertIn(
+            "grep -qx 'status=success' \"$OPTIMIZER_ROOT/provenance.txt\"",
+            text,
+        )
+        self.assertNotIn(
+            "grep -qx 'status success' \"$OPTIMIZER_ROOT/provenance.txt\"",
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
