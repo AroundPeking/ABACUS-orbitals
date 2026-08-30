@@ -17,6 +17,7 @@ module load oneapi/2024.2
 candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
 source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
+source_commit=${SIAB_SOURCE_COMMIT:?missing exact SIAB source commit}
 grid_root=$run_root/solid-grid
 work=$run_root/solid-sos
 reader=$work/reader_v1
@@ -31,6 +32,8 @@ librpa_commit=d4810f73aab20c36e69b1c353c945b77f40931c9
 build_provenance=$librpa_root/PROVENANCE-d4810f73.txt
 q_indices=(1 2 3 6 7 8 11 28)
 
+[[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+test "${source_commit:0:8}" = "${source_root##*-}"
 test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
@@ -152,7 +155,7 @@ grep -q '^| Total EcRPA:' librpa.out
   --sparse-output "allband=$work/librpa.out" \
   --output-root "$work/qstar-gate" \
   --binding-tolerance-kcal-mol-per-c 0.1 \
-  --provenance "source_commit=$(cat "$source_root/.git/HEAD")" \
+  --provenance "source_commit=$source_commit" \
   --provenance "qstar_array_job=$QSTAR_ARRAY_JOB_ID" > qstar_gate.out
 grep -qx 'success' qstar-gate/STATUS
 ecrpa_ha=$("$python" - qstar-gate/RESULT.json <<'PY'

@@ -9,9 +9,12 @@ fi
 candidate_root=$1
 run_root=$2
 source_root=$3
+source_commit=${SIAB_SOURCE_COMMIT:?missing exact SIAB source commit}
 scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 
 test -d "$candidate_root" && test ! -e "$run_root" && test -d "$source_root"
+[[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+test "${source_commit:0:8}" = "${source_root##*-}"
 test -s "$candidate_root/TRUNCATION.json" || test -s "$candidate_root/CANDIDATE.json"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
 for script in \
@@ -23,7 +26,7 @@ for script in \
 done
 test -z "$(squeue -h -u "$USER" -n c_thr_atom_sos,c_thr_qstar,c_thr_qsos,c_thr_bind -o %A)"
 
-common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root"
+common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root",SIAB_SOURCE_COMMIT="$source_commit"
 atom_job=$(sbatch --parsable --export="$common" "$scripts/run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm")
 qstar_job=$(sbatch --parsable --export="$common" "$scripts/run_threshold_candidate_solid_qstar_55d25e3c9.slurm")
 solid_sos_job=$(sbatch --parsable --dependency="afterok:$qstar_job" \

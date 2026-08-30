@@ -8,8 +8,9 @@ solid_q=$root/run_threshold_candidate_solid_qstar_55d25e3c9.slurm
 solid_sos=$root/run_threshold_candidate_solid_qstar_sos_d4810f73.slurm
 collector=$root/run_threshold_candidate_qstar_binding_collect.slurm
 submitter=$root/submit_threshold_candidate_qstar_chain.sh
+recovery=$root/run_threshold_candidate_solid_qstar_recovery.slurm
 
-for path in "$atom" "$solid_q" "$solid_sos" "$collector" "$submitter"; do
+for path in "$atom" "$solid_q" "$solid_sos" "$collector" "$submitter" "$recovery"; do
   test -s "$path"
 done
 
@@ -33,9 +34,18 @@ grep -q 'sparse_qstar_sos_gate.py' "$solid_sos"
 grep -q 'n_bands_chi0 = -1' "$solid_sos"
 grep -q 'libRPA finished successfully' "$solid_sos"
 grep -q 'qstar_reconstruction_ha' "$solid_sos"
+grep -q 'SIAB_SOURCE_COMMIT' "$solid_sos"
+! grep -q 'source_root/.git/HEAD' "$solid_sos"
+
+grep -q 'FAILED_SOLID_SOS_ROOT' "$recovery"
+grep -q 'FAILED_SOLID_SOS_JOB_ID' "$recovery"
+grep -q 'libRPA finished successfully' "$recovery"
+grep -q 'qstar_reconstruction_ha' "$recovery"
 
 grep -q '0.1' "$collector"
+grep -q 'SOLID_SOS_ROOT' "$collector"
 grep -q 'afterok' "$submitter"
 grep -q 'test -z.*squeue' "$submitter"
+grep -q 'SIAB_SOURCE_COMMIT' "$submitter"
 
 echo THRESHOLD_CANDIDATE_QSTAR_CHAIN_CONTRACT_OK

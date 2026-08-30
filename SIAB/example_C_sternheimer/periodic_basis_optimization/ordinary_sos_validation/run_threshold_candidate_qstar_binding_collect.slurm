@@ -19,12 +19,13 @@ collector=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/or
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 work=$run_root/binding
 atom=$run_root/atom/RESULT_SUMMARY.txt
-solid=$run_root/solid-sos/RESULT_SUMMARY.txt
+solid_root=${SOLID_SOS_ROOT:-$run_root/solid-sos}
+solid=$solid_root/RESULT_SUMMARY.txt
 
 test ! -e "$work"
 test -s "$collector" && test -x "$python"
 grep -qx 'success' "$run_root/atom/STATUS"
-grep -qx 'success' "$run_root/solid-sos/STATUS"
+grep -qx 'success' "$solid_root/STATUS"
 test -s "$atom" && test -s "$solid"
 mkdir -p "$work"
 "$python" "$collector" \
@@ -45,6 +46,7 @@ PY
   echo atom_job=${ATOM_JOB_ID:?missing atom job id}
   echo qstar_array_job=${QSTAR_ARRAY_JOB_ID:?missing q-star array job id}
   echo solid_sos_job=${SOLID_SOS_JOB_ID:?missing solid SOS job id}
+  echo solid_sos_root=$solid_root
   echo delta_st_reference_ev_per_c=6.902326
   echo acceptance_tolerance_ev_per_c=0.1
   sha256sum "$collector" "$atom" "$solid" "$work/RESULT.json"
