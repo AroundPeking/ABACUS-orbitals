@@ -39,6 +39,23 @@ class TruncatePeriodicCoefficientsTest(unittest.TestCase):
                 element="C",
             )
 
+    def test_can_preserve_empty_high_l_layout_for_primitive_blocks(self):
+        channels = [
+            torch.full((3, count), float(l + 1), dtype=torch.float64)
+            for l, count in enumerate((3, 3, 2, 1, 1))
+        ]
+
+        truncated = MODULE.truncate_angular_channels(
+            {"C": channels},
+            target_lmax=2,
+            element="C",
+            preserve_channel_layout=True,
+        )
+
+        self.assertEqual([channel.shape[1] for channel in truncated["C"]], [3, 3, 2, 0, 0])
+        self.assertEqual(truncated["C"][3].shape, (3, 0))
+        self.assertEqual(truncated["C"][4].shape, (3, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,9 +88,9 @@ case "$candidate_profile" in
     ;;
   no_f)
     candidate_label=3s3p2d
-    optimizer_nu=3,3,2
-    optimizer_fixed_nu=2,2,1
-    optimizer_max_l=2
+    optimizer_nu=3,3,2,0,0
+    optimizer_fixed_nu=2,2,1,0,0
+    optimizer_max_l=4
     initial=$RUN_ROOT/input/C_3s3p2d_joint_initial.txt
     ;;
   *)
@@ -154,6 +154,7 @@ if test "$candidate_profile" = no_f; then
     --radial-rows 31 \
     --input-nu 3,3,2,1,1 \
     --target-lmax 2 \
+    --preserve-channel-layout \
     --report "$RUN_ROOT/input/TRUNCATION.json" \
     > "$RUN_ROOT/input/truncate.stdout"
 fi

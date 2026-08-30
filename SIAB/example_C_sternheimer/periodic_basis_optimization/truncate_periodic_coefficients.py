@@ -31,7 +31,13 @@ def parse_counts(value):
     return counts
 
 
-def truncate_angular_channels(coefficients, *, target_lmax, element):
+def truncate_angular_channels(
+    coefficients,
+    *,
+    target_lmax,
+    element,
+    preserve_channel_layout=False,
+):
     if set(coefficients) != {element}:
         raise ValueError("coefficient elements do not match the requested element")
     channels = coefficients[element]
@@ -43,11 +49,15 @@ def truncate_angular_channels(coefficients, *, target_lmax, element):
         raise ValueError(
             "target_lmax must be non-negative and smaller than the source Lmax"
         )
-    return {
-        element: [
-            channel.detach().clone() for channel in channels[: target_lmax + 1]
-        ]
-    }
+    result = [
+        channel.detach().clone() for channel in channels[: target_lmax + 1]
+    ]
+    if preserve_channel_layout:
+        result.extend(
+            channel.new_empty((channel.shape[0], 0))
+            for channel in channels[target_lmax + 1 :]
+        )
+    return {element: result}
 
 
 def sha256(path):
@@ -66,6 +76,7 @@ def parse_args(argv=None):
     parser.add_argument("--radial-rows", type=int, default=31)
     parser.add_argument("--input-nu", required=True)
     parser.add_argument("--target-lmax", type=int, required=True)
+    parser.add_argument("--preserve-channel-layout", action="store_true")
     parser.add_argument("--report", type=Path)
     return parser.parse_args(argv)
 
@@ -87,6 +98,7 @@ def main(argv=None):
         coefficients,
         target_lmax=args.target_lmax,
         element=args.element,
+        preserve_channel_layout=args.preserve_channel_layout,
     )
     write_periodic_optimizer_coefficients(args.output, truncated)
     output_nu = tuple(channel.shape[1] for channel in truncated[args.element])
@@ -99,6 +111,7 @@ def main(argv=None):
         "output_nu": output_nu,
         "output_sha256": sha256(args.output),
         "radial_rows": args.radial_rows,
+        "preserve_channel_layout": args.preserve_channel_layout,
         "target_lmax": args.target_lmax,
     }
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"

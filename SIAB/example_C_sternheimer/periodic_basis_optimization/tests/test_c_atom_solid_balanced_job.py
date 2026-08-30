@@ -34,10 +34,11 @@ class CAtomSolidBalancedJobTest(unittest.TestCase):
         self.assertIn("CANDIDATE_PROFILE", text)
         self.assertIn("no_f)", text)
         self.assertIn("candidate_label=3s3p2d", text)
-        self.assertIn("optimizer_nu=3,3,2", text)
-        self.assertIn("optimizer_fixed_nu=2,2,1", text)
-        self.assertIn("optimizer_max_l=2", text)
+        self.assertIn("optimizer_nu=3,3,2,0,0", text)
+        self.assertIn("optimizer_fixed_nu=2,2,1,0,0", text)
+        self.assertIn("optimizer_max_l=4", text)
         self.assertIn("truncate_periodic_coefficients.py", text)
+        self.assertIn("--preserve-channel-layout", text)
         self.assertIn("#SBATCH --time=1-00:00:00", text)
 
     def test_submitter_is_duplicate_safe_and_has_two_modes(self):
