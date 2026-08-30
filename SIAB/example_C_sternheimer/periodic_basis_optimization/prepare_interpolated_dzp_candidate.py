@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a full-DZP C candidate along a verified reverse optimization direction."""
+"""Stage a full-DZP C candidate along one or two verified search directions."""
 
 from __future__ import annotations
 
@@ -60,6 +60,23 @@ def _validated_channel_alphas(alpha, channel_alphas):
     return None, values
 
 
+def _validated_optional_channel_alphas(optimized, channel_alphas):
+    if (optimized is None) != (channel_alphas is None):
+        raise ValueError(
+            "secondary_optimized and secondary_channel_alphas must be provided together"
+        )
+    if optimized is None:
+        return None
+    values = tuple(float(value) for value in channel_alphas)
+    if len(values) != len(NU):
+        raise ValueError("secondary_channel_alphas must define s,p,d,f,g")
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError("secondary channel search alphas must be finite")
+    if not any(value != 0.0 for value in values):
+        raise ValueError("secondary_channel_alphas must contain a nonzero component")
+    return values
+
+
 def prepare_candidate(
     *,
     original: Path,
@@ -67,13 +84,21 @@ def prepare_candidate(
     root: Path,
     alpha: float | None = None,
     channel_alphas=None,
+    secondary_optimized: Path | None = None,
+    secondary_channel_alphas=None,
 ) -> dict:
     alpha, resolved_channel_alphas = _validated_channel_alphas(
         alpha,
         channel_alphas,
     )
+    resolved_secondary_alphas = _validated_optional_channel_alphas(
+        secondary_optimized,
+        secondary_channel_alphas,
+    )
     original = Path(original).resolve(strict=True)
     optimized = Path(optimized).resolve(strict=True)
+    if secondary_optimized is not None:
+        secondary_optimized = Path(secondary_optimized).resolve(strict=True)
     root = Path(root).resolve()
     if root.exists() or root.is_symlink():
         raise FileExistsError(root)
@@ -82,17 +107,34 @@ def prepare_candidate(
 
     initial = _read(original)
     selected = _read(optimized)
+    secondary = (
+        _read(secondary_optimized) if secondary_optimized is not None else None
+    )
     coefficients = {"C": []}
-    for channel_alpha, initial_channel, selected_channel in zip(
-        resolved_channel_alphas,
-        initial["C"],
-        selected["C"],
+    for channel_index, (
+        channel_alpha,
+        initial_channel,
+        selected_channel,
+    ) in enumerate(
+        zip(
+            resolved_channel_alphas,
+            initial["C"],
+            selected["C"],
+        )
     ):
         if initial_channel.shape != selected_channel.shape:
             raise ValueError("coefficient channel layouts differ")
-        coefficients["C"].append(
-            initial_channel + channel_alpha * (selected_channel - initial_channel)
+        candidate_channel = initial_channel + channel_alpha * (
+            selected_channel - initial_channel
         )
+        if secondary is not None:
+            secondary_channel = secondary["C"][channel_index]
+            if initial_channel.shape != secondary_channel.shape:
+                raise ValueError("secondary coefficient channel layouts differ")
+            candidate_channel = candidate_channel + resolved_secondary_alphas[
+                channel_index
+            ] * (secondary_channel - initial_channel)
+        coefficients["C"].append(candidate_channel)
 
     temporary = Path(tempfile.mkdtemp(prefix=root.name + ".tmp-", dir=root.parent))
     try:
@@ -131,21 +173,46 @@ def prepare_candidate(
             "profile": "interpolated_dzp",
             "status": "success",
         }
+        if secondary_optimized is not None:
+            payload.update(
+                {
+                    "direction": "original_plus_two_channel_resolved_directions",
+                    "secondary_channel_alphas": list(resolved_secondary_alphas),
+                    "secondary_optimized_coefficients": str(secondary_optimized),
+                    "secondary_optimized_coefficients_sha256": sha256(
+                        secondary_optimized
+                    ),
+                }
+            )
         manifest = temporary / "CANDIDATE.json"
         manifest.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
             encoding="ascii",
         )
-        (temporary / "provenance.txt").write_text(
+        provenance_lines = [
             "status=success\n"
             "purpose=full_dzp_signed_channel_sos_line_search\n"
             f"alpha={alpha if alpha is not None else 'channel_resolved'}\n"
             f"channel_alphas={','.join(f'{value:.16g}' for value in resolved_channel_alphas)}\n"
             f"original_coefficients_sha256={payload['original_coefficients_sha256']}\n"
             f"optimized_coefficients_sha256={payload['optimized_coefficients_sha256']}\n"
+        ]
+        if secondary_optimized is not None:
+            provenance_lines.append(
+                "secondary_channel_alphas="
+                + ",".join(f"{value:.16g}" for value in resolved_secondary_alphas)
+                + "\n"
+                + "secondary_optimized_coefficients_sha256="
+                + payload["secondary_optimized_coefficients_sha256"]
+                + "\n"
+            )
+        provenance_lines.append(
             f"selected_coefficients_sha256={payload['coefficients_sha256']}\n"
             f"selected_orbital_sha256={payload['orbital_sha256']}\n"
-            f"candidate_manifest_sha256={sha256(manifest)}\n",
+            f"candidate_manifest_sha256={sha256(manifest)}\n"
+        )
+        (temporary / "provenance.txt").write_text(
+            "".join(provenance_lines),
             encoding="ascii",
         )
         (temporary / "STATUS").write_text("success\n", encoding="ascii")
@@ -167,6 +234,11 @@ def main() -> None:
         "--channel-alphas",
         help="comma-separated reverse coefficients for s,p,d,f,g",
     )
+    parser.add_argument("--secondary-optimized", type=Path)
+    parser.add_argument(
+        "--secondary-channel-alphas",
+        help="comma-separated coefficients for a second s,p,d,f,g direction",
+    )
     args = parser.parse_args()
     result = prepare_candidate(
         original=args.original,
@@ -176,6 +248,12 @@ def main() -> None:
         channel_alphas=(
             tuple(field.strip() for field in args.channel_alphas.split(","))
             if args.channel_alphas is not None
+            else None
+        ),
+        secondary_optimized=args.secondary_optimized,
+        secondary_channel_alphas=(
+            tuple(field.strip() for field in args.secondary_channel_alphas.split(","))
+            if args.secondary_channel_alphas is not None
             else None
         ),
     )
