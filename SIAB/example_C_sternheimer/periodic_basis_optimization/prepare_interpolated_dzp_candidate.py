@@ -42,10 +42,36 @@ def _read(path: Path):
     )
 
 
-def prepare_candidate(*, original: Path, optimized: Path, root: Path, alpha: float) -> dict:
-    alpha = float(alpha)
-    if not math.isfinite(alpha) or alpha >= 0.0:
-        raise ValueError("reverse-search alpha must be finite and negative")
+def _validated_channel_alphas(alpha, channel_alphas):
+    if (alpha is None) == (channel_alphas is None):
+        raise ValueError("provide exactly one scalar alpha or channel_alphas")
+    if channel_alphas is None:
+        alpha = float(alpha)
+        if not math.isfinite(alpha) or alpha >= 0.0:
+            raise ValueError("reverse-search alpha must be finite and negative")
+        return alpha, (alpha,) * len(NU)
+    values = tuple(float(value) for value in channel_alphas)
+    if len(values) != len(NU):
+        raise ValueError("channel_alphas must define s,p,d,f,g")
+    if any(not math.isfinite(value) or value > 0.0 for value in values):
+        raise ValueError("channel reverse-search alphas must be finite and nonpositive")
+    if not any(value < 0.0 for value in values):
+        raise ValueError("channel_alphas must contain a reverse component")
+    return None, values
+
+
+def prepare_candidate(
+    *,
+    original: Path,
+    optimized: Path,
+    root: Path,
+    alpha: float | None = None,
+    channel_alphas=None,
+) -> dict:
+    alpha, resolved_channel_alphas = _validated_channel_alphas(
+        alpha,
+        channel_alphas,
+    )
     original = Path(original).resolve(strict=True)
     optimized = Path(optimized).resolve(strict=True)
     root = Path(root).resolve()
@@ -57,17 +83,25 @@ def prepare_candidate(*, original: Path, optimized: Path, root: Path, alpha: flo
     initial = _read(original)
     selected = _read(optimized)
     coefficients = {"C": []}
-    for initial_channel, selected_channel in zip(initial["C"], selected["C"]):
+    for channel_alpha, initial_channel, selected_channel in zip(
+        resolved_channel_alphas,
+        initial["C"],
+        selected["C"],
+    ):
         if initial_channel.shape != selected_channel.shape:
             raise ValueError("coefficient channel layouts differ")
         coefficients["C"].append(
-            initial_channel + alpha * (selected_channel - initial_channel)
+            initial_channel + channel_alpha * (selected_channel - initial_channel)
         )
 
     temporary = Path(tempfile.mkdtemp(prefix=root.name + ".tmp-", dir=root.parent))
     try:
-        coefficient_name = "C_3s3p2d_reverse_alpha_{:+.3f}.txt".format(alpha)
-        orbital_name = "C_gga_10au_100Ry_3s3p2d_reverse_alpha_{:+.3f}.orb".format(alpha)
+        if alpha is None:
+            coefficient_name = "C_3s3p2d_reverse_channel_resolved.txt"
+            orbital_name = "C_gga_10au_100Ry_3s3p2d_reverse_channel_resolved.orb"
+        else:
+            coefficient_name = "C_3s3p2d_reverse_alpha_{:+.3f}.txt".format(alpha)
+            orbital_name = "C_gga_10au_100Ry_3s3p2d_reverse_alpha_{:+.3f}.orb".format(alpha)
         coefficient_path = temporary / coefficient_name
         orbital_path = temporary / orbital_name
         write_periodic_optimizer_coefficients(coefficient_path, coefficients)
@@ -83,9 +117,10 @@ def prepare_candidate(*, original: Path, optimized: Path, root: Path, alpha: flo
         payload = {
             "alpha": alpha,
             "ao_count_atom": AO_COUNT_ATOM,
+            "channel_alphas": list(resolved_channel_alphas),
             "coefficients_filename": coefficient_name,
             "coefficients_sha256": sha256(coefficient_path),
-            "direction": "original_plus_alpha_times_optimized_minus_original",
+            "direction": "original_plus_channel_alpha_times_optimized_minus_original",
             "nu": list(NU),
             "optimized_coefficients": str(optimized),
             "optimized_coefficients_sha256": sha256(optimized),
@@ -104,7 +139,8 @@ def prepare_candidate(*, original: Path, optimized: Path, root: Path, alpha: flo
         (temporary / "provenance.txt").write_text(
             "status=success\n"
             "purpose=full_dzp_reverse_relaxed_direction_sos_line_search\n"
-            f"alpha={alpha:.16g}\n"
+            f"alpha={alpha if alpha is not None else 'channel_resolved'}\n"
+            f"channel_alphas={','.join(f'{value:.16g}' for value in resolved_channel_alphas)}\n"
             f"original_coefficients_sha256={payload['original_coefficients_sha256']}\n"
             f"optimized_coefficients_sha256={payload['optimized_coefficients_sha256']}\n"
             f"selected_coefficients_sha256={payload['coefficients_sha256']}\n"
@@ -125,13 +161,23 @@ def main() -> None:
     parser.add_argument("--original", required=True, type=Path)
     parser.add_argument("--optimized", required=True, type=Path)
     parser.add_argument("--root", required=True, type=Path)
-    parser.add_argument("--alpha", required=True, type=float)
+    direction = parser.add_mutually_exclusive_group(required=True)
+    direction.add_argument("--alpha", type=float)
+    direction.add_argument(
+        "--channel-alphas",
+        help="comma-separated reverse coefficients for s,p,d,f,g",
+    )
     args = parser.parse_args()
     result = prepare_candidate(
         original=args.original,
         optimized=args.optimized,
         root=args.root,
         alpha=args.alpha,
+        channel_alphas=(
+            tuple(field.strip() for field in args.channel_alphas.split(","))
+            if args.channel_alphas is not None
+            else None
+        ),
     )
     print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
 
