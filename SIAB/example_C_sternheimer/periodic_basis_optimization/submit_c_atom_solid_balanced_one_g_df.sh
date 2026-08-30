@@ -26,8 +26,15 @@ test -d "$ATOM_PAIR_ROOT" && test ! -L "$ATOM_PAIR_ROOT"
 test ! -e "$receipt"
 test ! -e "$run_root"
 
-source_commit=$(/usr/bin/git -C "$REPO_ROOT" rev-parse HEAD)
-test -n "$source_commit"
+if source_commit=$(/usr/bin/git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null); then
+  :
+else
+  source_commit=$(cat "$REPO_ROOT/.git/HEAD")
+fi
+if ! printf '%s\n' "$source_commit" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo "source commit must be a 40-character lowercase SHA" >&2
+  exit 2
+fi
 exports="ALL,REPO_ROOT=$REPO_ROOT,CAMPAIGN_ROOT=$CAMPAIGN_ROOT,ATOM_PAIR_ROOT=$ATOM_PAIR_ROOT,RUN_ROOT=$run_root,RUN_MODE=$mode,CANDIDATE_PROFILE=$profile,EXPECTED_SIAB_COMMIT=$source_commit"
 
 sbatch --test-only --export="$exports" "$script"

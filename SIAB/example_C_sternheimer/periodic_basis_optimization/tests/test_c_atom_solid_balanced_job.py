@@ -65,6 +65,8 @@ class CAtomSolidBalancedJobTest(unittest.TestCase):
         self.assertIn("CANDIDATE_PROFILE", text)
         self.assertIn('test ! -e "$receipt"', text)
         self.assertIn('test ! -e "$run_root"', text)
+        self.assertIn('cat "$REPO_ROOT/.git/HEAD"', text)
+        self.assertIn("source commit must be a 40-character lowercase SHA", text)
         self.assertIn("sbatch --test-only", text)
         self.assertIn("sbatch --parsable", text)
 
