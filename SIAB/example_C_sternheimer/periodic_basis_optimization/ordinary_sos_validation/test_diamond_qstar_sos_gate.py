@@ -52,6 +52,43 @@ class DiamondQstarSosGateTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exactly 64"):
                 parse_librpa_q_contributions(output)
 
+    def test_accepts_microhartree_roundoff_in_printed_q_sum(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "librpa.out"
+            values = [complex(-0.05185222, 0.0)] * 64
+            _write_librpa_output(output, values)
+            text = output.read_text(encoding="ascii")
+            reported = sum(value.real for value in values) + 2.5e-6
+            output.write_text(
+                text.replace(
+                    f"| Total EcRPA:       {sum(value.real for value in values):.12g}",
+                    f"| Total EcRPA:       {reported:.12g}",
+                ),
+                encoding="ascii",
+            )
+
+            parsed = parse_librpa_q_contributions(output)
+
+        self.assertAlmostEqual(parsed["reported_ecrpa_ha"], reported)
+
+    def test_rejects_q_sum_mismatch_above_printing_roundoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "librpa.out"
+            values = [complex(-0.05185222, 0.0)] * 64
+            _write_librpa_output(output, values)
+            text = output.read_text(encoding="ascii")
+            reported = sum(value.real for value in values) + 6.0e-6
+            output.write_text(
+                text.replace(
+                    f"| Total EcRPA:       {sum(value.real for value in values):.12g}",
+                    f"| Total EcRPA:       {reported:.12g}",
+                ),
+                encoding="ascii",
+            )
+
+            with self.assertRaisesRegex(ValueError, "weighted q sum"):
+                parse_librpa_q_contributions(output)
+
     def test_collects_exact_symmetric_reconstruction(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "librpa.out"

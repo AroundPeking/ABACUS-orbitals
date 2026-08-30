@@ -26,7 +26,9 @@ QSTAR_REPRESENTATIVES = (
 )
 EXPECTED_Q_COUNT = 64
 MAX_IMAGINARY_HA = 1.0e-10
-PRINTED_SUM_TOLERANCE_HA = 1.0e-6
+# LibRPA prints each q contribution with limited precision. Summing 64 printed
+# values can therefore differ from the separately printed total by a few uHa.
+PRINTED_SUM_TOLERANCE_HA = 5.0e-6
 
 
 def _sha256(path: Path) -> str:
