@@ -119,7 +119,7 @@ set_input_key sternheimer_mpi_layout frequency_grouped
 set_input_key sternheimer_delta 1
 set_input_key sternheimer_fd_order 8
 set_input_key exx_pca_threshold 1e-4
-set_input_key rpa_pca_fixed_nu 2,2,1
+remove_input_key rpa_pca_fixed_nu
 set_input_key exx_singularity_correction massidda
 set_input_key exx_ccp_rmesh_times 1
 set_input_key rpa_ccp_rmesh_times 1
@@ -163,7 +163,7 @@ export I_MPI_FABRICS=shm:ofi
   echo orbital_basis=C_TZDP_10au_3s3p2d
   echo orbital_sha256=$expected_orbital_sha
   echo pca_threshold=1e-4
-  echo fixed_nu=2,2,1
+  echo auxiliary_basis_rule=product_pca_threshold_only
   echo restart_source=${restart_source:-none}
   echo grid=135,135,135
   echo fd_order=8
@@ -183,7 +183,6 @@ eig_occ=$out/eig_occ.txt
 test -s "$matrix" && test -s "$eig_occ" && test -s "$out/running_scf.log"
 grep -q '#SCF IS CONVERGED#' "$out/running_scf.log"
 ! grep -q '!!SCF IS NOT CONVERGED!!' "$out/running_scf.log"
-grep -Fq 'Response-aware RPA product PCA fixed radial profiles: 2,2,1' abacus.out
 if test -n "$restart_source"; then
   for spin in 1 2; do
     grep -Eq "Read NAO wave functions from .*wfs${spin}_nao.txt" abacus.out
