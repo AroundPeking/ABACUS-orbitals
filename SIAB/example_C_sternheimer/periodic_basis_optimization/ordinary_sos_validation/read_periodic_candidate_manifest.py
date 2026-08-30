@@ -12,6 +12,7 @@ from pathlib import Path
 STAGED_LAYOUTS = {
     "relaxed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "fixed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
+    "interpolated_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "nested_tzdp_2s2p1d": ([2, 2, 1], 13, "2s2p1d"),
     "nested_tzdp_3s2p1d": ([3, 2, 1], 14, "3s2p1d"),
     "nested_tzdp_2s3p1d": ([2, 3, 1], 16, "2s3p1d"),
