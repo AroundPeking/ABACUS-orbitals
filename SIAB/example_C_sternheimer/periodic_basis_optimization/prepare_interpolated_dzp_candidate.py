@@ -53,10 +53,10 @@ def _validated_channel_alphas(alpha, channel_alphas):
     values = tuple(float(value) for value in channel_alphas)
     if len(values) != len(NU):
         raise ValueError("channel_alphas must define s,p,d,f,g")
-    if any(not math.isfinite(value) or value > 0.0 for value in values):
-        raise ValueError("channel reverse-search alphas must be finite and nonpositive")
-    if not any(value < 0.0 for value in values):
-        raise ValueError("channel_alphas must contain a reverse component")
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError("channel search alphas must be finite")
+    if not any(value != 0.0 for value in values):
+        raise ValueError("channel_alphas must contain a nonzero component")
     return None, values
 
 
@@ -138,7 +138,7 @@ def prepare_candidate(
         )
         (temporary / "provenance.txt").write_text(
             "status=success\n"
-            "purpose=full_dzp_reverse_relaxed_direction_sos_line_search\n"
+            "purpose=full_dzp_signed_channel_sos_line_search\n"
             f"alpha={alpha if alpha is not None else 'channel_resolved'}\n"
             f"channel_alphas={','.join(f'{value:.16g}' for value in resolved_channel_alphas)}\n"
             f"original_coefficients_sha256={payload['original_coefficients_sha256']}\n"

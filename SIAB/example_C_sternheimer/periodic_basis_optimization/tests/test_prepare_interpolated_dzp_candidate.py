@@ -141,11 +141,70 @@ class PrepareInterpolatedDzpCandidateTest(unittest.TestCase):
                 )
             )
 
-    def test_rejects_channel_alphas_without_reverse_component(self):
+    def test_accepts_signed_channel_search_with_positive_s_component(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            original = parent / "original.txt"
+            optimized = parent / "optimized.txt"
+            root = parent / "candidate"
+            generator = torch.Generator().manual_seed(29)
+            initial = {
+                "C": [
+                    torch.randn(31, 3, generator=generator, dtype=torch.float64),
+                    torch.randn(31, 3, generator=generator, dtype=torch.float64),
+                    torch.randn(31, 2, generator=generator, dtype=torch.float64),
+                    torch.empty(31, 0, dtype=torch.float64),
+                    torch.empty(31, 0, dtype=torch.float64),
+                ]
+            }
+            selected = {
+                "C": [
+                    channel
+                    + 0.01
+                    * torch.randn(
+                        channel.shape,
+                        generator=generator,
+                        dtype=torch.float64,
+                    )
+                    for channel in initial["C"]
+                ]
+            }
+            write_periodic_optimizer_coefficients(original, initial)
+            write_periodic_optimizer_coefficients(optimized, selected)
+
+            result = prepare_candidate(
+                original=original,
+                optimized=optimized,
+                root=root,
+                channel_alphas=(1.0, -1.0, -1.5, 0.0, 0.0),
+            )
+
+            restored = read_periodic_optimizer_coefficients(
+                root / result["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 0, 0),
+            )
+            self.assertTrue(torch.allclose(restored["C"][0], selected["C"][0]))
+            self.assertTrue(
+                torch.allclose(
+                    restored["C"][1],
+                    initial["C"][1] - (selected["C"][1] - initial["C"][1]),
+                )
+            )
+            self.assertTrue(
+                torch.allclose(
+                    restored["C"][2],
+                    initial["C"][2]
+                    - 1.5 * (selected["C"][2] - initial["C"][2]),
+                )
+            )
+
+    def test_rejects_all_zero_channel_alphas(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
             source = parent / "missing.txt"
-            with self.assertRaisesRegex(ValueError, "reverse"):
+            with self.assertRaisesRegex(ValueError, "nonzero"):
                 prepare_candidate(
                     original=source,
                     optimized=source,
