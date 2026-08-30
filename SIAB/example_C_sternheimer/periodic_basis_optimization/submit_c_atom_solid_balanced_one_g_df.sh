@@ -6,14 +6,14 @@ set -euo pipefail
 : "${ATOM_PAIR_ROOT:?}"
 : "${RUN_ROOT:?}"
 
-mode=${1:?usage: submit_c_atom_solid_balanced_one_g_df.sh pilot|production [one_g|no_f]}
+mode=${1:?usage: submit_c_atom_solid_balanced_one_g_df.sh pilot|production [one_g|no_f|relaxed_dzp]}
 case "$mode" in
   pilot|production) ;;
   *) echo "unsupported run mode: $mode" >&2; exit 2 ;;
 esac
 profile=${2:-one_g}
 case "$profile" in
-  one_g|no_f) ;;
+  one_g|no_f|relaxed_dzp) ;;
   *) echo "unsupported candidate profile: $profile" >&2; exit 2 ;;
 esac
 

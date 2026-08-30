@@ -73,6 +73,8 @@ q1=$producer_root/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1
 q2=$producer_root/c-diamond-g24-fd8-nfreq6-q2-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q2_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 source_initial=$CAMPAIGN_ROOT/runs/product-pca-20260825/nested-one-g-screen-545e108d/C_3s3p2d1f1g_keep_g1.txt
 source_initial_sha=29a89abad8ffab7e55316a7e4ca908e14200cb5382274af6f8a6adaa91e895ca
+source_tzdp=$REPO_ROOT/SG15_v1.0/Orbitals_v2.0/C_TZDP/info/10/ORBITAL_RESULTS.txt
+source_tzdp_sha=b58a2183c3028e46e6f4bc55b0f21531f1253275d5c2f2c4ee4e27676c1b55f4
 atomic_response=/data/home/df_iopcas_ghj/gw/260823/c-atom-siab-reference-fixedocc-p1-8cf890e8/OUT.C_SIAB_REFERENCE/sternheimer_matrix.dat
 atomic_response_sha=e976c164595758029cb91ebe3913af6865780ef95fdb48954c07075bd0c7e3ff
 atomic_source=$ATOM_PAIR_ROOT/OUT.C_ATOM_SIAB_SOURCE/STERNHEIMER_SIAB_SOURCE_V1.dat
@@ -84,6 +86,10 @@ case "$candidate_profile" in
     optimizer_nu=3,3,2,1,1
     optimizer_fixed_nu=2,2,1,0,0
     optimizer_max_l=4
+    capture_reference=fixed_prefix
+    fixed_basis=2s2p1d
+    initial_source=$source_initial
+    initial_source_sha=$source_initial_sha
     initial=$source_initial
     ;;
   no_f)
@@ -91,7 +97,22 @@ case "$candidate_profile" in
     optimizer_nu=3,3,2,0,0
     optimizer_fixed_nu=2,2,1,0,0
     optimizer_max_l=4
+    capture_reference=fixed_prefix
+    fixed_basis=2s2p1d
+    initial_source=$source_initial
+    initial_source_sha=$source_initial_sha
     initial=$RUN_ROOT/input/C_3s3p2d_joint_initial.txt
+    ;;
+  relaxed_dzp)
+    candidate_label=3s3p2d_relaxed_dzp
+    optimizer_nu=3,3,2,0,0
+    optimizer_fixed_nu=1,1,0,0,0
+    optimizer_max_l=4
+    capture_reference=initial_candidate
+    fixed_basis=1s1p
+    initial_source=$source_tzdp
+    initial_source_sha=$source_tzdp_sha
+    initial=$source_tzdp
     ;;
   *)
     echo "unsupported candidate profile: $candidate_profile" >&2
@@ -101,8 +122,8 @@ esac
 
 test -s "$optimizer"
 test -s "$truncator"
-test -s "$source_initial"
-test "$(sha256sum "$source_initial" | awk '{print $1}')" = "$source_initial_sha"
+test -s "$initial_source"
+test "$(sha256sum "$initial_source" | awk '{print $1}')" = "$initial_source_sha"
 test -s "$atomic_response"
 test "$(sha256sum "$atomic_response" | awk '{print $1}')" = "$atomic_response_sha"
 test -s "$atomic_source"
@@ -166,7 +187,8 @@ test -s "$initial"
   echo siab_commit=$EXPECTED_SIAB_COMMIT
   echo candidate=$candidate_label
   echo candidate_profile=$candidate_profile
-  echo fixed_basis=2s2p1d
+  echo fixed_basis=$fixed_basis
+  echo occupied_capture_reference=$capture_reference
   echo objective='0.5*C_atom_normalized_loss+0.5*C_solid_normalized_loss'
   echo solid_training_q_indices=1,22
   echo atomic_frequency_count=16
@@ -175,7 +197,7 @@ test -s "$initial"
   echo python_executable=$python_exe
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$SLURM_CPUS_PER_TASK
-  sha256sum "$0" "$optimizer" "$truncator" "$source_initial" "$initial" \
+  sha256sum "$0" "$optimizer" "$truncator" "$initial_source" "$initial" \
     "$atomic_response" "$atomic_source" \
     "$pair_gate" "$q1/manifest.dat" "$q2/manifest.dat" \
     "$runtime/site-packages/torch/lib/libtorch_cpu.so"
@@ -212,7 +234,7 @@ export OMP_PLACES=cores
     --plateau-relative-improvement 1e-7 \
     --maximum-backtracks 40 \
     --block-cache-workers 8 \
-    --occupied-capture-reference fixed_prefix \
+    --occupied-capture-reference "$capture_reference" \
     --omitted-reference-projection-validation layout \
     > "$RUN_ROOT/optimize.log" 2>&1
 

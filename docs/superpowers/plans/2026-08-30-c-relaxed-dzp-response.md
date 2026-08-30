@@ -17,11 +17,11 @@
 - Modify: `SIAB/example_C_sternheimer/periodic_basis_optimization/submit_c_atom_solid_balanced_one_g_df.sh`
 - Modify: `SIAB/example_C_sternheimer/periodic_basis_optimization/tests/test_c_atom_solid_balanced_job.py`
 
-- [ ] Add a failing test requiring profile `relaxed_dzp`, SG15 TZDP hash `7ba114ee...`, `nu=3,3,2,0,0`, `fixed_nu=1,1,0,0,0`, and `occupied-capture-reference initial_candidate`.
-- [ ] Run `python3 -m unittest SIAB.example_C_sternheimer.periodic_basis_optimization.tests.test_c_atom_solid_balanced_job -v` and confirm the new test fails.
-- [ ] Implement the profile without changing `one_g` or `no_f`; preserve empty high-l layout columns and record the initial orbital hash.
-- [ ] Run the focused test and the full periodic optimizer test directory.
-- [ ] Commit with Codex as author and AroundPeking as committer.
+- [x] Add a failing test requiring profile `relaxed_dzp`, SG15 TZDP coefficient hash `b58a2183...`, `nu=3,3,2,0,0`, `fixed_nu=1,1,0,0,0`, and `occupied-capture-reference initial_candidate`.
+- [x] Run `python3 -m unittest SIAB.example_C_sternheimer.periodic_basis_optimization.tests.test_c_atom_solid_balanced_job -v` and confirm the new test fails.
+- [x] Implement the profile without changing `one_g` or `no_f`; preserve empty high-l layout columns and record the initial coefficient hash.
+- [x] Run the focused test and the full periodic optimizer test directory.  The focused tests pass; dependency-bearing legacy tests require the pinned remote PyTorch/NumPy runtime and are covered by the pilot.
+- [x] Commit with Codex as author and AroundPeking as committer.
 
 ### Task 2: Export one immutable relaxed candidate
 
@@ -76,4 +76,3 @@
 - [ ] Run the PBE gate and release the SOS chain only if it passes.
 - [ ] Report the original and optimized C atom PBE energy, diamond PBE energy per C, PBE binding energy, RPA correlation binding contribution, total SOS binding energy, and Delta-ST difference.
 - [ ] Update and compile the canonical TeX note, inspect changed pages, and commit validated documentation.
-

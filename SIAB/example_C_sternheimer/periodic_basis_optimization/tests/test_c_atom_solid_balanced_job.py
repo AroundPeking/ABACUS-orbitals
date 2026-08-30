@@ -41,10 +41,27 @@ class CAtomSolidBalancedJobTest(unittest.TestCase):
         self.assertIn("--preserve-channel-layout", text)
         self.assertIn("#SBATCH --time=1-00:00:00", text)
 
+    def test_runner_supports_relaxed_dzp_from_original_tzdp(self):
+        text = RUNNER.read_text(encoding="ascii")
+        self.assertIn("relaxed_dzp)", text)
+        self.assertIn("candidate_label=3s3p2d_relaxed_dzp", text)
+        self.assertIn("optimizer_nu=3,3,2,0,0", text)
+        self.assertIn("optimizer_fixed_nu=1,1,0,0,0", text)
+        self.assertIn(
+            "SG15_v1.0/Orbitals_v2.0/C_TZDP/info/10/ORBITAL_RESULTS.txt",
+            text,
+        )
+        self.assertIn(
+            "b58a2183c3028e46e6f4bc55b0f21531f1253275d5c2f2c4ee4e27676c1b55f4",
+            text,
+        )
+        self.assertIn("capture_reference=initial_candidate", text)
+        self.assertIn('--occupied-capture-reference "$capture_reference"', text)
+
     def test_submitter_is_duplicate_safe_and_has_two_modes(self):
         text = SUBMITTER.read_text(encoding="ascii")
         self.assertIn("pilot|production", text)
-        self.assertIn("one_g|no_f", text)
+        self.assertIn("one_g|no_f|relaxed_dzp", text)
         self.assertIn("CANDIDATE_PROFILE", text)
         self.assertIn('test ! -e "$receipt"', text)
         self.assertIn('test ! -e "$run_root"', text)
