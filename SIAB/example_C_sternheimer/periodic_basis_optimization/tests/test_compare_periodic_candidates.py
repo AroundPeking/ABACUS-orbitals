@@ -29,9 +29,33 @@ class ComparePeriodicCandidatesTest(unittest.TestCase):
         expected = math.log(1.5) - 0.5 + math.log(2.0) - 1.0
         self.assertAlmostEqual(MODULE.trace_log_value(response), expected, places=14)
 
-        invalid = torch.diag(torch.tensor([1.0], dtype=torch.complex128))
-        with self.assertRaisesRegex(RuntimeError, "trace-log"):
-            MODULE.trace_log_value(invalid)
+        invalid = torch.diag(torch.tensor([1.25], dtype=torch.complex128))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"candidate trace-log argument is not positive.*"
+            r"minimum_argument=-0.25.*maximum_eigenvalue=1.25",
+        ):
+            MODULE.trace_log_value(invalid, name="candidate")
+
+    def test_response_metrics_validates_reference_before_candidate(self):
+        invalid_reference = torch.tensor(
+            [[[1.50 + 0.0j]]], dtype=torch.complex128
+        )
+        invalid_candidate = torch.tensor(
+            [[[2.00 + 0.0j]]], dtype=torch.complex128
+        )
+        weights = torch.tensor([1.0], dtype=torch.float64)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"reference frequency 0 trace-log argument is not positive.*"
+            r"maximum_eigenvalue=1.5",
+        ):
+            MODULE.response_metrics(
+                invalid_candidate,
+                invalid_reference,
+                weights,
+            )
 
     def test_reports_each_frequency_and_weighted_pi_error(self):
         reference = torch.tensor(

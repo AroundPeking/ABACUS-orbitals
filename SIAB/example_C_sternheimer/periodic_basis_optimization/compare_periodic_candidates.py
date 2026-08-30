@@ -63,14 +63,24 @@ def validate_occupied_capture_floor(value):
     return float(value)
 
 
-def trace_log_value(response):
+def trace_log_value(response, *, name="response"):
     if response.ndim != 2 or response.shape[0] != response.shape[1]:
         raise ValueError("trace-log response must be square")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("trace-log response name must be nonempty")
     hermitian = 0.5 * (response + response.transpose(-2, -1).conj())
     eigenvalue = torch.linalg.eigvalsh(hermitian)
     argument = 1.0 - eigenvalue
     if not bool(torch.isfinite(argument).all()) or bool(torch.any(argument <= 0.0)):
-        raise RuntimeError("trace-log argument is not positive")
+        minimum_argument = float(torch.min(argument).detach())
+        minimum_eigenvalue = float(torch.min(eigenvalue).detach())
+        maximum_eigenvalue = float(torch.max(eigenvalue).detach())
+        raise RuntimeError(
+            f"{name} trace-log argument is not positive: "
+            f"minimum_argument={minimum_argument:.17g}, "
+            f"minimum_eigenvalue={minimum_eigenvalue:.17g}, "
+            f"maximum_eigenvalue={maximum_eigenvalue:.17g}"
+        )
     return float(torch.sum(torch.log(argument) + eigenvalue).detach())
 
 
@@ -96,8 +106,18 @@ def response_metrics(candidate, reference, weights):
         )
         numerator_by_frequency.append(numerator)
         denominator_by_frequency.append(denominator)
-        trace_candidate.append(trace_log_value(candidate[ifrequency]))
-        trace_reference.append(trace_log_value(reference[ifrequency]))
+        trace_reference.append(
+            trace_log_value(
+                reference[ifrequency],
+                name=f"reference frequency {ifrequency}",
+            )
+        )
+        trace_candidate.append(
+            trace_log_value(
+                candidate[ifrequency],
+                name=f"candidate frequency {ifrequency}",
+            )
+        )
 
     weight = [float(value) for value in weights]
     weighted_numerator = sum(
