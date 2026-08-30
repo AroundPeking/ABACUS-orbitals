@@ -14,7 +14,7 @@ set -euo pipefail
 : "${SIAB_COMMIT:?SIAB_COMMIT is required}"
 
 test -d "$REPO_ROOT/.git" || test -f "$REPO_ROOT/.git"
-test "$(git -C "$REPO_ROOT" rev-parse HEAD)" = "$SIAB_COMMIT"
+test "$(cat "$REPO_ROOT/.git/HEAD")" = "$SIAB_COMMIT"
 test ! -e "$RUN_ROOT/result"
 mkdir "$RUN_ROOT/result"
 

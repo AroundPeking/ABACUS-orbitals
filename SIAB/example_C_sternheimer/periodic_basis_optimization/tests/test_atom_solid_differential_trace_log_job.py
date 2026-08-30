@@ -41,7 +41,7 @@ class AtomSolidDifferentialTraceLogJobTest(unittest.TestCase):
     def test_job_requires_an_immutable_deployment_and_new_run_root(self):
         text = SCRIPT.read_text(encoding="ascii")
 
-        self.assertIn('test "$(git -C "$REPO_ROOT" rev-parse HEAD)" = "$SIAB_COMMIT"', text)
+        self.assertIn('test "$(cat "$REPO_ROOT/.git/HEAD")" = "$SIAB_COMMIT"', text)
         self.assertIn('test ! -e "$RUN_ROOT/result"', text)
         self.assertIn('mkdir "$RUN_ROOT/result"', text)
 
