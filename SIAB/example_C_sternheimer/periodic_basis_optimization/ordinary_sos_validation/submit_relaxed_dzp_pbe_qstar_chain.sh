@@ -10,11 +10,15 @@ candidate_root=$1
 run_root=$2
 source_root=$3
 scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
+manifest_reader=$scripts/read_periodic_candidate_manifest.py
+python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 receipt=${run_root}.SUBMISSION.txt
 
 test -d "$candidate_root" && test ! -e "$run_root" && test ! -e "$receipt" && test -d "$source_root"
-test -s "$candidate_root/CANDIDATE.json"
-grep -q '"pre_pbe_gate": "pass"' "$candidate_root/CANDIDATE.json"
+test -s "$candidate_root/CANDIDATE.json" && test -s "$manifest_reader"
+grep -qx 'status=success' "$candidate_root/provenance.txt"
+mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
+test "${#candidate[@]}" -eq 5
 for script in \
   run_relaxed_dzp_pbe_gate_55d25e3c9.slurm \
   run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm \

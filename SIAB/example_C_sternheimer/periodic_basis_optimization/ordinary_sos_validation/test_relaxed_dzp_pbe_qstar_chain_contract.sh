@@ -16,5 +16,6 @@ grep -q 'run_threshold_candidate_solid_qstar_sos_d4810f73.slurm' "$submitter"
 grep -q 'run_threshold_candidate_qstar_binding_collect.slurm' "$submitter"
 grep -q 'test ! -e "$receipt"' "$submitter"
 grep -q 'sbatch --test-only' "$submitter"
-grep -Fq 'payload["profile"] in {"relaxed_dzp", "fixed_dzp"}' "$pbe"
+grep -q 'read_periodic_candidate_manifest.py' "$pbe"
+grep -q 'read_periodic_candidate_manifest.py' "$submitter"
 echo RELAXED_DZP_PBE_QSTAR_CHAIN_CONTRACT_OK

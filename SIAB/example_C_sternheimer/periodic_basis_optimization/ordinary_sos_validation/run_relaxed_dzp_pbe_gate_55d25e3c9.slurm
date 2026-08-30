@@ -19,6 +19,7 @@ run_root=${RUN_ROOT:?missing immutable run root}
 source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 manifest=$candidate_root/CANDIDATE.json
 collector=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/collect_relaxed_dzp_pbe_gate.py
+manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 atom_source=/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/original-tzdp-atom-allband-sos-recovery-8e5cfb5d
 solid_source=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1
 abacus=/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artifacts/job3137534/abacus_3p
@@ -30,29 +31,14 @@ test "${SLURM_JOB_PARTITION:?}" = p1
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
-test -s "$manifest" && test -s "$collector"
+test -s "$manifest" && test -s "$collector" && test -s "$manifest_reader"
 test -x "$abacus" && test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
-mapfile -t candidate < <("$python" - "$manifest" "$candidate_root" <<'PY'
-import hashlib
-import json
-import pathlib
-import sys
-
-payload = json.load(open(sys.argv[1], encoding="ascii"))
-root = pathlib.Path(sys.argv[2]).resolve()
-assert payload["status"] == "success"
-assert payload["profile"] in {"relaxed_dzp", "fixed_dzp"}
-assert payload["nu"] == [3, 3, 2, 0, 0]
-assert payload["ao_count_atom"] == 22
-orbital = (root / payload["orbital_filename"]).resolve()
-assert orbital.parent == root
-assert hashlib.sha256(orbital.read_bytes()).hexdigest() == payload["orbital_sha256"]
-print(orbital.name)
-print(payload["orbital_sha256"])
-PY
-)
-orbital_name=${candidate[0]}
-orbital_sha=${candidate[1]}
+mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
+test "${candidate[0]}" = "$manifest"
+orbital_name=${candidate[1]}
+orbital_sha=${candidate[2]}
+nao_atom=${candidate[3]}
+orbital_layout=${candidate[4]}
 orbital=$candidate_root/$orbital_name
 
 export LD_LIBRARY_PATH=/data/home/df_iopcas_ghj/app/elpa-build/lib:/data/app/libxc/6.2.2-intel/lib:${LD_LIBRARY_PATH:-}
@@ -134,12 +120,6 @@ prepare_side() {
   set_input_key "$input" ny "$ny"
   set_input_key "$input" nz "$nz"
   if test "$side" = atom; then
-    mkdir -p "$out" "$side_work/restart_input_snapshot"
-    for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
-      test -s "$atom_source/OUT.C_ATOM_ORIGINAL_TZDP_PCA/$name"
-      cp "$atom_source/OUT.C_ATOM_ORIGINAL_TZDP_PCA/$name" "$out/$name"
-      cp "$atom_source/OUT.C_ATOM_ORIGINAL_TZDP_PCA/$name" "$side_work/restart_input_snapshot/$name"
-    done
     set_input_key "$input" nelec 4
     set_input_key "$input" nspin 2
     set_input_key "$input" nupdown 2
@@ -148,9 +128,9 @@ prepare_side() {
     set_input_key "$input" kpar 1
     set_input_key "$input" smearing_method fixed
     set_input_key "$input" ocp 1
-    set_input_key "$input" ocp_set "3*1 19*0 1*1 21*0"
-    set_input_key "$input" init_wfc file
-    set_input_key "$input" init_chg file
+    set_input_key "$input" ocp_set "3*1 $((nbands - 3))*0 1*1 $((nbands - 1))*0"
+    set_input_key "$input" init_wfc atomic
+    set_input_key "$input" init_chg atomic
   else
     set_input_key "$input" nspin 1
     set_input_key "$input" symmetry -1
@@ -185,15 +165,17 @@ PY
 mkdir -p "$work"
 {
   echo status=running
-  echo purpose=relaxed_dzp_atom_solid_pbe_reference_gate
+  echo purpose=candidate_atom_solid_pbe_reference_gate
   echo reference_basis=original_unoptimized_sg15_tzdp
+  echo orbital_layout=$orbital_layout
+  echo nao_atom=$nao_atom
   echo selected_orbital_sha256=$orbital_sha
   echo tolerance_ev=0.010
-  sha256sum "$0" "$manifest" "$collector" "$abacus" "$orbital"
+  sha256sum "$0" "$manifest" "$collector" "$manifest_reader" "$abacus" "$orbital"
 } > "$work/provenance.txt"
 
-prepare_side atom "$atom_source" C_RELAXED_DZP_PBE_ATOM 22 135 135 135
-prepare_side solid "$solid_source" C_RELAXED_DZP_PBE_SOLID 44 24 24 24
+prepare_side atom "$atom_source" C_CANDIDATE_PBE_ATOM "$nao_atom" 135 135 135
+prepare_side solid "$solid_source" C_CANDIDATE_PBE_SOLID "$((2 * nao_atom))" 24 24 24
 atom_energy=$(cat "$work/atom/PBE_ENERGY_EV")
 solid_energy=$(cat "$work/solid/PBE_ENERGY_EV")
 "$python" "$collector" \

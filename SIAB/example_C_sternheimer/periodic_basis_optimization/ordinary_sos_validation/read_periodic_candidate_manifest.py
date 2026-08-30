@@ -9,6 +9,16 @@ import json
 from pathlib import Path
 
 
+STAGED_LAYOUTS = {
+    "relaxed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
+    "fixed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
+    "nested_tzdp_2s2p1d": ([2, 2, 1], 13, "2s2p1d"),
+    "nested_tzdp_3s2p1d": ([3, 2, 1], 14, "3s2p1d"),
+    "nested_tzdp_2s3p1d": ([2, 3, 1], 16, "2s3p1d"),
+    "nested_tzdp_2s2p2d": ([2, 2, 2], 18, "2s2p2d"),
+}
+
+
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -19,18 +29,15 @@ def read_candidate(root: Path) -> dict:
     legacy = root / "TRUNCATION.json"
     if staged.is_file() and not legacy.exists():
         payload = json.loads(staged.read_text(encoding="ascii"))
-        if payload.get("status") != "success" or payload.get("profile") not in {
-            "relaxed_dzp",
-            "fixed_dzp",
-        }:
+        profile = payload.get("profile")
+        if payload.get("status") != "success" or profile not in STAGED_LAYOUTS:
             raise ValueError("unsupported staged candidate")
-        if payload.get("nu") != [3, 3, 2, 0, 0] or payload.get("ao_count_atom") != 22:
-            raise ValueError("staged DZP layout mismatch")
+        expected_nu, nao, layout = STAGED_LAYOUTS[profile]
+        if payload.get("nu") != expected_nu or payload.get("ao_count_atom") != nao:
+            raise ValueError("staged candidate layout mismatch")
         orbital = (root / payload["orbital_filename"]).resolve(strict=True)
         expected_sha = payload["orbital_sha256"]
-        layout = "3s3p2d"
         manifest = staged
-        nao = 22
     elif legacy.is_file() and not staged.exists():
         payload = json.loads(legacy.read_text(encoding="ascii"))
         if payload.get("source_nu") != [3, 3, 2, 1, 1]:

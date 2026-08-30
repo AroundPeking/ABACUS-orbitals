@@ -8,6 +8,33 @@ from read_periodic_candidate_manifest import read_candidate
 
 
 class ReadPeriodicCandidateManifestTest(unittest.TestCase):
+    def test_reads_nested_tzdp_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            orbital = root / "nested.orb"
+            orbital.write_text("orbital\n", encoding="ascii")
+            digest = hashlib.sha256(orbital.read_bytes()).hexdigest()
+            (root / "CANDIDATE.json").write_text(
+                json.dumps({"status": "success", "profile": "nested_tzdp_2s2p1d", "nu": [2, 2, 1], "ao_count_atom": 13, "orbital_filename": orbital.name, "orbital_sha256": digest}),
+                encoding="ascii",
+            )
+            result = read_candidate(root)
+            self.assertEqual(result["nao_atom"], 13)
+            self.assertEqual(result["layout"], "2s2p1d")
+
+    def test_rejects_unapproved_nested_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            orbital = root / "nested.orb"
+            orbital.write_text("orbital\n", encoding="ascii")
+            digest = hashlib.sha256(orbital.read_bytes()).hexdigest()
+            (root / "CANDIDATE.json").write_text(
+                json.dumps({"status": "success", "profile": "nested_tzdp_1s1p1d", "nu": [1, 1, 1], "ao_count_atom": 9, "orbital_filename": orbital.name, "orbital_sha256": digest}),
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(ValueError, "unsupported staged candidate"):
+                read_candidate(root)
+
     def test_reads_relaxed_dzp_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

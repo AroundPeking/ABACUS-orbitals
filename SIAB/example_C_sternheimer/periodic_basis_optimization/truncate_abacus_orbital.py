@@ -9,6 +9,7 @@ from pathlib import Path
 
 LMAX_RE = re.compile(r"^(Lmax\s+)(\d+)(\s*)$")
 NU_RE = re.compile(r"^Number of ([A-Z])orbital-->\s+(\d+)\s*$")
+NU_WRITE_RE = re.compile(r"^(Number of [A-Z]orbital-->\s+)(\d+)(\s*)$")
 MESH_RE = re.compile(r"^Mesh\s+(\d+)\s*$")
 BLOCK_HEADER = "                Type                   L                   N"
 BLOCK_INDEX_RE = re.compile(r"^\s*0\s+(\d+)\s+(\d+)\s*$")
@@ -67,7 +68,7 @@ def _parse_radial_blocks(lines, mesh):
     return blocks
 
 
-def truncate_abacus_orbital(source, output, *, target_lmax):
+def select_abacus_orbital_channels(source, output, *, target_nu):
     source = Path(source)
     output = Path(output)
     if output.exists():
@@ -77,10 +78,18 @@ def truncate_abacus_orbital(source, output, *, target_lmax):
 
     lines = source.read_text(encoding="ascii").splitlines()
     source_lmax, mesh, nu_entries = _parse_header(lines)
-    if target_lmax < 0 or target_lmax >= source_lmax:
-        raise ValueError("target_lmax must be non-negative and smaller than source Lmax")
-
     source_nu = [entry[2] for entry in nu_entries]
+    target_nu = [int(count) for count in target_nu]
+    if not target_nu or len(target_nu) > len(source_nu):
+        raise ValueError("target_nu must contain one prefix count per retained channel")
+    if any(count <= 0 for count in target_nu):
+        raise ValueError("target_nu counts must be positive")
+    if any(count > source_nu[l_value] for l_value, count in enumerate(target_nu)):
+        raise ValueError("target_nu cannot exceed the source channel counts")
+    if target_nu == source_nu:
+        raise ValueError("target_nu must remove at least one source radial function")
+    target_lmax = len(target_nu) - 1
+
     blocks = _parse_radial_blocks(lines, mesh)
     expected_blocks = sum(source_nu)
     if len(blocks) != expected_blocks:
@@ -104,13 +113,20 @@ def truncate_abacus_orbital(source, output, *, target_lmax):
         if match:
             header.append("{}{}{}".format(match.group(1), target_lmax, match.group(3)))
             continue
-        if index in nu_line_indices and nu_line_indices[index] > target_lmax:
+        if index in nu_line_indices:
+            l_value = nu_line_indices[index]
+            if l_value > target_lmax:
+                continue
+            match = NU_WRITE_RE.match(line)
+            if not match:
+                raise ValueError("invalid orbital channel-count header")
+            header.append("{}{}{}".format(match.group(1), target_nu[l_value], match.group(3)))
             continue
         header.append(line)
 
     output_lines = list(header)
-    for start, stop, l_value, _n_value in blocks:
-        if l_value <= target_lmax:
+    for start, stop, l_value, n_value in blocks:
+        if l_value <= target_lmax and n_value < target_nu[l_value]:
             output_lines.extend(lines[start:stop])
     output.write_text("\n".join(output_lines).rstrip() + "\n", encoding="ascii")
 
@@ -121,31 +137,64 @@ def truncate_abacus_orbital(source, output, *, target_lmax):
         "target_lmax": target_lmax,
         "mesh": mesh,
         "source_nu": source_nu,
-        "output_nu": source_nu[:target_lmax + 1],
+        "output_nu": target_nu,
         "source_nao": sum((2 * l_value + 1) * count for l_value, count in enumerate(source_nu)),
         "output_nao": sum(
             (2 * l_value + 1) * count
-            for l_value, count in enumerate(source_nu[:target_lmax + 1])
+            for l_value, count in enumerate(target_nu)
         ),
     }
+
+
+def truncate_abacus_orbital(source, output, *, target_lmax):
+    source = Path(source)
+    lines = source.read_text(encoding="ascii").splitlines()
+    source_lmax, _mesh, nu_entries = _parse_header(lines)
+    if target_lmax < 0 or target_lmax >= source_lmax:
+        raise ValueError("target_lmax must be non-negative and smaller than source Lmax")
+    source_nu = [entry[2] for entry in nu_entries]
+    return select_abacus_orbital_channels(
+        source,
+        output,
+        target_nu=source_nu[:target_lmax + 1],
+    )
+
+
+def _parse_target_nu(value):
+    try:
+        counts = [int(token) for token in value.split(",")]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("target-nu must be comma-separated integers") from error
+    if not counts or any(count <= 0 for count in counts):
+        raise argparse.ArgumentTypeError("target-nu counts must be positive")
+    return counts
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--target-lmax", type=int, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--target-lmax", type=int)
+    target.add_argument("--target-nu", type=_parse_target_nu)
     parser.add_argument("--report", type=Path)
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    report = truncate_abacus_orbital(
-        args.input,
-        args.output,
-        target_lmax=args.target_lmax,
-    )
+    if args.target_nu is not None:
+        report = select_abacus_orbital_channels(
+            args.input,
+            args.output,
+            target_nu=args.target_nu,
+        )
+    else:
+        report = truncate_abacus_orbital(
+            args.input,
+            args.output,
+            target_lmax=args.target_lmax,
+        )
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.report:
         if args.report.exists():
