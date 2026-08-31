@@ -17,6 +17,7 @@ module load oneapi/2024.2
 candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
 source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
+atom_restart_source=${ATOM_RESTART_SOURCE:-}
 manifest=$candidate_root/CANDIDATE.json
 collector=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/collect_relaxed_dzp_pbe_gate.py
 manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
@@ -43,6 +44,12 @@ orbital_sha=${candidate[2]}
 nao_atom=${candidate[3]}
 orbital_layout=${candidate[4]}
 orbital=$candidate_root/$orbital_name
+if test -n "$atom_restart_source"; then
+  test -d "$atom_restart_source"
+  for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
+    test -s "$atom_restart_source/$name"
+  done
+fi
 
 export LD_LIBRARY_PATH=/data/home/df_iopcas_ghj/app/elpa-build/lib:/data/app/libxc/6.2.2-intel/lib:${LD_LIBRARY_PATH:-}
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -132,8 +139,25 @@ prepare_side() {
     set_input_key "$input" smearing_method fixed
     set_input_key "$input" ocp 1
     set_input_key "$input" ocp_set "3*1 $((nbands - 3))*0 1*1 $((nbands - 1))*0"
-    set_input_key "$input" init_wfc atomic
-    set_input_key "$input" init_chg atomic
+    set_input_key "$input" out_chg 1
+    set_input_key "$input" out_wfc_lcao 1
+    set_input_key "$input" out_app_flag 1
+    if test -n "$atom_restart_source"; then
+      mkdir -p "$out" "$side_work/restart_input_snapshot"
+      for name in wfs1_nao.txt wfs2_nao.txt chgs1.cube chgs2.cube; do
+        cp "$atom_restart_source/$name" "$out/$name"
+        cp "$atom_restart_source/$name" "$side_work/restart_input_snapshot/$name"
+      done
+      set_input_key "$input" init_wfc file
+      set_input_key "$input" init_chg file
+      set_input_key "$input" mixing_beta 0.2
+      set_input_key "$input" mixing_beta_mag 0.2
+      set_input_key "$input" mixing_gg0 0.0
+      set_input_key "$input" mixing_gg0_mag 0.0
+    else
+      set_input_key "$input" init_wfc atomic
+      set_input_key "$input" init_chg atomic
+    fi
   else
     set_input_key "$input" nspin 1
     set_input_key "$input" symmetry -1
@@ -148,6 +172,43 @@ prepare_side() {
   test -s "$out/running_scf.log"
   grep -q '#SCF IS CONVERGED#' "$out/running_scf.log"
   ! grep -q '!!SCF IS NOT CONVERGED!!' "$out/running_scf.log"
+  if test "$side" = atom; then
+    "$python" - "$out/eig_occ.txt" "$nbands" <<'PY'
+import math
+import pathlib
+import re
+import sys
+
+states = {1: [], 2: []}
+spin = None
+for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines():
+    match = re.search(r"spin=(\d+)", line)
+    if match:
+        spin = int(match.group(1))
+        continue
+    fields = line.split()
+    if spin in states and len(fields) == 3 and fields[0].isdigit():
+        states[spin].append(float(fields[2]))
+nbands = int(sys.argv[2])
+valid = (
+    all(len(values) == nbands for values in states.values())
+    and states[1][:3] == [1.0, 1.0, 1.0]
+    and all(abs(value) <= 1.0e-12 for value in states[1][3:])
+    and states[2][0] == 1.0
+    and all(abs(value) <= 1.0e-12 for value in states[2][1:])
+    and math.isclose(sum(states[1]), 3.0)
+    and math.isclose(sum(states[2]), 1.0)
+)
+if not valid:
+    raise SystemExit("atom occupations are not the intended 3/1 state")
+PY
+    if test -n "$atom_restart_source"; then
+      for spin in 1 2; do
+        grep -Eq "Read NAO wave functions from .*wfs${spin}_nao.txt" "$side_work/abacus.out"
+        grep -Eq "Read in electron density: .*chgs${spin}\.cube|Read electron density from file: .*chgs${spin}\.cube" "$out/running_scf.log"
+      done
+    fi
+  fi
   "$python" - "$out/running_scf.log" "$side_work/PBE_ENERGY_EV" <<'PY'
 import math
 import pathlib
@@ -173,8 +234,14 @@ mkdir -p "$work"
   echo orbital_layout=$orbital_layout
   echo nao_atom=$nao_atom
   echo selected_orbital_sha256=$orbital_sha
+  echo atom_restart_source=${atom_restart_source:-none}
+  echo atom_restart_mixing_beta=$(test -n "$atom_restart_source" && echo 0.2 || echo original)
   echo tolerance_ev=0.010
   sha256sum "$0" "$manifest" "$collector" "$manifest_reader" "$abacus" "$orbital"
+  if test -n "$atom_restart_source"; then
+    sha256sum "$atom_restart_source"/wfs1_nao.txt "$atom_restart_source"/wfs2_nao.txt \
+      "$atom_restart_source"/chgs1.cube "$atom_restart_source"/chgs2.cube
+  fi
 } > "$work/provenance.txt"
 
 prepare_side atom "$atom_source" C_CANDIDATE_PBE_ATOM "$nao_atom" 135 135 135
