@@ -19,6 +19,8 @@ trap 'status=$?; echo "C_CONTROLLED_F_GATE_FAILED line=$LINENO command=$BASH_COM
 : "${CANDIDATE_ROOT:?missing controlled f candidate root}"
 : "${GATE_ROOT:?missing controlled f gate root}"
 second_primitive_amplitude=${SECOND_PRIMITIVE_AMPLITUDE:-0}
+damping_radius_bohr=${F_DAMPING_RADIUS_BOHR:-}
+damping_power=${F_DAMPING_POWER:-}
 
 case "${SLURM_JOB_PARTITION:?}" in
   p1|48cp2) ;;
@@ -70,17 +72,24 @@ export OMP_PLACES=cores
 mkdir -p "$GATE_ROOT"
 {
   echo status=running
-  echo purpose=controlled_lowest_f_q3_and_spectrum_gate
+  echo purpose=controlled_single_f_q3_and_spectrum_gate
   echo source_commit=$EXPECTED_SIAB_COMMIT
   echo base_candidate_root=$BASE_CANDIDATE_ROOT
   echo selected_iq=43
   echo second_primitive_amplitude=$second_primitive_amplitude
+  echo damping_radius_bohr=${damping_radius_bohr:-none}
+  echo damping_power=${damping_power:-none}
   sha256sum "$preparer" "$comparator" "$analyzer" "$original" "$base_coefficients" "$q3/manifest.dat" "$q3/status.dat"
 } > "$GATE_ROOT/provenance.txt"
 
+profile_args=(--second-primitive-amplitude "$second_primitive_amplitude")
+if test -n "$damping_radius_bohr" || test -n "$damping_power"; then
+  test -n "$damping_radius_bohr" && test -n "$damping_power"
+  test "$second_primitive_amplitude" = 0
+  profile_args=(--damping-radius-bohr "$damping_radius_bohr" --damping-power "$damping_power")
+fi
 "$python_exe" "$preparer" --source "$base_coefficients" --root "$CANDIDATE_ROOT" \
-  --second-primitive-amplitude "$second_primitive_amplitude" \
-  > "$GATE_ROOT/prepare.out"
+  "${profile_args[@]}" > "$GATE_ROOT/prepare.out"
 
 candidate_coefficients=$(
   "$python_exe" - "$CANDIDATE_ROOT/CANDIDATE.json" "$CANDIDATE_ROOT" <<'PY'

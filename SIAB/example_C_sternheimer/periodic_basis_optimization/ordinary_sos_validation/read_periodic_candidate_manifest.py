@@ -15,6 +15,7 @@ STAGED_LAYOUTS = {
     "interpolated_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "controlled_lowest_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_contracted_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
+    "controlled_tail_damped_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "nested_tzdp_2s2p1d": ([2, 2, 1], 13, "2s2p1d"),
     "nested_tzdp_3s2p1d": ([3, 2, 1], 14, "3s2p1d"),
     "nested_tzdp_2s3p1d": ([2, 3, 1], 16, "2s3p1d"),

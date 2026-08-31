@@ -127,6 +127,72 @@ class PrepareControlledFCandidateTest(unittest.TestCase):
             )
             self.assertLess(contracted["f_diagnostics"]["numerical_kinetic_energy_ry"], 0.55)
 
+    def test_writes_smoothly_tail_damped_f_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            generator = torch.Generator().manual_seed(47)
+            coefficients = {
+                "C": [
+                    torch.randn(31, count, generator=generator, dtype=torch.float64)
+                    if count
+                    else torch.empty(31, 0, dtype=torch.float64)
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            write_periodic_optimizer_coefficients(source, coefficients)
+            lowest = prepare_candidate(source=source, root=parent / "lowest")
+            damped = prepare_candidate(
+                source=source,
+                root=parent / "damped",
+                damping_radius_bohr=7.5,
+                damping_power=4.0,
+            )
+
+            self.assertEqual(damped["profile"], "controlled_tail_damped_f")
+            self.assertEqual(damped["damping_radius_bohr"], 7.5)
+            self.assertEqual(damped["damping_power"], 4.0)
+            self.assertEqual(damped["f_diagnostics"]["interior_node_count"], 0)
+            self.assertLess(
+                damped["f_diagnostics"]["mean_radius_bohr"],
+                lowest["f_diagnostics"]["mean_radius_bohr"],
+            )
+            self.assertLess(
+                damped["f_diagnostics"]["tail_probability_r_ge_9_bohr"],
+                lowest["f_diagnostics"]["tail_probability_r_ge_9_bohr"],
+            )
+            self.assertLess(damped["damping_projection_relative_l2_error"], 0.001)
+            self.assertLess(damped["f_diagnostics"]["numerical_kinetic_energy_ry"], 1.0)
+
+            restored = read_periodic_optimizer_coefficients(
+                parent / "damped" / damped["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 1, 0),
+            )
+            for actual, expected in zip(restored["C"][:3], coefficients["C"][:3]):
+                self.assertTrue(torch.equal(actual, expected))
+
+    def test_refuses_mixed_contraction_and_damping_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            coefficients = {
+                "C": [
+                    torch.zeros(31, count, dtype=torch.float64)
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            write_periodic_optimizer_coefficients(source, coefficients)
+            with self.assertRaises(ValueError):
+                prepare_candidate(
+                    source=source,
+                    root=parent / "candidate",
+                    second_primitive_amplitude=0.1,
+                    damping_radius_bohr=7.5,
+                    damping_power=4.0,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
