@@ -29,7 +29,10 @@ full_q_index=${q_indices[$((task - 1))]}
 work=$run_root/solid-grid/q${full_q_index}
 suffix=C_DIAMOND_THRESHOLD_Q${full_q_index}
 
-test "${SLURM_JOB_PARTITION:?}" = p1
+case "${SLURM_JOB_PARTITION:?}" in
+  p1|48cp2) ;;
+  *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
+esac
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test "$task" -ge 1 && test "$task" -le 8

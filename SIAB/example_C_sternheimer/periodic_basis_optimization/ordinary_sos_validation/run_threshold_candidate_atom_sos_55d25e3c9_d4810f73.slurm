@@ -32,7 +32,10 @@ suffix=C_ATOM_THRESHOLD_CANDIDATE_PCA
 work=${ATOM_SOS_ROOT:-$run_root/atom}
 restart_source=${ATOM_RESTART_SOURCE:-}
 
-test "${SLURM_JOB_PARTITION:?}" = p1
+case "${SLURM_JOB_PARTITION:?}" in
+  p1|48cp2) ;;
+  *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
+esac
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"

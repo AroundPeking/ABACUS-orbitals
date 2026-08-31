@@ -34,7 +34,10 @@ q_indices=(1 2 3 6 7 8 11 28)
 
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
 test "${source_commit:0:8}" = "${source_root##*-}"
-test "${SLURM_JOB_PARTITION:?}" = p1
+case "${SLURM_JOB_PARTITION:?}" in
+  p1|48cp2) ;;
+  *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
+esac
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"

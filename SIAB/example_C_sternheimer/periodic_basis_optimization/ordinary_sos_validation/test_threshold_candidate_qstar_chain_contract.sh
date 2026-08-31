@@ -14,6 +14,12 @@ for path in "$atom" "$solid_q" "$solid_sos" "$collector" "$submitter" "$recovery
   test -s "$path"
 done
 
+for job in "$atom" "$solid_q" "$solid_sos"; do
+  grep -Fq 'case "${SLURM_JOB_PARTITION:?}" in' "$job"
+  grep -Fq 'p1|48cp2)' "$job"
+  ! grep -Fq 'test "${SLURM_JOB_PARTITION:?}" = p1' "$job"
+done
+
 grep -q 'read_periodic_candidate_manifest.py' "$atom"
 grep -q 'set_input_key nbands "$nbands"' "$atom"
 grep -q 'remove_input_key rpa_pca_fixed_nu' "$atom"

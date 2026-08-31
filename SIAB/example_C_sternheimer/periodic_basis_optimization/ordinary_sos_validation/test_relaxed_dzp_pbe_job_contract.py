@@ -9,6 +9,9 @@ SCRIPT = ROOT / "run_relaxed_dzp_pbe_gate_55d25e3c9.slurm"
 class RelaxedDzpPbeJobContractTest(unittest.TestCase):
     def test_job_runs_dynamic_candidate_atom_and_solid_before_rpa(self):
         text = SCRIPT.read_text(encoding="ascii")
+        self.assertIn('case "${SLURM_JOB_PARTITION:?}" in', text)
+        self.assertIn("p1|48cp2)", text)
+        self.assertNotIn('test "${SLURM_JOB_PARTITION:?}" = p1', text)
         self.assertIn("CANDIDATE.json", text)
         self.assertIn("read_periodic_candidate_manifest.py", text)
         self.assertIn("collect_relaxed_dzp_pbe_gate.py", text)

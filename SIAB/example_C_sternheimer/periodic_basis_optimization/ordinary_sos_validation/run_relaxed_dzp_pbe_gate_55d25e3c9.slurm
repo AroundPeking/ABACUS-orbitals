@@ -27,7 +27,10 @@ expected_abacus_sha=25a9133c3facfe44d64d34f2696fe899b82e55be6e22c15c20ade0c00721
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 work=$run_root/pbe-gate
 
-test "${SLURM_JOB_PARTITION:?}" = p1
+case "${SLURM_JOB_PARTITION:?}" in
+  p1|48cp2) ;;
+  *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
+esac
 test "${SLURM_NTASKS:?}" = 1
 test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
