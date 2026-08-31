@@ -18,6 +18,7 @@ module load oneapi/2024.2
 source_root=${SOURCE_ROOT:?set SOURCE_ROOT to the prepared sparse-q reader root}
 run_root=${RUN_ROOT:?set RUN_ROOT to a new replay directory}
 librpa_debug=${LIBRPA_DEBUG:-f}
+source_commit=${SIAB_SOURCE_COMMIT:?set SIAB_SOURCE_COMMIT to the immutable deployment commit}
 librpa=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-logdet-bz-exact-d4810f73/build-df-intel/chi0_main.exe
 expected_librpa_sha=971c839ca3748782b9a6a8ee2f8e9ffd647b66f10448c611e1dba89bb44348cf
 
@@ -57,6 +58,7 @@ export I_MPI_FABRICS=shm:ofi
   echo librpa_sha256=$expected_librpa_sha
   echo n_bands_chi0=-1
   echo librpa_debug=$librpa_debug
+  echo source_commit=$source_commit
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
   sha256sum "$source_root/librpa.in" "$librpa"
