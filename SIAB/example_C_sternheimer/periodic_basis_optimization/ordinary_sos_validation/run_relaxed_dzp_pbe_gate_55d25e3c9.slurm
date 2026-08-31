@@ -18,6 +18,7 @@ candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
 source_root=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}
 atom_restart_source=${ATOM_RESTART_SOURCE:-}
+atom_restart_mixing_beta=${ATOM_RESTART_MIXING_BETA:-0.2}
 manifest=$candidate_root/CANDIDATE.json
 collector=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/collect_relaxed_dzp_pbe_gate.py
 manifest_reader=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
@@ -37,6 +38,14 @@ test "${SLURM_CPUS_PER_TASK:?}" = 40
 test ! -e "$work"
 test -s "$manifest" && test -s "$collector" && test -s "$manifest_reader"
 test -x "$abacus" && test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
+"$python" - "$atom_restart_mixing_beta" <<'PY'
+import math
+import sys
+
+value = float(sys.argv[1])
+if not math.isfinite(value) or not 0.0 < value <= 0.4:
+    raise SystemExit("ATOM_RESTART_MIXING_BETA must be finite and in (0, 0.4]")
+PY
 mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
 test "${candidate[0]}" = "$manifest"
 orbital_name=${candidate[1]}
@@ -150,8 +159,8 @@ prepare_side() {
       done
       set_input_key "$input" init_wfc file
       set_input_key "$input" init_chg file
-      set_input_key "$input" mixing_beta 0.2
-      set_input_key "$input" mixing_beta_mag 0.2
+      set_input_key "$input" mixing_beta "$atom_restart_mixing_beta"
+      set_input_key "$input" mixing_beta_mag "$atom_restart_mixing_beta"
       set_input_key "$input" mixing_gg0 0.0
       set_input_key "$input" mixing_gg0_mag 0.0
     else
@@ -235,7 +244,7 @@ mkdir -p "$work"
   echo nao_atom=$nao_atom
   echo selected_orbital_sha256=$orbital_sha
   echo atom_restart_source=${atom_restart_source:-none}
-  echo atom_restart_mixing_beta=$(test -n "$atom_restart_source" && echo 0.2 || echo original)
+  echo atom_restart_mixing_beta=$(test -n "$atom_restart_source" && echo "$atom_restart_mixing_beta" || echo original)
   echo tolerance_ev=0.010
   sha256sum "$0" "$manifest" "$collector" "$manifest_reader" "$abacus" "$orbital"
   if test -n "$atom_restart_source"; then
