@@ -19,7 +19,8 @@
       "stability": "stable",
       "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/pbe-gate/PBE_GATE.json",
       "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/binding/RESULT.json",
-      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/solid-sos/librpa.out"
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/solid-sos/librpa.out",
+      "frequency_decomposition": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-stable-tail-calibration-87cf66a7/signed-base/decomposition-v2.tsv"
     },
     {
       "name": "relaxed_p_all_0p25",
@@ -43,7 +44,8 @@
       "stability": "stable",
       "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
       "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
-      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out",
+      "frequency_decomposition": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-stable-tail-calibration-87cf66a7/s3p0p25/decomposition-v2.tsv"
     },
     {
       "name": "s3_0p50",
