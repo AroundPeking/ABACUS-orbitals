@@ -120,6 +120,20 @@ class ReadPeriodicCandidateManifestTest(unittest.TestCase):
             self.assertEqual(result["nao_atom"], 29)
             self.assertEqual(result["layout"], "3s3p2d1f")
 
+    def test_reads_controlled_lowest_g_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            orbital = root / "controlled-lowest-g.orb"
+            orbital.write_text("orbital\n", encoding="ascii")
+            digest = hashlib.sha256(orbital.read_bytes()).hexdigest()
+            (root / "CANDIDATE.json").write_text(
+                json.dumps({"status": "success", "profile": "controlled_lowest_g", "nu": [3, 3, 2, 0, 1], "ao_count_atom": 31, "orbital_filename": orbital.name, "orbital_sha256": digest}),
+                encoding="ascii",
+            )
+            result = read_candidate(root)
+            self.assertEqual(result["nao_atom"], 31)
+            self.assertEqual(result["layout"], "3s3p2d1g")
+
     def test_rejects_unapproved_nested_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

@@ -16,6 +16,7 @@ STAGED_LAYOUTS = {
     "controlled_lowest_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_contracted_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_tail_damped_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
+    "controlled_lowest_g": ([3, 3, 2, 0, 1], 31, "3s3p2d1g"),
     "nested_tzdp_2s2p1d": ([2, 2, 1], 13, "2s2p1d"),
     "nested_tzdp_3s2p1d": ([3, 2, 1], 14, "3s2p1d"),
     "nested_tzdp_2s3p1d": ([2, 3, 1], 16, "2s3p1d"),
