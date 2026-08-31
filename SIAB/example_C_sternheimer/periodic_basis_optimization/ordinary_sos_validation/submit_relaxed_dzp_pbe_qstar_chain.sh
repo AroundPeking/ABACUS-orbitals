@@ -9,12 +9,15 @@ fi
 candidate_root=$1
 run_root=$2
 source_root=$3
+source_commit=${SIAB_SOURCE_COMMIT:?missing exact SIAB source commit}
 scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 manifest_reader=$scripts/read_periodic_candidate_manifest.py
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 receipt=${run_root}.SUBMISSION.txt
 
 test -d "$candidate_root" && test ! -e "$run_root" && test ! -e "$receipt" && test -d "$source_root"
+[[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+test "${source_commit:0:8}" = "${source_root##*-}"
 test -s "$candidate_root/CANDIDATE.json" && test -s "$manifest_reader"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
 mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
@@ -29,7 +32,7 @@ for script in \
 done
 test -z "$(squeue -h -u "$USER" -n c_relaxed_pbe,c_thr_atom_sos,c_thr_qstar,c_thr_qsos,c_thr_bind -o %A)"
 
-common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root"
+common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root",SIAB_SOURCE_COMMIT="$source_commit"
 for script in \
   run_relaxed_dzp_pbe_gate_55d25e3c9.slurm \
   run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm \
