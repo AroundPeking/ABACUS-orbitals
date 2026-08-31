@@ -32,7 +32,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _complex(match: re.Match, prefix: str) -> complex:
+def _complex(match, prefix):
     # Named groups inside repeated regex fragments are renamed by the caller.
     return complex(float(match.group(f"{prefix}_real")), float(match.group(f"{prefix}_imag")))
 
@@ -59,7 +59,7 @@ def _compile_patterns():
 NORMAL_PATTERN, FREQDIAG_PATTERN = _compile_patterns()
 
 
-def _parse(path: Path, pattern: re.Pattern, kind: str) -> list[dict]:
+def _parse(path, pattern, kind):
     records = []
     for line_number, line in enumerate(path.read_text(encoding="ascii").splitlines(), start=1):
         match = pattern.fullmatch(line)

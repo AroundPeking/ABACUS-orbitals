@@ -2,6 +2,7 @@
 
 import json
 import math
+import ast
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,10 @@ QSTAR_MULTIPLICITIES = {
 
 
 class QStarFrequencyDecompositionTest(unittest.TestCase):
+    def test_parser_source_accepts_python36_grammar(self):
+        source = Path(__file__).with_name("build_qstar_frequency_decomposition.py")
+        ast.parse(source.read_text(encoding="ascii"), filename=str(source), feature_version=(3, 6))
+
     def _write_inputs(self, directory: Path):
         normal_path = directory / "normal_split.dat"
         freqdiag_path = directory / "freqdiag.dat"
