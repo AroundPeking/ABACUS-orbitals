@@ -14,14 +14,21 @@ scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordi
 manifest_reader=$scripts/read_periodic_candidate_manifest.py
 python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
 receipt=${run_root}.SUBMISSION.txt
+lock=${receipt}.lock
 
 test -d "$candidate_root" && test ! -e "$run_root" && test ! -e "$receipt" && test -d "$source_root"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
 test "${source_commit:0:8}" = "${source_root##*-}"
 test -s "$candidate_root/CANDIDATE.json" && test -s "$manifest_reader"
 grep -qx 'status=success' "$candidate_root/provenance.txt"
+mkdir "$lock"
+cleanup_lock() {
+  rmdir "$lock" 2>/dev/null || true
+}
+trap cleanup_lock EXIT
 mapfile -t candidate < <("$python" "$manifest_reader" "$candidate_root")
 test "${#candidate[@]}" -eq 5
+candidate_orbital_sha256=${candidate[2]}
 for script in \
   run_relaxed_dzp_pbe_gate_55d25e3c9.slurm \
   run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm \
@@ -30,7 +37,6 @@ for script in \
   run_threshold_candidate_qstar_binding_collect.slurm; do
   test -s "$scripts/$script"
 done
-test -z "$(squeue -h -u "$USER" -n c_relaxed_pbe,c_thr_atom_sos,c_thr_qstar,c_thr_qsos,c_thr_bind -o %A)"
 
 common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root",SIAB_SOURCE_COMMIT="$source_commit"
 for script in \
@@ -52,6 +58,9 @@ binding_job=$(sbatch --parsable --dependency="afterok:$atom_job:$solid_sos_job" 
   --export="$common,ATOM_JOB_ID=$atom_job,QSTAR_ARRAY_JOB_ID=$qstar_job,SOLID_SOS_JOB_ID=$solid_sos_job" \
   "$scripts/run_threshold_candidate_qstar_binding_collect.slurm")
 
-printf 'status submitted\npbe_job %s\natom_job %s\nqstar_array_job %s\nsolid_sos_job %s\nbinding_job %s\n' \
+printf 'status submitted\ncandidate_root %s\nrun_root %s\ncandidate_orbital_sha256 %s\npbe_job %s\natom_job %s\nqstar_array_job %s\nsolid_sos_job %s\nbinding_job %s\n' \
+  "$candidate_root" "$run_root" "$candidate_orbital_sha256" \
   "$pbe_job" "$atom_job" "$qstar_job" "$solid_sos_job" "$binding_job" > "$receipt"
+rmdir "$lock"
+trap - EXIT
 echo "C_RELAXED_DZP_PBE_QSTAR_CHAIN_SUBMITTED receipt=$receipt"
