@@ -112,6 +112,7 @@ def build_decomposition(
     expected_star_ecrpa: Optional[float] = None,
     tolerance: float = 5.0e-10,
     star_tolerance: float = 5.0e-6,
+    qstar_indices=None,
 ) -> dict:
     normal_path = Path(normal_path).resolve(strict=True)
     freqdiag_path = Path(freqdiag_path).resolve(strict=True)
@@ -124,6 +125,16 @@ def build_decomposition(
     for output_path in (output_tsv, output_json):
         if output_path.exists():
             raise FileExistsError(f"refusing to overwrite {output_path}")
+    if qstar_indices is None:
+        expected_q_indices = list(QSTAR_MULTIPLICITIES)
+    else:
+        expected_q_indices = [int(value) for value in qstar_indices]
+        if (
+            not expected_q_indices
+            or expected_q_indices != sorted(set(expected_q_indices))
+            or any(value not in QSTAR_MULTIPLICITIES for value in expected_q_indices)
+        ):
+            raise ValueError("qstar_indices must be a nonempty sorted subset of the eight representatives")
 
     normal = _parse(normal_path, NORMAL_PATTERN, "normal split")
     freqdiag = _parse(freqdiag_path, FREQDIAG_PATTERN, "frequency diagnostic")
@@ -193,7 +204,6 @@ def build_decomposition(
             raise ValueError(f"incomplete frequencies for q index {ordinal}")
         if any(abs(record[1]["raw"]) > 1.0e-18 for record in records):
             selected_q_indices.append(ordinal)
-    expected_q_indices = list(QSTAR_MULTIPLICITIES)
     if selected_q_indices != expected_q_indices:
         raise ValueError(
             f"nonzero q indices are {selected_q_indices}; expected {expected_q_indices}"
@@ -267,6 +277,11 @@ def build_decomposition(
     result = {
         "status": "success",
         "name": name,
+        "scope": (
+            "full_qstar_reconstruction"
+            if selected_q_indices == list(QSTAR_MULTIPLICITIES)
+            else "partial_qstar_screen"
+        ),
         "normal_path": str(normal_path),
         "normal_sha256": _sha256(normal_path),
         "freqdiag_path": str(freqdiag_path),
@@ -279,8 +294,11 @@ def build_decomposition(
         "q_count": len(q_order),
         "frequency_count": FREQUENCY_COUNT,
         "selected_q_indices": selected_q_indices,
-        "qstar_multiplicity_sum": sum(QSTAR_MULTIPLICITIES.values()),
+        "qstar_multiplicity_sum": sum(
+            QSTAR_MULTIPLICITIES[index] for index in selected_q_indices
+        ),
         "sparse_ecrpa_ha": sparse_total,
+        "weighted_selected_ecrpa_ha": star_total,
         "star_reconstructed_ecrpa_ha": star_total,
         "q_metrics": q_metrics,
     }
@@ -311,7 +329,13 @@ def main():
     parser.add_argument("--expected-star-ecrpa", type=float)
     parser.add_argument("--tolerance", type=float, default=5.0e-10)
     parser.add_argument("--star-tolerance", type=float, default=5.0e-6)
+    parser.add_argument(
+        "--qstar-indices",
+        default=",".join(str(value) for value in QSTAR_MULTIPLICITIES),
+        help="comma-separated sorted subset of 1,2,3,6,7,8,11,28",
+    )
     args = parser.parse_args()
+    qstar_indices = tuple(int(value) for value in args.qstar_indices.split(",") if value)
     result = build_decomposition(
         normal_path=args.normal_split,
         freqdiag_path=args.freqdiag,
@@ -322,6 +346,7 @@ def main():
         expected_star_ecrpa=args.expected_star_ecrpa,
         tolerance=args.tolerance,
         star_tolerance=args.star_tolerance,
+        qstar_indices=qstar_indices,
     )
     print(json.dumps(result, sort_keys=True, allow_nan=False))
 

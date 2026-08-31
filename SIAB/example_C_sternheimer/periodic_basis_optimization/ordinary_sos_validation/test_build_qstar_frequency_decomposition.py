@@ -28,7 +28,8 @@ class QStarFrequencyDecompositionTest(unittest.TestCase):
         source = Path(__file__).with_name("build_qstar_frequency_decomposition.py")
         ast.parse(source.read_text(encoding="ascii"), filename=str(source), feature_version=(3, 6))
 
-    def _write_inputs(self, directory: Path):
+    def _write_inputs(self, directory: Path, qstars=None):
+        qstars = QSTAR_MULTIPLICITIES if qstars is None else qstars
         normal_path = directory / "normal_split.dat"
         freqdiag_path = directory / "freqdiag.dat"
         normal_lines = []
@@ -37,7 +38,7 @@ class QStarFrequencyDecompositionTest(unittest.TestCase):
         star_total = 0.0
         for q_index in range(1, 65):
             q_text = f"({q_index:.17e},0.00000000000000000e+00,0.00000000000000000e+00)"
-            multiplicity = QSTAR_MULTIPLICITIES.get(q_index, 0)
+            multiplicity = qstars.get(q_index, 0)
             for ifreq in range(6):
                 frequency = 0.25 * (ifreq + 1)
                 trace = -10.0 / (ifreq + 1) if multiplicity else 0.0
@@ -104,6 +105,31 @@ class QStarFrequencyDecompositionTest(unittest.TestCase):
                 trust_region_metrics["q6"]["high_frequency_tail_fraction"],
                 result["q_metrics"]["q6"]["high_frequency_tail_fraction"],
             )
+
+    def test_builds_two_q_tail_screen(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            selected = {2: 8, 6: 6}
+            normal_path, freqdiag_path, sparse_total, star_total = self._write_inputs(
+                directory, qstars=selected
+            )
+
+            result = build_decomposition(
+                normal_path=normal_path,
+                freqdiag_path=freqdiag_path,
+                name="two_q",
+                output_tsv=directory / "decomposition.tsv",
+                output_json=directory / "summary.json",
+                qstar_indices=(2, 6),
+                expected_sparse_ecrpa=sparse_total,
+                expected_star_ecrpa=star_total,
+                tolerance=5.0e-12,
+            )
+
+            self.assertEqual(result["scope"], "partial_qstar_screen")
+            self.assertEqual(result["selected_q_indices"], [2, 6])
+            self.assertEqual(result["decomposition_record_count"], 12)
+            self.assertEqual(set(result["q_metrics"]), {"q2", "q6"})
 
     def test_rejects_unexpected_nonzero_q(self):
         with tempfile.TemporaryDirectory() as directory_name:
