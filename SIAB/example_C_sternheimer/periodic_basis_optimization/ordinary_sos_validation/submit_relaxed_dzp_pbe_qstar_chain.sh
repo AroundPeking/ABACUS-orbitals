@@ -39,6 +39,7 @@ for script in \
 done
 
 common=ALL,CANDIDATE_ROOT="$candidate_root",RUN_ROOT="$run_root",SIAB_SOURCE_ROOT="$source_root",SIAB_SOURCE_COMMIT="$source_commit"
+atom_restart_source=$run_root/pbe-gate/atom/OUT.C_CANDIDATE_PBE_ATOM
 for script in \
   run_relaxed_dzp_pbe_gate_55d25e3c9.slurm \
   run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm \
@@ -49,7 +50,9 @@ for script in \
 done
 
 pbe_job=$(sbatch --parsable --export="$common" "$scripts/run_relaxed_dzp_pbe_gate_55d25e3c9.slurm")
-atom_job=$(sbatch --parsable --dependency="afterok:$pbe_job" --export="$common" "$scripts/run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm")
+atom_job=$(sbatch --parsable --dependency="afterok:$pbe_job" \
+  --export="$common,ATOM_RESTART_SOURCE=$atom_restart_source" \
+  "$scripts/run_threshold_candidate_atom_sos_55d25e3c9_d4810f73.slurm")
 qstar_job=$(sbatch --parsable --dependency="afterok:$pbe_job" --export="$common" "$scripts/run_threshold_candidate_solid_qstar_55d25e3c9.slurm")
 solid_sos_job=$(sbatch --parsable --dependency="afterok:$qstar_job" \
   --export="$common,QSTAR_ARRAY_JOB_ID=$qstar_job" \

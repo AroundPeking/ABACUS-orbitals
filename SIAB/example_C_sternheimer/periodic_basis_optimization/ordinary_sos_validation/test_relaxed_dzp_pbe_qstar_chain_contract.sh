@@ -4,8 +4,10 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
 submitter=$root/submit_relaxed_dzp_pbe_qstar_chain.sh
+recovery=$root/submit_threshold_candidate_atom_binding_recovery.sh
 pbe=$root/run_relaxed_dzp_pbe_gate_55d25e3c9.slurm
 test -s "$submitter"
+test -s "$recovery"
 test -s "$pbe"
 grep -q 'CANDIDATE.json' "$submitter"
 grep -q 'run_relaxed_dzp_pbe_gate_55d25e3c9.slurm' "$submitter"
@@ -24,6 +26,19 @@ grep -q 'sbatch --test-only' "$submitter"
 grep -Fq 'source_commit=${SIAB_SOURCE_COMMIT:?missing exact SIAB source commit}' "$submitter"
 grep -Fq 'test "${source_commit:0:8}" = "${source_root##*-}"' "$submitter"
 grep -Fq 'SIAB_SOURCE_COMMIT="$source_commit"' "$submitter"
+grep -Fq 'atom_restart_source=$run_root/pbe-gate/atom/OUT.C_CANDIDATE_PBE_ATOM' "$submitter"
+grep -Fq 'ATOM_RESTART_SOURCE=$atom_restart_source' "$submitter"
 grep -q 'read_periodic_candidate_manifest.py' "$pbe"
 grep -q 'read_periodic_candidate_manifest.py' "$submitter"
+grep -Fq 'failed_atom_job_id=$4' "$recovery"
+grep -Fq 'qstar_array_job_id=$5' "$recovery"
+grep -Fq 'solid_sos_job_id=$6' "$recovery"
+grep -Fq 'ATOM_RESTART_SOURCE="$atom_restart_source"' "$recovery"
+grep -Fq 'ATOM_SOS_ROOT="$atom_recovery_root"' "$recovery"
+grep -Fq 'afterok:$atom_job:$solid_sos_job_id' "$recovery"
+grep -Fq 'test "$failed_atom_state" = FAILED' "$recovery"
+grep -Fq 'grep -qx "atom_job $failed_atom_job_id" "$original_receipt"' "$recovery"
+grep -Fq 'grep -qx "qstar_array_job $qstar_array_job_id" "$original_receipt"' "$recovery"
+grep -Fq 'grep -qx "solid_sos_job $solid_sos_job_id" "$original_receipt"' "$recovery"
+grep -Fq 'test ! -e "$receipt"' "$recovery"
 echo RELAXED_DZP_PBE_QSTAR_CHAIN_CONTRACT_OK
