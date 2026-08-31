@@ -1,0 +1,83 @@
+{
+  "delta_st_reference_ev_per_c": 6.902326,
+  "pbe_tolerance_ev": 0.01,
+  "minimum_loo_rank_concordance": 0.8,
+  "minimum_tail_calibration_points": 3,
+  "surrogate_terms": [
+    {"name": "intercept", "powers": {}},
+    {"name": "relaxed_p_all", "powers": {"relaxed_p_all": 1}},
+    {"name": "relaxed_d_all", "powers": {"relaxed_d_all": 1}},
+    {"name": "beta_s3", "powers": {"beta_s3": 1}},
+    {"name": "beta_s3_squared", "powers": {"beta_s3": 2}},
+    {"name": "beta_d2", "powers": {"beta_d2": 1}},
+    {"name": "beta_p3", "powers": {"beta_p3": 1}}
+  ],
+  "candidates": [
+    {
+      "name": "signed_base",
+      "coordinates": {},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/solid-sos/librpa.out"
+    },
+    {
+      "name": "relaxed_p_all_0p25",
+      "coordinates": {"relaxed_p_all": 0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxedpp0p25-pbe-qstar-sos-2ce075f8/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxedpp0p25-pbe-qstar-sos-2ce075f8/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxedpp0p25-pbe-qstar-sos-2ce075f8/solid-sos/librpa.out"
+    },
+    {
+      "name": "relaxed_d_all_0p25",
+      "coordinates": {"relaxed_d_all": 0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxeddp0p25-pbe-qstar-sos-2ce075f8/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxeddp0p25-pbe-qstar-sos-2ce075f8/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxeddp0p25-pbe-qstar-sos-2ce075f8/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p25",
+      "coordinates": {"beta_s3": 0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p50",
+      "coordinates": {"beta_s3": 0.5},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p5-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p5-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p5-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p25_d2_0p25",
+      "coordinates": {"beta_s3": 0.25, "beta_d2": 0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out",
+      "frequency_decomposition": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-d2-finite-q-freqdiag-87cf66a7/d2p0p25/decomposition.tsv"
+    },
+    {
+      "name": "s3_0p25_d2_0p25_p3_0p25",
+      "coordinates": {"beta_s3": 0.25, "beta_d2": 0.25, "beta_p3": 0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p25_d2_0p50_barrier",
+      "coordinates": {"beta_s3": 0.25, "beta_d2": 0.5},
+      "stability": "unstable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p5-pbe-qstar-sos-4a8dd9e2/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p5-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p5-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out",
+      "frequency_decomposition": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-d2-finite-q-freqdiag-87cf66a7/d2p0p50/decomposition.tsv"
+    }
+  ]
+}
