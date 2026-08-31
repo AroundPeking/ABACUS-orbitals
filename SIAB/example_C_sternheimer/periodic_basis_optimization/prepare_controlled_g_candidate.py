@@ -87,9 +87,23 @@ def _radial_diagnostics(radius: np.ndarray, radial: np.ndarray) -> dict:
     }
 
 
-def prepare_candidate(*, source: Path, root: Path) -> dict:
+def _amplitude_token(value: float) -> str:
+    sign = "p" if value >= 0.0 else "m"
+    magnitude = f"{abs(value):.8f}".rstrip("0").rstrip(".").replace(".", "p")
+    return sign + (magnitude or "0")
+
+
+def prepare_candidate(
+    *,
+    source: Path,
+    root: Path,
+    second_primitive_amplitude: float = 0.0,
+) -> dict:
     source = Path(source).resolve(strict=True)
     root = Path(root).resolve()
+    second_primitive_amplitude = float(second_primitive_amplitude)
+    if not math.isfinite(second_primitive_amplitude):
+        raise ValueError("second primitive amplitude must be finite")
     if root.exists() or root.is_symlink():
         raise FileExistsError(root)
     if not root.parent.is_dir():
@@ -104,6 +118,7 @@ def prepare_candidate(*, source: Path, root: Path) -> dict:
     coefficients = {"C": [channel.detach().clone() for channel in base["C"]]}
     g_seed = torch.zeros(RADIAL_ROWS, 1, dtype=torch.float64)
     g_seed[0, 0] = 1.0
+    g_seed[1, 0] = second_primitive_amplitude
     coefficients["C"][4] = g_seed
 
     radius, orbitals = build_radial_orbitals(
@@ -128,8 +143,11 @@ def prepare_candidate(*, source: Path, root: Path) -> dict:
 
     temporary = Path(tempfile.mkdtemp(prefix=root.name + ".tmp-", dir=root.parent))
     try:
-        coefficient_name = "C_3s3p2d1g_lowest_l4_bessel.txt"
-        orbital_name = "C_gga_10au_100Ry_3s3p2d1g_lowest_l4_bessel.orb"
+        contracted = second_primitive_amplitude != 0.0
+        token = _amplitude_token(second_primitive_amplitude)
+        suffix = f"contracted_l4_bessel_{token}" if contracted else "lowest_l4_bessel"
+        coefficient_name = f"C_3s3p2d1g_{suffix}.txt"
+        orbital_name = f"C_gga_10au_100Ry_3s3p2d1g_{suffix}.orb"
         coefficient_path = temporary / coefficient_name
         orbital_path = temporary / orbital_name
         write_periodic_optimizer_coefficients(coefficient_path, coefficients)
@@ -154,10 +172,15 @@ def prepare_candidate(*, source: Path, root: Path) -> dict:
 
         payload = {
             "status": "success",
-            "profile": "controlled_lowest_g",
+            "profile": "controlled_contracted_g" if contracted else "controlled_lowest_g",
             "nu": list(TARGET_NU),
             "ao_count_atom": AO_COUNT_ATOM,
-            "seed_definition": "lowest_l4_spherical_bessel_primitive",
+            "seed_definition": (
+                "lowest_l4_bessel_plus_scaled_second_primitive"
+                if contracted
+                else "lowest_l4_spherical_bessel_primitive"
+            ),
+            "second_primitive_amplitude": second_primitive_amplitude,
             "base_coefficients": str(source),
             "base_coefficients_sha256": sha256(source),
             "coefficients_filename": coefficient_name,
@@ -196,10 +219,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--second-primitive-amplitude", type=float, default=0.0)
     args = parser.parse_args()
     print(
         json.dumps(
-            prepare_candidate(source=args.source, root=args.root),
+            prepare_candidate(
+                source=args.source,
+                root=args.root,
+                second_primitive_amplitude=args.second_primitive_amplitude,
+            ),
             sort_keys=True,
             allow_nan=False,
         )

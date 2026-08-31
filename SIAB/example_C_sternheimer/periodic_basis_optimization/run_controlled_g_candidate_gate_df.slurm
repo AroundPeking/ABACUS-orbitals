@@ -18,6 +18,7 @@ trap 'status=$?; echo "C_CONTROLLED_G_GATE_FAILED line=$LINENO command=$BASH_COM
 : "${BASE_CANDIDATE_ROOT:?missing accepted 3s3p2d base candidate}"
 : "${CANDIDATE_ROOT:?missing controlled g candidate root}"
 : "${GATE_ROOT:?missing controlled g gate root}"
+g_second_primitive_amplitude=${G_SECOND_PRIMITIVE_AMPLITUDE:-0}
 
 case "${SLURM_JOB_PARTITION:?}" in p1|48cp2) ;; *) exit 1 ;; esac
 test "${SLURM_NTASKS:?}" = 1
@@ -62,10 +63,15 @@ mkdir -p "$GATE_ROOT"
   echo source_commit=$EXPECTED_SIAB_COMMIT
   echo base_candidate_root=$BASE_CANDIDATE_ROOT
   echo selected_iq=43
+  echo g_second_primitive_amplitude=$g_second_primitive_amplitude
   sha256sum "$preparer" "$comparator" "$analyzer" "$original" "$base_coefficients" "$q3/manifest.dat" "$q3/status.dat"
 } > "$GATE_ROOT/provenance.txt"
 
-"$python_exe" "$preparer" --source "$base_coefficients" --root "$CANDIDATE_ROOT" > "$GATE_ROOT/prepare.out"
+"$python_exe" "$preparer" \
+  --source "$base_coefficients" \
+  --root "$CANDIDATE_ROOT" \
+  --second-primitive-amplitude "$g_second_primitive_amplitude" \
+  > "$GATE_ROOT/prepare.out"
 candidate_coefficients=$("$python_exe" - "$CANDIDATE_ROOT/CANDIDATE.json" "$CANDIDATE_ROOT" <<'PY'
 import json, pathlib, sys
 manifest = json.load(open(sys.argv[1], encoding="ascii"))

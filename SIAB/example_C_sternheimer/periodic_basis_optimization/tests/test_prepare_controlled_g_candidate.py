@@ -86,6 +86,44 @@ class PrepareControlledGCandidateTest(unittest.TestCase):
                 result,
             )
 
+    def test_appends_nodeless_contracted_g_primitive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            root = parent / "candidate"
+            generator = torch.Generator().manual_seed(61)
+            base = {
+                "C": [
+                    torch.randn(31, count, generator=generator, dtype=torch.float64)
+                    if count
+                    else torch.empty(31, 0, dtype=torch.float64)
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            write_periodic_optimizer_coefficients(source, base)
+
+            result = prepare_candidate(
+                source=source,
+                root=root,
+                second_primitive_amplitude=0.2,
+            )
+
+            self.assertEqual(result["profile"], "controlled_contracted_g")
+            self.assertEqual(result["second_primitive_amplitude"], 0.2)
+            self.assertEqual(result["g_diagnostics"]["interior_node_count"], 0)
+            self.assertLess(
+                result["g_diagnostics"]["tail_probability_r_ge_9_bohr"],
+                0.03,
+            )
+            restored = read_periodic_optimizer_coefficients(
+                root / result["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 0, 1),
+            )
+            self.assertEqual(restored["C"][4][0, 0], 1.0)
+            self.assertEqual(restored["C"][4][1, 0], 0.2)
+
     def test_refuses_existing_root(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
