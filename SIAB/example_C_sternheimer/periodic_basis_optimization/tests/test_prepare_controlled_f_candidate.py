@@ -93,6 +93,40 @@ class PrepareControlledFCandidateTest(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 prepare_candidate(source=source, root=root)
 
+    def test_writes_nodeless_contracted_f_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            generator = torch.Generator().manual_seed(43)
+            coefficients = {
+                "C": [
+                    torch.randn(31, count, generator=generator, dtype=torch.float64)
+                    if count
+                    else torch.empty(31, 0, dtype=torch.float64)
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            write_periodic_optimizer_coefficients(source, coefficients)
+            lowest = prepare_candidate(source=source, root=parent / "lowest")
+            contracted = prepare_candidate(
+                source=source,
+                root=parent / "contracted",
+                second_primitive_amplitude=0.25,
+            )
+
+            self.assertEqual(contracted["profile"], "controlled_contracted_f")
+            self.assertEqual(contracted["second_primitive_amplitude"], 0.25)
+            self.assertEqual(contracted["f_diagnostics"]["interior_node_count"], 0)
+            self.assertLess(
+                contracted["f_diagnostics"]["mean_radius_bohr"],
+                lowest["f_diagnostics"]["mean_radius_bohr"],
+            )
+            self.assertLess(
+                contracted["f_diagnostics"]["tail_probability_r_ge_9_bohr"],
+                lowest["f_diagnostics"]["tail_probability_r_ge_9_bohr"],
+            )
+            self.assertLess(contracted["f_diagnostics"]["numerical_kinetic_energy_ry"], 0.55)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ job=$root/run_controlled_f_candidate_gate_df.slurm
 test -s "$job"
 grep -Fq '#SBATCH --partition=48cp2,p1' "$job"
 grep -Fq 'prepare_controlled_f_candidate.py' "$job"
+grep -Fq 'SECOND_PRIMITIVE_AMPLITUDE' "$job"
+grep -Fq -- '--second-primitive-amplitude "$second_primitive_amplitude"' "$job"
 grep -Fq 'controlled-f:' "$job"
 grep -Fq '3,3,2,1,0' "$job"
 grep -Fq 'selected_iq 43' "$job"
