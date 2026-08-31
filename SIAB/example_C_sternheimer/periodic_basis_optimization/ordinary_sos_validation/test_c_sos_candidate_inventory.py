@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from c_sos_candidate_inventory import DEFAULT_CONTRACT, build_inventory, classify_candidate
+from c_sos_candidate_inventory import (
+    DEFAULT_CONTRACT,
+    build_inventory,
+    classify_candidate,
+    write_inventory,
+)
 
 
 def base_candidate():
@@ -148,6 +153,27 @@ class InventoryTest(unittest.TestCase):
             self.assertEqual(result["eligible_extra_stable_points"], ["extra-candidate-test"])
             self.assertFalse(result["strict_redundancy_blocker"])
             self.assertEqual(result["coordinate_nonzero_amplitudes"], {"beta_d2": [0.25]})
+
+    def test_writes_hashed_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            output = root / "inventory"
+            result = {
+                "status": "success",
+                "quantity": "test_inventory",
+                "generator_path": "/immutable/generator.py",
+                "generator_sha256": "a" * 64,
+                "runs_root": "/runs",
+                "trust_result_path": "/runs/trust/RESULT.json",
+                "trust_result_sha256": "b" * 64,
+            }
+
+            write_inventory(output, result)
+
+            provenance = json.loads((output / "PROVENANCE.json").read_text(encoding="utf-8"))
+            self.assertEqual((output / "STATUS").read_text(encoding="utf-8"), "success\n")
+            self.assertEqual(provenance["generator_sha256"], "a" * 64)
+            self.assertEqual(len(provenance["result_sha256"]), 64)
 
 
 if __name__ == "__main__":

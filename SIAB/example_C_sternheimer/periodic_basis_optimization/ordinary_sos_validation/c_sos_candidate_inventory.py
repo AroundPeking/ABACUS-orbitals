@@ -227,7 +227,22 @@ def write_inventory(output_root: Path, result: dict) -> None:
     if output_root.exists() or output_root.is_symlink():
         raise FileExistsError(output_root)
     output_root.mkdir(parents=True)
-    _atomic_write(output_root / "RESULT.json", json.dumps(result, indent=2, sort_keys=True) + "\n")
+    result_path = output_root / "RESULT.json"
+    _atomic_write(result_path, json.dumps(result, indent=2, sort_keys=True) + "\n")
+    provenance = {
+        "status": "success",
+        "quantity": result["quantity"],
+        "generator_path": result["generator_path"],
+        "generator_sha256": result["generator_sha256"],
+        "result_sha256": _sha256(result_path),
+        "runs_root": result["runs_root"],
+        "trust_result_path": result["trust_result_path"],
+        "trust_result_sha256": result["trust_result_sha256"],
+    }
+    _atomic_write(
+        output_root / "PROVENANCE.json",
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+    )
     _atomic_write(output_root / "STATUS", "success\n")
 
 
@@ -238,6 +253,9 @@ def main() -> None:
     parser.add_argument("--output-root", required=True, type=Path)
     args = parser.parse_args()
     result = build_inventory(args.runs_root, args.trust_result)
+    generator_path = Path(__file__).resolve(strict=True)
+    result["generator_path"] = str(generator_path)
+    result["generator_sha256"] = _sha256(generator_path)
     write_inventory(args.output_root, result)
     print(json.dumps(result, sort_keys=True))
 
