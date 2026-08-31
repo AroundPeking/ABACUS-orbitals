@@ -60,5 +60,6 @@ grep -q 'SOLID_SOS_ROOT' "$collector"
 grep -q 'afterok' "$submitter"
 grep -q 'test -z.*squeue' "$submitter"
 grep -q 'SIAB_SOURCE_COMMIT' "$submitter"
+grep -q 'controlled_lowest_f' "$root/read_periodic_candidate_manifest.py"
 
 echo THRESHOLD_CANDIDATE_QSTAR_CHAIN_CONTRACT_OK
