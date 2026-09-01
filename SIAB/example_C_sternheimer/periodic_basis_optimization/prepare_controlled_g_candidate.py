@@ -98,12 +98,19 @@ def prepare_candidate(
     source: Path,
     root: Path,
     second_primitive_amplitude: float = 0.0,
+    optimized_g_source: Path | None = None,
 ) -> dict:
     source = Path(source).resolve(strict=True)
     root = Path(root).resolve()
     second_primitive_amplitude = float(second_primitive_amplitude)
     if not math.isfinite(second_primitive_amplitude):
         raise ValueError("second primitive amplitude must be finite")
+    if optimized_g_source is not None:
+        optimized_g_source = Path(optimized_g_source).resolve(strict=True)
+        if second_primitive_amplitude != 0.0:
+            raise ValueError(
+                "optimized g source and second primitive amplitude are mutually exclusive"
+            )
     if root.exists() or root.is_symlink():
         raise FileExistsError(root)
     if not root.parent.is_dir():
@@ -116,9 +123,20 @@ def prepare_candidate(
         expected_nu=BASE_NU,
     )
     coefficients = {"C": [channel.detach().clone() for channel in base["C"]]}
-    g_seed = torch.zeros(RADIAL_ROWS, 1, dtype=torch.float64)
-    g_seed[0, 0] = 1.0
-    g_seed[1, 0] = second_primitive_amplitude
+    if optimized_g_source is None:
+        g_seed = torch.zeros(RADIAL_ROWS, 1, dtype=torch.float64)
+        g_seed[0, 0] = 1.0
+        g_seed[1, 0] = second_primitive_amplitude
+    else:
+        optimized = read_periodic_optimizer_coefficients(
+            optimized_g_source,
+            element="C",
+            radial_rows=RADIAL_ROWS,
+            expected_nu=(3, 3, 2, 1, 1),
+        )
+        g_seed = optimized["C"][4].detach().clone()
+        if tuple(g_seed.shape) != (RADIAL_ROWS, 1):
+            raise RuntimeError("optimized g source does not contain exactly one g radial")
     coefficients["C"][4] = g_seed
 
     radius, orbitals = build_radial_orbitals(
@@ -144,8 +162,12 @@ def prepare_candidate(
     temporary = Path(tempfile.mkdtemp(prefix=root.name + ".tmp-", dir=root.parent))
     try:
         contracted = second_primitive_amplitude != 0.0
+        optimized_profile = optimized_g_source is not None
         token = _amplitude_token(second_primitive_amplitude)
-        suffix = f"contracted_l4_bessel_{token}" if contracted else "lowest_l4_bessel"
+        if optimized_profile:
+            suffix = "joint_atom_solid_optimized_g"
+        else:
+            suffix = f"contracted_l4_bessel_{token}" if contracted else "lowest_l4_bessel"
         coefficient_name = f"C_3s3p2d1g_{suffix}.txt"
         orbital_name = f"C_gga_10au_100Ry_3s3p2d1g_{suffix}.orb"
         coefficient_path = temporary / coefficient_name
@@ -172,11 +194,17 @@ def prepare_candidate(
 
         payload = {
             "status": "success",
-            "profile": "controlled_contracted_g" if contracted else "controlled_lowest_g",
+            "profile": (
+                "controlled_optimized_g"
+                if optimized_profile
+                else "controlled_contracted_g" if contracted else "controlled_lowest_g"
+            ),
             "nu": list(TARGET_NU),
             "ao_count_atom": AO_COUNT_ATOM,
             "seed_definition": (
-                "lowest_l4_bessel_plus_scaled_second_primitive"
+                "joint_atom_solid_optimized_g_only"
+                if optimized_profile
+                else "lowest_l4_bessel_plus_scaled_second_primitive"
                 if contracted
                 else "lowest_l4_spherical_bessel_primitive"
             ),
@@ -189,6 +217,13 @@ def prepare_candidate(
             "orbital_sha256": sha256(orbital_path),
             "g_diagnostics": diagnostics,
         }
+        if optimized_profile:
+            payload.update(
+                {
+                    "optimized_g_source": str(optimized_g_source),
+                    "optimized_g_source_sha256": sha256(optimized_g_source),
+                }
+            )
         manifest = temporary / "CANDIDATE.json"
         manifest.write_text(
             json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -196,9 +231,14 @@ def prepare_candidate(
         )
         (temporary / "provenance.txt").write_text(
             "status=success\n"
-            "purpose=controlled_lowest_g_candidate\n"
+            f"purpose={payload['profile']}_candidate\n"
             f"base_coefficients_sha256={payload['base_coefficients_sha256']}\n"
-            f"candidate_orbital_sha256={payload['orbital_sha256']}\n",
+            + (
+                f"optimized_g_source_sha256={payload['optimized_g_source_sha256']}\n"
+                if optimized_profile
+                else ""
+            )
+            + f"candidate_orbital_sha256={payload['orbital_sha256']}\n",
             encoding="ascii",
         )
         (temporary / "STATUS").write_text("success\n", encoding="ascii")
@@ -220,6 +260,7 @@ def main() -> None:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--second-primitive-amplitude", type=float, default=0.0)
+    parser.add_argument("--optimized-g-source", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -227,6 +268,7 @@ def main() -> None:
                 source=args.source,
                 root=args.root,
                 second_primitive_amplitude=args.second_primitive_amplitude,
+                optimized_g_source=args.optimized_g_source,
             ),
             sort_keys=True,
             allow_nan=False,

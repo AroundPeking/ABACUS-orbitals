@@ -19,6 +19,8 @@ trap 'status=$?; echo "C_CONTROLLED_G_GATE_FAILED line=$LINENO command=$BASH_COM
 : "${CANDIDATE_ROOT:?missing controlled g candidate root}"
 : "${GATE_ROOT:?missing controlled g gate root}"
 g_second_primitive_amplitude=${G_SECOND_PRIMITIVE_AMPLITUDE:-0}
+optimized_g_source=${OPTIMIZED_G_SOURCE:-}
+optimized_g_provenance=${OPTIMIZED_G_PROVENANCE:-}
 
 case "${SLURM_JOB_PARTITION:?}" in p1|48cp2) ;; *) exit 1 ;; esac
 test "${SLURM_NTASKS:?}" = 1
@@ -46,6 +48,11 @@ PY
 )
 
 for path in "$preparer" "$comparator" "$analyzer" "$original" "$base_coefficients" "$q3/manifest.dat" "$q3/status.dat"; do test -s "$path"; done
+if [[ -n "$optimized_g_source" || -n "$optimized_g_provenance" ]]; then
+  test -n "$optimized_g_source" && test -n "$optimized_g_provenance"
+  test -s "$optimized_g_source" && test -s "$optimized_g_provenance"
+  grep -qx 'status=success' "$optimized_g_provenance"
+fi
 grep -qx 'status success' "$q3/status.dat"
 grep -qx 'all_converged yes' "$q3/status.dat"
 grep -qx 'selected_iq 43' "$q3/manifest.dat"
@@ -64,14 +71,22 @@ mkdir -p "$GATE_ROOT"
   echo base_candidate_root=$BASE_CANDIDATE_ROOT
   echo selected_iq=43
   echo g_second_primitive_amplitude=$g_second_primitive_amplitude
+  echo optimized_g_source=${optimized_g_source:-none}
   sha256sum "$preparer" "$comparator" "$analyzer" "$original" "$base_coefficients" "$q3/manifest.dat" "$q3/status.dat"
+  if [[ -n "$optimized_g_source" ]]; then
+    sha256sum "$optimized_g_source" "$optimized_g_provenance"
+  fi
 } > "$GATE_ROOT/provenance.txt"
 
-"$python_exe" "$preparer" \
-  --source "$base_coefficients" \
-  --root "$CANDIDATE_ROOT" \
-  --second-primitive-amplitude "$g_second_primitive_amplitude" \
-  > "$GATE_ROOT/prepare.out"
+prepare_args=(
+  --source "$base_coefficients"
+  --root "$CANDIDATE_ROOT"
+  --second-primitive-amplitude "$g_second_primitive_amplitude"
+)
+if [[ -n "$optimized_g_source" ]]; then
+  prepare_args+=(--optimized-g-source "$optimized_g_source")
+fi
+"$python_exe" "$preparer" "${prepare_args[@]}" > "$GATE_ROOT/prepare.out"
 candidate_coefficients=$("$python_exe" - "$CANDIDATE_ROOT/CANDIDATE.json" "$CANDIDATE_ROOT" <<'PY'
 import json, pathlib, sys
 manifest = json.load(open(sys.argv[1], encoding="ascii"))

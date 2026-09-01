@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import hashlib
 import json
 import numpy as np
 import sys
@@ -123,6 +124,75 @@ class PrepareControlledGCandidateTest(unittest.TestCase):
             )
             self.assertEqual(restored["C"][4][0, 0], 1.0)
             self.assertEqual(restored["C"][4][1, 0], 0.2)
+
+    def test_reuses_only_optimized_g_without_changing_dzp_or_keeping_f(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            optimized = parent / "joint-optimized.txt"
+            root = parent / "candidate"
+            generator = torch.Generator().manual_seed(67)
+            base = {
+                "C": [
+                    torch.randn(31, count, generator=generator, dtype=torch.float64)
+                    if count
+                    else torch.empty(31, 0, dtype=torch.float64)
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            optimized_coefficients = {
+                "C": [
+                    torch.randn(31, count, generator=generator, dtype=torch.float64)
+                    if count
+                    else torch.empty(31, 0, dtype=torch.float64)
+                    for count in (3, 3, 2, 1, 1)
+                ]
+            }
+            optimized_coefficients["C"][4].zero_()
+            optimized_coefficients["C"][4][0, 0] = 1.0
+            write_periodic_optimizer_coefficients(source, base)
+            write_periodic_optimizer_coefficients(optimized, optimized_coefficients)
+
+            result = prepare_candidate(
+                source=source,
+                root=root,
+                optimized_g_source=optimized,
+            )
+
+            self.assertEqual(result["profile"], "controlled_optimized_g")
+            self.assertEqual(result["seed_definition"], "joint_atom_solid_optimized_g_only")
+            self.assertEqual(
+                result["optimized_g_source_sha256"],
+                hashlib.sha256(optimized.read_bytes()).hexdigest(),
+            )
+            restored = read_periodic_optimizer_coefficients(
+                root / result["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 0, 1),
+            )
+            for actual, expected in zip(restored["C"][:3], base["C"][:3]):
+                self.assertTrue(torch.equal(actual, expected))
+            self.assertEqual(restored["C"][3].shape, (31, 0))
+            self.assertTrue(torch.equal(restored["C"][4], optimized_coefficients["C"][4]))
+
+    def test_rejects_mixing_optimized_g_with_primitive_amplitude(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            optimized = parent / "joint-optimized.txt"
+            base = {"C": [torch.zeros(31, count, dtype=torch.float64) for count in (3, 3, 2, 0, 0)]}
+            joint = {"C": [torch.zeros(31, count, dtype=torch.float64) for count in (3, 3, 2, 1, 1)]}
+            joint["C"][4][0, 0] = 1.0
+            write_periodic_optimizer_coefficients(source, base)
+            write_periodic_optimizer_coefficients(optimized, joint)
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                prepare_candidate(
+                    source=source,
+                    root=parent / "candidate",
+                    second_primitive_amplitude=0.1,
+                    optimized_g_source=optimized,
+                )
 
     def test_refuses_existing_root(self):
         with tempfile.TemporaryDirectory() as directory:
