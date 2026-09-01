@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 STAGED_LAYOUTS = {
+    "galerkin_pareto_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "relaxed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "fixed_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),
     "interpolated_dzp": ([3, 3, 2, 0, 0], 22, "3s3p2d"),

@@ -8,6 +8,20 @@ from read_periodic_candidate_manifest import read_candidate
 
 
 class ReadPeriodicCandidateManifestTest(unittest.TestCase):
+    def test_reads_galerkin_pareto_dzp_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            orbital = root / "galerkin.orb"
+            orbital.write_text("orbital\n", encoding="ascii")
+            digest = hashlib.sha256(orbital.read_bytes()).hexdigest()
+            (root / "CANDIDATE.json").write_text(
+                json.dumps({"status": "success", "profile": "galerkin_pareto_dzp", "nu": [3, 3, 2, 0, 0], "ao_count_atom": 22, "orbital_filename": orbital.name, "orbital_sha256": digest}),
+                encoding="ascii",
+            )
+            result = read_candidate(root)
+            self.assertEqual(result["nao_atom"], 22)
+            self.assertEqual(result["layout"], "3s3p2d")
+
     def test_reads_nested_tzdp_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
