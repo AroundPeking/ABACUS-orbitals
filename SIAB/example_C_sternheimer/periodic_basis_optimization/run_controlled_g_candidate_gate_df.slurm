@@ -21,6 +21,7 @@ trap 'status=$?; echo "C_CONTROLLED_G_GATE_FAILED line=$LINENO command=$BASH_COM
 g_second_primitive_amplitude=${G_SECOND_PRIMITIVE_AMPLITUDE:-0}
 optimized_g_source=${OPTIMIZED_G_SOURCE:-}
 optimized_g_provenance=${OPTIMIZED_G_PROVENANCE:-}
+optimized_g_max_primitives=${OPTIMIZED_G_MAX_PRIMITIVES:-}
 
 case "${SLURM_JOB_PARTITION:?}" in p1|48cp2) ;; *) exit 1 ;; esac
 test "${SLURM_NTASKS:?}" = 1
@@ -72,6 +73,7 @@ mkdir -p "$GATE_ROOT"
   echo selected_iq=43
   echo g_second_primitive_amplitude=$g_second_primitive_amplitude
   echo optimized_g_source=${optimized_g_source:-none}
+  echo optimized_g_max_primitives=${optimized_g_max_primitives:-none}
   sha256sum "$preparer" "$comparator" "$analyzer" "$original" "$base_coefficients" "$q3/manifest.dat" "$q3/status.dat"
   if [[ -n "$optimized_g_source" ]]; then
     sha256sum "$optimized_g_source" "$optimized_g_provenance"
@@ -85,6 +87,9 @@ prepare_args=(
 )
 if [[ -n "$optimized_g_source" ]]; then
   prepare_args+=(--optimized-g-source "$optimized_g_source")
+fi
+if [[ -n "$optimized_g_max_primitives" ]]; then
+  prepare_args+=(--optimized-g-max-primitives "$optimized_g_max_primitives")
 fi
 "$python_exe" "$preparer" "${prepare_args[@]}" > "$GATE_ROOT/prepare.out"
 candidate_coefficients=$("$python_exe" - "$CANDIDATE_ROOT/CANDIDATE.json" "$CANDIDATE_ROOT" <<'PY'

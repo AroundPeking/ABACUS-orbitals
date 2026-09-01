@@ -99,6 +99,7 @@ def prepare_candidate(
     root: Path,
     second_primitive_amplitude: float = 0.0,
     optimized_g_source: Path | None = None,
+    optimized_g_max_primitives: int | None = None,
 ) -> dict:
     source = Path(source).resolve(strict=True)
     root = Path(root).resolve()
@@ -111,6 +112,11 @@ def prepare_candidate(
             raise ValueError(
                 "optimized g source and second primitive amplitude are mutually exclusive"
             )
+    if optimized_g_max_primitives is not None:
+        if optimized_g_source is None:
+            raise ValueError("optimized g lowpass requires an optimized g source")
+        if not 1 <= optimized_g_max_primitives <= RADIAL_ROWS:
+            raise ValueError("optimized g max primitives must be within [1, 31]")
     if root.exists() or root.is_symlink():
         raise FileExistsError(root)
     if not root.parent.is_dir():
@@ -137,6 +143,9 @@ def prepare_candidate(
         g_seed = optimized["C"][4].detach().clone()
         if tuple(g_seed.shape) != (RADIAL_ROWS, 1):
             raise RuntimeError("optimized g source does not contain exactly one g radial")
+        if optimized_g_max_primitives is not None:
+            g_seed[optimized_g_max_primitives:, 0] = 0.0
+            g_seed /= torch.linalg.norm(g_seed)
     coefficients["C"][4] = g_seed
 
     radius, orbitals = build_radial_orbitals(
@@ -149,7 +158,7 @@ def prepare_candidate(
     )
     diagnostics = _radial_diagnostics(radius, orbitals[4][:, 0])
     if diagnostics["interior_node_count"] != 0:
-        raise RuntimeError("lowest g seed unexpectedly contains an interior radial node")
+        raise RuntimeError("controlled g radial contains an interior radial node")
     if abs(diagnostics["radial_norm"] - 1.0) > 1.0e-10:
         raise RuntimeError("controlled g radial normalization failed")
     if not all(
@@ -163,8 +172,11 @@ def prepare_candidate(
     try:
         contracted = second_primitive_amplitude != 0.0
         optimized_profile = optimized_g_source is not None
+        lowpass_profile = optimized_g_max_primitives is not None
         token = _amplitude_token(second_primitive_amplitude)
-        if optimized_profile:
+        if lowpass_profile:
+            suffix = f"joint_atom_solid_optimized_g_lowpass_n{optimized_g_max_primitives}"
+        elif optimized_profile:
             suffix = "joint_atom_solid_optimized_g"
         else:
             suffix = f"contracted_l4_bessel_{token}" if contracted else "lowest_l4_bessel"
@@ -195,14 +207,18 @@ def prepare_candidate(
         payload = {
             "status": "success",
             "profile": (
-                "controlled_optimized_g"
+                "controlled_optimized_g_lowpass"
+                if lowpass_profile
+                else "controlled_optimized_g"
                 if optimized_profile
                 else "controlled_contracted_g" if contracted else "controlled_lowest_g"
             ),
             "nu": list(TARGET_NU),
             "ao_count_atom": AO_COUNT_ATOM,
             "seed_definition": (
-                "joint_atom_solid_optimized_g_only"
+                "joint_atom_solid_optimized_g_lowpass"
+                if lowpass_profile
+                else "joint_atom_solid_optimized_g_only"
                 if optimized_profile
                 else "lowest_l4_bessel_plus_scaled_second_primitive"
                 if contracted
@@ -222,6 +238,7 @@ def prepare_candidate(
                 {
                     "optimized_g_source": str(optimized_g_source),
                     "optimized_g_source_sha256": sha256(optimized_g_source),
+                    "optimized_g_max_primitives": optimized_g_max_primitives,
                 }
             )
         manifest = temporary / "CANDIDATE.json"
@@ -261,6 +278,7 @@ def main() -> None:
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--second-primitive-amplitude", type=float, default=0.0)
     parser.add_argument("--optimized-g-source", type=Path)
+    parser.add_argument("--optimized-g-max-primitives", type=int)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -269,6 +287,7 @@ def main() -> None:
                 root=args.root,
                 second_primitive_amplitude=args.second_primitive_amplitude,
                 optimized_g_source=args.optimized_g_source,
+                optimized_g_max_primitives=args.optimized_g_max_primitives,
             ),
             sort_keys=True,
             allow_nan=False,

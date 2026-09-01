@@ -194,6 +194,57 @@ class PrepareControlledGCandidateTest(unittest.TestCase):
                     optimized_g_source=optimized,
                 )
 
+    def test_lowpass_projects_optimized_g_to_requested_primitive_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            source = parent / "base.txt"
+            optimized = parent / "joint-optimized.txt"
+            root = parent / "candidate"
+            generator = torch.Generator().manual_seed(71)
+            base = {
+                "C": [
+                    torch.randn(
+                        31, count, generator=generator, dtype=torch.float64
+                    )
+                    for count in (3, 3, 2, 0, 0)
+                ]
+            }
+            joint = {
+                "C": [
+                    torch.randn(
+                        31, count, generator=generator, dtype=torch.float64
+                    )
+                    for count in (3, 3, 2, 1, 1)
+                ]
+            }
+            joint["C"][4][:3, 0] = torch.tensor(
+                [1.0, 0.01, 0.4], dtype=torch.float64
+            )
+            joint["C"][4][3:, 0] = 0.2
+            write_periodic_optimizer_coefficients(source, base)
+            write_periodic_optimizer_coefficients(optimized, joint)
+
+            result = prepare_candidate(
+                source=source,
+                root=root,
+                optimized_g_source=optimized,
+                optimized_g_max_primitives=3,
+            )
+
+            self.assertEqual(result["profile"], "controlled_optimized_g_lowpass")
+            self.assertEqual(result["optimized_g_max_primitives"], 3)
+            restored = read_periodic_optimizer_coefficients(
+                root / result["coefficients_filename"],
+                element="C",
+                radial_rows=31,
+                expected_nu=(3, 3, 2, 0, 1),
+            )
+            expected = joint["C"][4].clone()
+            expected[3:, 0] = 0.0
+            expected /= torch.linalg.norm(expected)
+            self.assertTrue(torch.allclose(restored["C"][4], expected, atol=1.0e-15))
+            self.assertEqual(result["g_diagnostics"]["interior_node_count"], 0)
+
     def test_refuses_existing_root(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
