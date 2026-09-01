@@ -73,6 +73,14 @@
       "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
     },
     {
+      "name": "s3_0p25_d2_0p25_p3_m0p25",
+      "coordinates": {"beta_s3": 0.25, "beta_d2": 0.25, "beta_p3": -0.25},
+      "stability": "stable",
+      "pbe_gate": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3m0p25-d2p0p25-pbe-qstar-sos-retry-adfe596b/pbe-gate/PBE_GATE.json",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3m0p25-d2p0p25-pbe-qstar-sos-retry-adfe596b/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3m0p25-d2p0p25-pbe-qstar-sos-retry-adfe596b/solid-sos/librpa.out"
+    },
+    {
       "name": "s3_0p25_d2_0p50_barrier",
       "coordinates": {"beta_s3": 0.25, "beta_d2": 0.5},
       "stability": "unstable",
