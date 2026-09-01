@@ -1,0 +1,65 @@
+{
+  "acceptance_tolerance_ev_per_c": 0.1,
+  "ao_count_per_atom": 22,
+  "atom_occupations": {
+    "down": 1,
+    "up": 3
+  },
+  "candidate_nu": [
+    3,
+    3,
+    2,
+    0,
+    0
+  ],
+  "counterpoise": false,
+  "coulomb": "exact_grid_full_periodic",
+  "element": "C",
+  "family_pair": [
+    "C_atom",
+    "C_solid"
+  ],
+  "fixed_nu": [
+    2,
+    2,
+    1,
+    0,
+    0
+  ],
+  "format_version": 1,
+  "frequency_count": 6,
+  "full_qstar_indices": [
+    1,
+    2,
+    3,
+    6,
+    7,
+    8,
+    11,
+    28
+  ],
+  "librpa_commit": "d4810f73",
+  "maximum_relative_family_degradation": 0.02,
+  "n_bands_chi0": -1,
+  "occupied_capture_floor": 0.9998982409775239,
+  "pareto_weights": [
+    0.25,
+    0.5,
+    0.75
+  ],
+  "pbe_max_abs_deviation_ev": 0.01,
+  "product_pca_threshold": 0.0001,
+  "proxy_maximum_loo_error_ev_per_c": 0.001912,
+  "proxy_q_indices": [
+    6,
+    7,
+    8
+  ],
+  "reference_binding_ev_per_c": 6.902326,
+  "system": "C_atom_diamond",
+  "tail_q_indices": [
+    2,
+    6
+  ],
+  "trust_radius": 0.02
+}
