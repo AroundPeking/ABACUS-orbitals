@@ -34,6 +34,7 @@ class CGalerkinBindingWorkflowTest(unittest.TestCase):
         self.assertEqual(config["pbe_max_abs_deviation_ev"], 0.01)
         self.assertEqual(config["tail_q_indices"], [2, 6])
         self.assertEqual(config["proxy_q_indices"], [6, 7, 8])
+        self.assertEqual(config["q3_maximum_condition_ratio"], 3.0)
         self.assertEqual(config["full_qstar_indices"], [1, 2, 3, 6, 7, 8, 11, 28])
         self.assertEqual(config["n_bands_chi0"], -1)
         self.assertEqual(config["product_pca_threshold"], 1.0e-4)

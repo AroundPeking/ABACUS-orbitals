@@ -55,6 +55,7 @@
     7,
     8
   ],
+  "q3_maximum_condition_ratio": 3.0,
   "reference_binding_ev_per_c": 6.902326,
   "system": "C_atom_diamond",
   "tail_q_indices": [

@@ -62,6 +62,7 @@ REQUIRED_CONFIG = {
     "product_pca_threshold",
     "proxy_maximum_loo_error_ev_per_c",
     "proxy_q_indices",
+    "q3_maximum_condition_ratio",
     "reference_binding_ev_per_c",
     "system",
     "tail_q_indices",
@@ -126,6 +127,7 @@ def load_config(path):
         "pbe_max_abs_deviation_ev",
         "product_pca_threshold",
         "proxy_maximum_loo_error_ev_per_c",
+        "q3_maximum_condition_ratio",
         "reference_binding_ev_per_c",
         "trust_radius",
     ):
