@@ -1,0 +1,74 @@
+{
+  "q_indices_one_based": [6, 7, 8],
+  "maximum_loo_error_ev_per_c": 0.01,
+  "minimum_rank_concordance": 0.95,
+  "calibration_endpoints": [
+    {
+      "name": "signed_base",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/signed-fixed-sp0p5-pm1-dm1p5-pbe-qstar-sos-0e9cd721/solid-sos/librpa.out"
+    },
+    {
+      "name": "relaxed_p_all_0p25",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxedpp0p25-pbe-qstar-sos-2ce075f8/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxedpp0p25-pbe-qstar-sos-2ce075f8/solid-sos/librpa.out"
+    },
+    {
+      "name": "relaxed_d_all_0p25",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxeddp0p25-pbe-qstar-sos-2ce075f8/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/twodir-fixedsp0p5-pm1-dm1p5-relaxeddp0p25-pbe-qstar-sos-2ce075f8/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p25",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p50",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p5-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p5-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "s3_0p25_d2_0p25",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "p3_0p25",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3p0p25-d2p0p25-pbe-qstar-sos-4a8dd9e2/solid-sos/librpa.out"
+    },
+    {
+      "name": "reverse_p3",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3m0p25-d2p0p25-pbe-qstar-sos-retry-adfe596b/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/zeta-fixedsp0p5-pm1-dm1p5-relaxeds3p0p25-p3m0p25-d2p0p25-pbe-qstar-sos-retry-adfe596b/solid-sos/librpa.out"
+    },
+    {
+      "name": "fixed500",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/fixed-dzp-pbe-qstar-sos-01cfb35a/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/fixed-dzp-pbe-qstar-sos-01cfb35a/solid-sos/librpa.out"
+    },
+    {
+      "name": "relaxed_dzp",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/relaxed-dzp-pbe-qstar-sos-5b59f819/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/relaxed-dzp-pbe-qstar-sos-5b59f819/solid-sos/librpa.out"
+    },
+    {
+      "name": "lowpass_g",
+      "binding_result": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/controlled-jointopt-g-lowpass-n3-from-p3-pbe-tail-sos-bd4b168a/binding/RESULT.json",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/controlled-jointopt-g-lowpass-n3-from-p3-pbe-tail-sos-bd4b168a/solid-sos/librpa.out"
+    },
+    {
+      "name": "no_f_baseline",
+      "atom_summary": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/joint-atom-solid-no-f-threshold-q12-control/atom-reference-density-seed/RESULT_SUMMARY.txt",
+      "solid_summary": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/joint-atom-solid-no-f-threshold-q12-control/solid-qstar-sos/RESULT_SUMMARY.txt",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/joint-atom-solid-no-f-threshold-q12-control/solid-qstar-sos/librpa.out"
+    },
+    {
+      "name": "original_sg15_tzdp",
+      "atom_summary": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/original-tzdp-atom-allband-sos-threshold-pca-914b787f/RESULT_SUMMARY.txt",
+      "solid_summary": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/original-tzdp-atom-solid-sos-baseline-914b787f/SOLID_RESULT_SUMMARY.txt",
+      "solid_librpa_output": "/data/home/df_iopcas_ghj/app/siab/periodic-c-efc24c2c/runs/product-pca-20260825/ordinary-sos-original-tzdp-grid-full-bz-reader-fractional-nfreq6-d4810f73/librpa.out"
+    }
+  ]
+}
