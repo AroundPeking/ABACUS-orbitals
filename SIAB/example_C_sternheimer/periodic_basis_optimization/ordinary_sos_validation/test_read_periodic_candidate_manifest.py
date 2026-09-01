@@ -134,6 +134,20 @@ class ReadPeriodicCandidateManifestTest(unittest.TestCase):
             self.assertEqual(result["nao_atom"], 29)
             self.assertEqual(result["layout"], "3s3p2d1f")
 
+    def test_reads_galerkin_single_f_solid_orthogonal_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            orbital = root / "galerkin-solid-orthogonal-f.orb"
+            orbital.write_text("orbital\n", encoding="ascii")
+            digest = hashlib.sha256(orbital.read_bytes()).hexdigest()
+            (root / "CANDIDATE.json").write_text(
+                json.dumps({"status": "success", "profile": "galerkin_single_f_solid_orthogonal", "nu": [3, 3, 2, 1, 0], "ao_count_atom": 29, "orbital_filename": orbital.name, "orbital_sha256": digest}),
+                encoding="ascii",
+            )
+            result = read_candidate(root)
+            self.assertEqual(result["nao_atom"], 29)
+            self.assertEqual(result["layout"], "3s3p2d1f")
+
     def test_reads_controlled_lowest_g_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

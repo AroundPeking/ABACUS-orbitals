@@ -17,6 +17,7 @@ STAGED_LAYOUTS = {
     "controlled_lowest_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_contracted_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_tail_damped_f": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
+    "galerkin_single_f_solid_orthogonal": ([3, 3, 2, 1, 0], 29, "3s3p2d1f"),
     "controlled_lowest_g": ([3, 3, 2, 0, 1], 31, "3s3p2d1g"),
     "controlled_contracted_g": ([3, 3, 2, 0, 1], 31, "3s3p2d1g"),
     "controlled_optimized_g": ([3, 3, 2, 0, 1], 31, "3s3p2d1g"),
