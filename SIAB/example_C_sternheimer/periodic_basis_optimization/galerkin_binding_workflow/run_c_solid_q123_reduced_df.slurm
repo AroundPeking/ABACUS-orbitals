@@ -13,6 +13,8 @@ trap 'status=$?; echo "C_SOLID_Q123_FAILED line=$LINENO command=$BASH_COMMAND st
 
 : "${SIAB_SOURCE_ROOT:?missing immutable source deployment}"
 : "${SIAB_SOURCE_COMMIT:?missing source commit}"
+: "${SIAB_SCRIPT_SHA256:?missing solid-only adapter SHA256}"
+: "${SIAB_CONFIG_SHA256:?missing reduced config SHA256}"
 : "${INITIAL_COEFFICIENTS:?missing accepted starting coefficients}"
 : "${INITIAL_SHA256:?missing initial coefficient SHA256}"
 : "${Q1_PHYSICS_HASH:?missing q1 physics hash}"
@@ -20,8 +22,14 @@ trap 'status=$?; echo "C_SOLID_Q123_FAILED line=$LINENO command=$BASH_COMMAND st
 : "${Q3_PHYSICS_HASH:?missing q3 physics hash}"
 : "${OUTPUT_ROOT:?missing immutable output root}"
 
-test "$(git -C "$SIAB_SOURCE_ROOT" rev-parse HEAD)" = "$SIAB_SOURCE_COMMIT"
-test -z "$(git -C "$SIAB_SOURCE_ROOT" status --porcelain)"
+if test -d "$SIAB_SOURCE_ROOT/.git"; then
+  git_head=$SIAB_SOURCE_ROOT/.git/HEAD
+else
+  gitdir=$(sed -n 's/^gitdir: //p' "$SIAB_SOURCE_ROOT/.git")
+  test -n "$gitdir"
+  git_head=$gitdir/HEAD
+fi
+test "$(cat "$git_head")" = "$SIAB_SOURCE_COMMIT"
 test "$(sha256sum "$INITIAL_COEFFICIENTS" | awk '{print $1}')" = "$INITIAL_SHA256"
 output=$OUTPUT_ROOT
 test ! -e "$output"
@@ -41,6 +49,8 @@ export OMP_PLACES=cores
 workflow=$SIAB_SOURCE_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow
 script=$workflow/build_c_solid_all_q_candidate.py
 config=$workflow/c_diamond_solid_q123_reduced.json
+test "$(sha256sum "$script" | awk '{print $1}')" = "$SIAB_SCRIPT_SHA256"
+test "$(sha256sum "$config" | awk '{print $1}')" = "$SIAB_CONFIG_SHA256"
 producer=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1
 q1=$producer/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q1_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
 q2=$producer/c-diamond-g24-fd8-nfreq6-q2-product-pca-711af860c-kpar8-retry1/OUT.C_DIAMOND_G24_FD8_NFREQ6_Q2_PRODUCT_PCA/STERNHEIMER_BASIS_OPT_V1
