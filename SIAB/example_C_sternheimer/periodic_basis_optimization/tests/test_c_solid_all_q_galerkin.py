@@ -1,6 +1,8 @@
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 import unittest
 
 import torch
@@ -11,6 +13,11 @@ SCRIPT = (
     ROOT
     / "galerkin_binding_workflow"
     / "build_c_solid_all_q_candidate.py"
+)
+CONFIG = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "c_diamond_solid_q123_reduced.json"
 )
 
 
@@ -160,6 +167,152 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
                 q_count=64,
                 coverage="full",
             )
+
+    def test_reduced_config_and_cli_have_no_atomic_inputs(self):
+        module = load_module()
+        config = module.load_config(CONFIG)
+        self.assertEqual(config["system"], "C_diamond_solid")
+        self.assertEqual(config["coverage"], "reduced")
+        self.assertEqual(config["q_count"], 64)
+        self.assertEqual(config["qstar_contract"], list(self.FULL_CONTRACT[:3]))
+
+        arguments = module.parse_args(
+            [
+                "--config",
+                str(CONFIG),
+                "--qstar",
+                "1=/tmp/q1",
+                "--qstar",
+                "2=/tmp/q2",
+                "--qstar",
+                "3=/tmp/q3",
+                "--initial",
+                "/tmp/initial.orb",
+                "--output-directory",
+                "/tmp/output",
+                "--source-commit",
+                "1" * 40,
+            ]
+        )
+        self.assertEqual([label for label, _ in arguments.qstar], [1, 2, 3])
+        self.assertFalse(any("atom" in name for name in vars(arguments)))
+
+    def test_cli_writes_solid_only_candidate_artifacts(self):
+        module = load_module()
+        contract = self.FULL_CONTRACT[:3]
+        datasets = {
+            record["label"]: self.dataset(record) for record in contract
+        }
+        initial = {
+            "C": [
+                torch.eye(3, dtype=torch.float64),
+                torch.eye(3, dtype=torch.float64),
+                torch.eye(2, dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+                torch.empty((3, 0), dtype=torch.float64),
+            ]
+        }
+        calls = {}
+
+        def dataset_reader(path, **options):
+            self.assertFalse(options["include_reference_projection"])
+            return datasets[int(Path(path).name[1:])]
+
+        def coefficient_reader(path, **options):
+            calls["coefficient_reader"] = (Path(path), options)
+            return initial
+
+        def gradient_evaluator(values, coefficients, **options):
+            calls["gradient"] = (values, coefficients, options)
+            return SimpleNamespace(
+                family_order=("C_solid",),
+                family_losses={"C_solid": 2.0},
+                gradient_norms={"C_solid": 0.5},
+                gradient_cosines={},
+                minimum_occupied_capture=0.99999,
+                maximum_overlap_condition=2.0,
+            )
+
+        candidate = SimpleNamespace(
+            family="C_solid",
+            trust_radius=0.01,
+            coefficients=initial,
+            coefficients_sha256="9" * 64,
+        )
+
+        def candidate_builder(result, **options):
+            calls["candidate_builder"] = (result, options)
+            return candidate
+
+        def candidate_evaluator(result, coefficients):
+            self.assertIs(coefficients, initial)
+            return {
+                "loss": 1.5,
+                "family_losses": {"C_solid": 1.5},
+                "minimum_occupied_capture": 0.99998,
+                "maximum_overlap_condition": 2.1,
+            }
+
+        def coefficient_writer(path, coefficients):
+            self.assertIs(coefficients, initial)
+            Path(path).write_text("candidate\n", encoding="ascii")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = json.loads(CONFIG.read_text(encoding="ascii"))
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(config), encoding="ascii")
+            initial_path = root / "initial.orb"
+            initial_path.write_text("initial\n", encoding="ascii")
+            for label in (1, 2, 3):
+                (root / f"q{label}").mkdir()
+            output = root / "output"
+
+            result = module.main(
+                [
+                    "--config",
+                    str(config_path),
+                    "--qstar",
+                    f"1={root / 'q1'}",
+                    "--qstar",
+                    f"2={root / 'q2'}",
+                    "--qstar",
+                    f"3={root / 'q3'}",
+                    "--initial",
+                    str(initial_path),
+                    "--output-directory",
+                    str(output),
+                    "--source-commit",
+                    "1" * 40,
+                ],
+                dataset_reader=dataset_reader,
+                dataset_contract_validator=lambda values: None,
+                coefficient_reader=coefficient_reader,
+                gradient_evaluator=gradient_evaluator,
+                candidate_builder=candidate_builder,
+                candidate_evaluator=candidate_evaluator,
+                coefficient_writer=coefficient_writer,
+            )
+
+            self.assertEqual(
+                calls["gradient"][2]["dataset_families"],
+                ("C_solid", "C_solid", "C_solid"),
+            )
+            self.assertEqual(calls["candidate_builder"][1]["family"], "C_solid")
+            for name in (
+                "STATUS.json",
+                "PROVENANCE.json",
+                "DATASET_INVENTORY.json",
+                "GRADIENT.json",
+                "CANDIDATE.json",
+                "ORBITAL_RESULTS.txt",
+            ):
+                self.assertTrue((output / name).is_file(), name)
+            self.assertEqual(result["candidate_generation_gate"], "pass")
+            self.assertEqual(result["physical_release_gate"], "hold")
+            status = json.loads((output / "STATUS.json").read_text(encoding="ascii"))
+            self.assertEqual(status["status"], "success")
+            self.assertEqual(status["coverage"], "reduced")
 
 
 if __name__ == "__main__":

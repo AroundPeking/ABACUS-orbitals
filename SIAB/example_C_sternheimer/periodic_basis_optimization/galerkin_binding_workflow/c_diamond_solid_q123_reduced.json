@@ -1,0 +1,42 @@
+{
+  "ao_count_per_atom": 22,
+  "candidate_nu": [
+    3,
+    3,
+    2,
+    0,
+    0
+  ],
+  "coverage": "reduced",
+  "element": "C",
+  "fixed_nu": [
+    2,
+    2,
+    1,
+    0,
+    0
+  ],
+  "format_version": 1,
+  "occupied_capture_floor": 0.9998982409775239,
+  "q_count": 64,
+  "qstar_contract": [
+    {
+      "label": 1,
+      "multiplicity": 1,
+      "selected_iq": 1
+    },
+    {
+      "label": 2,
+      "multiplicity": 8,
+      "selected_iq": 22
+    },
+    {
+      "label": 3,
+      "multiplicity": 4,
+      "selected_iq": 43
+    }
+  ],
+  "radial_rows": 31,
+  "system": "C_diamond_solid",
+  "trust_radius": 0.01
+}
