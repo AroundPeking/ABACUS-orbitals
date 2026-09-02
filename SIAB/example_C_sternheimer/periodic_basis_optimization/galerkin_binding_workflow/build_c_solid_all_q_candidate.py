@@ -45,6 +45,22 @@ DIAMOND_QSTAR_CONTRACT = (
     {"label": 11, "selected_iq": 11, "multiplicity": 3},
     {"label": 28, "selected_iq": 55, "multiplicity": 6},
 )
+STANDARD_FD8_QSTAR_LABELS = (1, 2, 3, 6, 7, 8, 11, 22, 23, 24, 27, 28, 43)
+STANDARD_FD8_QSTAR_CONTRACT = (
+    {"label": 1, "selected_iq": 1, "multiplicity": 1},
+    {"label": 2, "selected_iq": 2, "multiplicity": 6},
+    {"label": 3, "selected_iq": 3, "multiplicity": 3},
+    {"label": 6, "selected_iq": 6, "multiplicity": 6},
+    {"label": 7, "selected_iq": 7, "multiplicity": 12},
+    {"label": 8, "selected_iq": 8, "multiplicity": 6},
+    {"label": 11, "selected_iq": 11, "multiplicity": 3},
+    {"label": 22, "selected_iq": 22, "multiplicity": 2},
+    {"label": 23, "selected_iq": 23, "multiplicity": 6},
+    {"label": 24, "selected_iq": 24, "multiplicity": 6},
+    {"label": 27, "selected_iq": 27, "multiplicity": 6},
+    {"label": 28, "selected_iq": 28, "multiplicity": 6},
+    {"label": 43, "selected_iq": 43, "multiplicity": 1},
+)
 SHARED_PROVENANCE_FIELDS = (
     "abacus_commit",
     "executable_sha256",
@@ -67,6 +83,13 @@ REQUIRED_CONFIG_FIELDS = {
     "system",
     "trust_radius",
 }
+STANDARD_CONFIG_FIELDS = REQUIRED_CONFIG_FIELDS | {
+    "final_energy_protocol",
+    "frequency_count",
+    "product_pca_threshold",
+    "qstar_scheme",
+    "training_coulomb",
+}
 FREQUENCY_RTOL = 1.0e-12
 FREQUENCY_ATOL = 1.0e-14
 
@@ -77,20 +100,33 @@ def _positive_integer(value, name):
     return value
 
 
-def _validate_frequency_tensor(value, name):
+def _validate_frequency_tensor(value, name, expected_count=6):
+    _positive_integer(expected_count, "expected frequency count")
+    count_name = {6: "six-point", 12: "twelve-point"}.get(
+        expected_count,
+        f"{expected_count}-point",
+    )
     if (
         not isinstance(value, torch.Tensor)
         or value.dtype != torch.float64
         or value.device.type != "cpu"
         or value.ndim != 1
-        or value.numel() != 6
+        or value.numel() != expected_count
         or not bool(torch.isfinite(value).all())
     ):
-        raise ValueError(f"{name} must be a finite six-point CPU float64 tensor")
+        raise ValueError(
+            f"{name} must be a finite {count_name} CPU float64 tensor"
+        )
     return value
 
 
-def _parse_qstar_contract(qstar_contract, *, coverage, q_count):
+def _parse_qstar_contract(
+    qstar_contract,
+    *,
+    coverage,
+    q_count,
+    expected_labels=FULL_QSTAR_LABELS,
+):
     contract = tuple(qstar_contract)
     if not contract:
         raise ValueError("q-star contract must be nonempty")
@@ -111,8 +147,17 @@ def _parse_qstar_contract(qstar_contract, *, coverage, q_count):
         )
     if len(set(labels)) != len(labels) or len(set(selected_iq)) != len(selected_iq):
         raise ValueError("logical q-star labels and selected_iq values must be unique")
-    if coverage == "full" and tuple(labels) != FULL_QSTAR_LABELS:
+    expected_labels = tuple(expected_labels)
+    if coverage == "full" and tuple(labels) != expected_labels:
+        if expected_labels == STANDARD_FD8_QSTAR_LABELS:
+            raise ValueError("full coverage requires the 13 standard FD8 q stars")
         raise ValueError("full coverage requires the eight logical q stars")
+    if (
+        coverage == "full"
+        and expected_labels == STANDARD_FD8_QSTAR_LABELS
+        and tuple(selected_iq) != STANDARD_FD8_QSTAR_LABELS
+    ):
+        raise ValueError("standard FD8 labels and selected_iq values must match")
     if coverage == "full" and sum(multiplicities) != q_count:
         raise ValueError("full q-star multiplicities must cover the q mesh")
     return contract, labels, selected_iq, multiplicities
@@ -140,9 +185,15 @@ def _finite(value, name, *, positive=False):
 
 def load_config(path):
     payload = json.loads(Path(path).read_text(encoding="ascii"))
-    if not isinstance(payload, dict) or set(payload) != REQUIRED_CONFIG_FIELDS:
+    if not isinstance(payload, dict):
+        raise ValueError("solid-only workflow config must be an object")
+    format_version = payload.get("format_version")
+    expected_fields = (
+        REQUIRED_CONFIG_FIELDS if format_version == 1 else STANDARD_CONFIG_FIELDS
+    )
+    if set(payload) != expected_fields:
         raise ValueError("solid-only workflow config fields differ from the contract")
-    if payload["format_version"] != 1 or payload["system"] != "C_diamond_solid":
+    if format_version not in {1, 2} or payload["system"] != "C_diamond_solid":
         raise ValueError("unsupported solid-only C workflow config")
     if payload["element"] != "C":
         raise ValueError("solid-only C workflow element must be C")
@@ -165,10 +216,37 @@ def load_config(path):
     _finite(payload["occupied_capture_floor"], "occupied_capture_floor", positive=True)
     if not 0.0 < payload["occupied_capture_floor"] <= 1.0:
         raise ValueError("occupied capture floor must be in (0, 1]")
+    expected_labels = FULL_QSTAR_LABELS
+    if format_version == 2:
+        if payload["coverage"] != "full":
+            raise ValueError("standard FD8 workflow requires full coverage")
+        if payload["qstar_scheme"] != "fd8_discrete_13":
+            raise ValueError("unsupported standard q-star scheme")
+        if payload["frequency_count"] != 12:
+            raise ValueError("standard FD8 workflow requires 12 frequencies")
+        if payload["product_pca_threshold"] != 1.0e-6:
+            raise ValueError("standard FD8 workflow requires product PCA 1e-6")
+        if payload["training_coulomb"] != "full_periodic":
+            raise ValueError("standard FD8 workflow requires full periodic Coulomb")
+        expected_final = {
+            "coulomb": "full_periodic",
+            "frequency_count": 12,
+            "option_dielect_func": 3,
+            "product_pca_threshold": 1.0e-6,
+            "replace_w_head": True,
+            "rpa_headwing_body_start": 1,
+            "rpa_headwing_mode": "qavg",
+            "sqrt_coulomb_threshold": 1.0e-5,
+            "use_rpa_gamma": True,
+        }
+        if payload["final_energy_protocol"] != expected_final:
+            raise ValueError("standard final qavg head/wing protocol differs")
+        expected_labels = STANDARD_FD8_QSTAR_LABELS
     _, labels, _, _ = _parse_qstar_contract(
         payload["qstar_contract"],
         coverage=payload["coverage"],
         q_count=payload["q_count"],
+        expected_labels=expected_labels,
     )
     if payload["coverage"] == "reduced" and labels != [1, 2, 3]:
         raise ValueError("reduced replay must use logical q stars 1, 2, and 3")
@@ -210,6 +288,8 @@ def validate_qstar_datasets(
     qstar_contract,
     q_count,
     coverage,
+    expected_labels=FULL_QSTAR_LABELS,
+    expected_frequency_count=6,
 ):
     """Validate symmetry labels, weights, grids, and shared response provenance."""
     if coverage not in {"full", "reduced"}:
@@ -223,6 +303,7 @@ def validate_qstar_datasets(
         contract,
         coverage=coverage,
         q_count=q_count,
+        expected_labels=expected_labels,
     )
 
     reference_frequency = None
@@ -246,10 +327,12 @@ def validate_qstar_datasets(
         frequency = _validate_frequency_tensor(
             getattr(dataset, "frequency_ha", None),
             "frequency grid",
+            expected_frequency_count,
         )
         weights = _validate_frequency_tensor(
             getattr(dataset, "frequency_weights_ha", None),
             "frequency weights",
+            expected_frequency_count,
         )
         provenance = tuple(
             getattr(dataset, field, None) for field in SHARED_PROVENANCE_FIELDS
@@ -357,8 +440,22 @@ def main(
         qstar_contract=config["qstar_contract"],
         q_count=config["q_count"],
         coverage=config["coverage"],
+        expected_labels=(
+            STANDARD_FD8_QSTAR_LABELS
+            if config["format_version"] == 2
+            else FULL_QSTAR_LABELS
+        ),
+        expected_frequency_count=config.get("frequency_count", 6),
     )
     inventory = build_dataset_inventory(datasets, contract_result)
+    inventory["training_protocol"] = {
+        "frequency_count": config.get("frequency_count", 6),
+        "product_pca_threshold": config.get("product_pca_threshold", 1.0e-4),
+        "coulomb": config.get("training_coulomb", "full_periodic"),
+        "qstar_scheme": config.get("qstar_scheme", "legacy_logical_8"),
+    }
+    if "final_energy_protocol" in config:
+        inventory["final_energy_protocol"] = config["final_energy_protocol"]
     initial = coefficient_reader(
         args.initial,
         element=config["element"],

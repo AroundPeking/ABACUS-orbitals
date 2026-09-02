@@ -2,7 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a solid-only diamond-C Galerkin adapter that validates a complete weighted eight-q-star dataset and produces one deterministic trust-region candidate without atomic inputs.
+**Goal:** Add a solid-only diamond-C Galerkin adapter that validates the standard weighted FD8 thirteen-q dataset and produces one deterministic trust-region candidate without atomic inputs.
+
+**Current protocol:** Tasks 1-5 below record the completed legacy six-frequency,
+eight-logical-q scaffold and reduced replay.  They are retained for provenance,
+not as the production contract.  Production now means 12 frequencies,
+threshold-only product PCA `1e-6`, full periodic Coulomb, the thirteen FD8
+representatives, and qavg head/wing only in the final LibRPA energy stage.
 
 **Architecture:** Keep the existing q-weighted periodic loss as the single numerical implementation. Add a public single-family descent helper and a C-specific adapter that validates logical q-star labels separately from each dataset's symmetry-equivalent `selected_iq`. A reduced q1/q2/q3 mode provides regression evidence but is permanently blocked from physical release.
 
@@ -250,3 +256,52 @@ direct reference definition are complete.
 Record the code commit, replay result, missing q contract, measured cost and
 remaining physical decision. Compile the canonical TeX note and inspect every
 changed PDF page before reporting the stage complete.
+
+### Task 6: Freeze The Standard FD8 Production Contract
+
+**Files:**
+- Modify: `SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/build_c_solid_all_q_candidate.py`
+- Create: `SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/c_diamond_solid_fd8_q13_standard.json`
+- Create: `SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_q1_df.slurm`
+- Create: `SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/librpa_c_solid_fd8_q13_qavg.in`
+- Modify: `SIAB/example_C_sternheimer/periodic_basis_optimization/tests/test_c_solid_all_q_galerkin.py`
+
+- [x] **Step 1: Write and observe failing standard-protocol tests**
+
+Require exactly thirteen representatives with multiplicities summing to 64,
+12 common frequencies, product PCA `1e-6`, and separate training/final-energy
+contracts.  Confirm the tests fail against the legacy-only implementation.
+
+- [x] **Step 2: Implement the versioned standard contract**
+
+Keep version 1 reduced/eight-q parsing unchanged.  Add version 2 with exact
+FD8 labels and multiplicities, 12-frequency validation, product-PCA and full
+Coulomb metadata, plus the final qavg head/wing contract.
+
+- [x] **Step 3: Add a unique q1 timing and storage gate**
+
+Use the frozen basis-opt ABACUS executable on 48 p1 nodes, with 12 frequency
+groups and four k groups.  Produce q1 only.  Validate scheduler/program status,
+all equations, manifest provenance, exact frequency grid, memory, wall time and
+dataset bytes.  Do not release the other twelve representatives yet.
+
+- [ ] **Step 4: Verify, commit, deploy and submit q1 once**
+
+Run focused and related regression tests, shell syntax checks and
+`git diff --check`.  Commit with the required attribution, deploy the exact
+commit immutably, check queue and output roots for duplicates, then submit one
+q1 gate.
+
+- [ ] **Step 5: Decide whether to release the remaining twelve q points**
+
+Require q1 `COMPLETED/0:0`, program and provenance success, exactly 12 complete
+frequencies, product PCA `1e-6`, full Coulomb, a frequency-grid hash matching
+the accepted standard reference, and measured runtime/storage within the
+campaign limits.  Only then create the remaining-q array contract.
+
+- [ ] **Step 6: Final qavg physical validation**
+
+After offline Galerkin optimization and candidate promotion, run the complete
+thirteen-representative reader chain and LibRPA using the frozen qavg template.
+Keep the body response and final head/wing correction as separately reported
+quantities; do not call a Galerkin loss or body-only energy a physical result.

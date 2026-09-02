@@ -1,0 +1,43 @@
+{
+  "ao_count_per_atom": 22,
+  "candidate_nu": [3, 3, 2, 0, 0],
+  "coverage": "full",
+  "element": "C",
+  "final_energy_protocol": {
+    "coulomb": "full_periodic",
+    "frequency_count": 12,
+    "option_dielect_func": 3,
+    "product_pca_threshold": 1e-06,
+    "replace_w_head": true,
+    "rpa_headwing_body_start": 1,
+    "rpa_headwing_mode": "qavg",
+    "sqrt_coulomb_threshold": 1e-05,
+    "use_rpa_gamma": true
+  },
+  "fixed_nu": [2, 2, 1, 0, 0],
+  "format_version": 2,
+  "frequency_count": 12,
+  "occupied_capture_floor": 0.9998982409775239,
+  "product_pca_threshold": 1e-06,
+  "q_count": 64,
+  "qstar_contract": [
+    {"label": 1, "multiplicity": 1, "selected_iq": 1},
+    {"label": 2, "multiplicity": 6, "selected_iq": 2},
+    {"label": 3, "multiplicity": 3, "selected_iq": 3},
+    {"label": 6, "multiplicity": 6, "selected_iq": 6},
+    {"label": 7, "multiplicity": 12, "selected_iq": 7},
+    {"label": 8, "multiplicity": 6, "selected_iq": 8},
+    {"label": 11, "multiplicity": 3, "selected_iq": 11},
+    {"label": 22, "multiplicity": 2, "selected_iq": 22},
+    {"label": 23, "multiplicity": 6, "selected_iq": 23},
+    {"label": 24, "multiplicity": 6, "selected_iq": 24},
+    {"label": 27, "multiplicity": 6, "selected_iq": 27},
+    {"label": 28, "multiplicity": 6, "selected_iq": 28},
+    {"label": 43, "multiplicity": 1, "selected_iq": 43}
+  ],
+  "qstar_scheme": "fd8_discrete_13",
+  "radial_rows": 31,
+  "system": "C_diamond_solid",
+  "training_coulomb": "full_periodic",
+  "trust_radius": 0.01
+}

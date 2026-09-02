@@ -34,6 +34,26 @@ CONFIG = (
     / "galerkin_binding_workflow"
     / "c_diamond_solid_q123_reduced.json"
 )
+STANDARD_CONFIG = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "c_diamond_solid_fd8_q13_standard.json"
+)
+STANDARD_Q1_RUNNER = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "run_c_solid_fd8_q13_standard_q1_df.slurm"
+)
+STANDARD_QAVG_INPUT = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "librpa_c_solid_fd8_q13_qavg.in"
+)
+STANDARD_FREQUENCY_REFERENCE = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "c_diamond_fd8_nfreq12_reference.tsv"
+)
 
 
 def load_module():
@@ -87,6 +107,21 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         {"label": 11, "selected_iq": 11, "multiplicity": 3},
         {"label": 28, "selected_iq": 55, "multiplicity": 6},
     )
+    STANDARD_FD8_CONTRACT = (
+        {"label": 1, "selected_iq": 1, "multiplicity": 1},
+        {"label": 2, "selected_iq": 2, "multiplicity": 6},
+        {"label": 3, "selected_iq": 3, "multiplicity": 3},
+        {"label": 6, "selected_iq": 6, "multiplicity": 6},
+        {"label": 7, "selected_iq": 7, "multiplicity": 12},
+        {"label": 8, "selected_iq": 8, "multiplicity": 6},
+        {"label": 11, "selected_iq": 11, "multiplicity": 3},
+        {"label": 22, "selected_iq": 22, "multiplicity": 2},
+        {"label": 23, "selected_iq": 23, "multiplicity": 6},
+        {"label": 24, "selected_iq": 24, "multiplicity": 6},
+        {"label": 27, "selected_iq": 27, "multiplicity": 6},
+        {"label": 28, "selected_iq": 28, "multiplicity": 6},
+        {"label": 43, "selected_iq": 43, "multiplicity": 1},
+    )
 
     def dataset(self, record, **changes):
         values = {
@@ -116,6 +151,130 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
     def datasets(self, contract=None):
         contract = self.FULL_CONTRACT if contract is None else tuple(contract)
         return tuple(self.dataset(record) for record in contract)
+
+    def standard_datasets(self):
+        frequency = torch.tensor(
+            [0.02, 0.07, 0.16, 0.31, 0.55, 0.92, 1.5, 2.5, 4.2, 7.5, 15.0, 40.0],
+            dtype=torch.float64,
+        )
+        weights = torch.tensor(
+            [0.03, 0.06, 0.11, 0.18, 0.29, 0.45, 0.70, 1.1, 1.9, 3.8, 10.0, 50.0],
+            dtype=torch.float64,
+        )
+        return tuple(
+            self.dataset(
+                record,
+                frequency_ha=frequency.clone(),
+                frequency_weights_ha=weights.clone(),
+            )
+            for record in self.STANDARD_FD8_CONTRACT
+        )
+
+    def test_standard_config_locks_twelve_frequency_pca_and_qavg_contract(self):
+        module = load_module()
+
+        config = module.load_config(STANDARD_CONFIG)
+
+        self.assertEqual(config["format_version"], 2)
+        self.assertEqual(config["qstar_scheme"], "fd8_discrete_13")
+        self.assertEqual(config["frequency_count"], 12)
+        self.assertEqual(config["product_pca_threshold"], 1.0e-6)
+        self.assertEqual(config["training_coulomb"], "full_periodic")
+        self.assertEqual(config["qstar_contract"], list(self.STANDARD_FD8_CONTRACT))
+        self.assertEqual(
+            config["final_energy_protocol"],
+            {
+                "coulomb": "full_periodic",
+                "frequency_count": 12,
+                "option_dielect_func": 3,
+                "product_pca_threshold": 1.0e-6,
+                "replace_w_head": True,
+                "rpa_headwing_body_start": 1,
+                "rpa_headwing_mode": "qavg",
+                "sqrt_coulomb_threshold": 1.0e-5,
+                "use_rpa_gamma": True,
+            },
+        )
+
+    def test_accepts_standard_fd8_thirteen_q_twelve_frequency_contract(self):
+        module = load_module()
+
+        result = module.validate_qstar_datasets(
+            self.standard_datasets(),
+            qstar_contract=self.STANDARD_FD8_CONTRACT,
+            q_count=64,
+            coverage="full",
+            expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+            expected_frequency_count=12,
+        )
+
+        self.assertEqual(result["dataset_contract_gate"], "pass")
+        self.assertEqual(result["frequency_count"], 12)
+        self.assertEqual(result["multiplicity_sum"], 64)
+        self.assertEqual(
+            result["logical_qstar_labels"],
+            [1, 2, 3, 6, 7, 8, 11, 22, 23, 24, 27, 28, 43],
+        )
+
+    def test_standard_contract_rejects_legacy_eight_q_and_six_frequency_data(self):
+        module = load_module()
+        with self.assertRaisesRegex(ValueError, "13 standard FD8 q stars"):
+            module.validate_qstar_datasets(
+                self.datasets(),
+                qstar_contract=self.FULL_CONTRACT,
+                q_count=64,
+                coverage="full",
+                expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+                expected_frequency_count=12,
+            )
+        with self.assertRaisesRegex(ValueError, "twelve-point"):
+            module.validate_qstar_datasets(
+                self.datasets(self.STANDARD_FD8_CONTRACT),
+                qstar_contract=self.STANDARD_FD8_CONTRACT,
+                q_count=64,
+                coverage="full",
+                expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+                expected_frequency_count=12,
+            )
+
+    def test_standard_q1_runner_and_final_qavg_input_keep_stage_boundaries(self):
+        runner = STANDARD_Q1_RUNNER.read_text(encoding="ascii")
+        final_input = STANDARD_QAVG_INPUT.read_text(encoding="ascii")
+
+        self.assertIn("set_input_key sternheimer_nfreq 12", runner)
+        self.assertIn("set_input_key exx_pca_threshold 1e-6", runner)
+        self.assertIn("set_input_key out_sternheimer_basis_opt 1", runner)
+        self.assertIn("set_input_key sternheimer_q_index 1", runner)
+        self.assertNotIn("rpa_headwing_mode", runner)
+        self.assertNotIn("replace_w_head", runner)
+        self.assertIn("nfreq = 12", final_input)
+        self.assertIn("use_rpa_gamma = true", final_input)
+        self.assertIn("replace_w_head = true", final_input)
+        self.assertIn("option_dielect_func = 3", final_input)
+        self.assertIn("rpa_headwing_mode = qavg", final_input)
+        self.assertIn("rpa_headwing_body_start = 1", final_input)
+        self.assertIn("sqrt_coulomb_threshold = 1e-5", final_input)
+
+    def test_standard_frequency_reference_matches_accepted_delta_st_grid(self):
+        rows = [
+            tuple(float(value) for value in line.split())
+            for line in STANDARD_FREQUENCY_REFERENCE.read_text(
+                encoding="ascii"
+            ).splitlines()
+        ]
+        runner = STANDARD_Q1_RUNNER.read_text(encoding="ascii")
+
+        self.assertEqual(len(rows), 12)
+        self.assertEqual(
+            rows[0],
+            (1.0, 0.04387042772464342, 0.08917051395758147),
+        )
+        self.assertEqual(
+            rows[-1],
+            (12.0, 38.14573704601481, 41.61618619514986),
+        )
+        self.assertIn("c_diamond_fd8_nfreq12_reference.tsv", runner)
+        self.assertIn("frequency grid differs from accepted standard reference", runner)
 
     def test_accepts_complete_weighted_eight_qstar_contract(self):
         module = load_module()

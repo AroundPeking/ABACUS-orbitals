@@ -9,10 +9,17 @@ frozen Galerkin response data from every symmetry-inequivalent q star of the
 
 ## Physical Boundary
 
-The eight q-star representatives are `1, 2, 3, 6, 7, 8, 11, 28` with frozen
-star multiplicities.  Their weighted sum is the complete 64-q result for this
-mesh; it is not proof of q-mesh convergence.  A reduced q set may be used only
-for regression tests or an explicitly labelled screening estimate.
+The standard FD8 `4 x 4 x 4` response contract has thirteen representatives:
+`1, 2, 3, 6, 7, 8, 11, 22, 23, 24, 27, 28, 43`, with multiplicities
+`1, 6, 3, 6, 12, 6, 3, 2, 6, 6, 6, 6, 1`.  Their multiplicities sum to 64.
+The earlier eight-logical-star mapping is retained only as a legacy ordinary
+SOS diagnostic and must not be accepted as the standard Delta-ST/Galerkin
+training contract.
+
+Every standard training dataset uses 12 GreenX minimax frequencies,
+threshold-only product PCA `1e-6`, FD8 on the `24 x 24 x 24` real-space grid,
+and the full periodic Coulomb metric.  A reduced q set may be used only for
+regression tests or an explicitly labelled screening estimate.
 
 The workflow requires a named solid-only reference observable.  A large-basis
 ordinary-SOS energy may be recorded as a numerical baseline, but it is not an
@@ -43,8 +50,8 @@ implementation.
 
 ## Objective And Candidate Policy
 
-The first implementation uses the existing normalized projected-response loss
-over all eight q stars.  It records enough per-q information to add an
+The standard implementation uses the existing normalized projected-response
+loss over all thirteen q representatives.  It records enough per-q information to add an
 energy-sensitivity weighting later without changing the dataset contract.
 The scalar ordinary-SOS energy is never the only response constraint.
 
@@ -57,11 +64,11 @@ candidate at a time.
 
 ## Dataset Contract
 
-A production all-q run must contain exactly the configured eight logical
-q-star labels, with no duplicates or omissions.  Every dataset must have:
+A production all-q run must contain exactly the configured thirteen FD8
+representatives, with no duplicates or omissions.  Every dataset must have:
 
 - `status success` and `all_converged yes`;
-- the configured star weight and six-frequency grid;
+- the configured star weight and common 12-frequency grid;
 - identical orbital, pseudopotential, auxiliary basis, primitive-block,
   ABACUS commit and executable identities where the format provides them;
 - full periodic Coulomb and the same `4 x 4 x 4` k/q definition;
@@ -75,12 +82,15 @@ physical-release gate.
 
 The expensive path is monotone:
 
-1. complete eight-q Galerkin evaluation and candidate freeze;
+1. complete thirteen-q Galerkin evaluation and candidate freeze;
 2. solid PBE per-C energy, gap, band order and virtual-spectrum gate;
-3. q2/q6 six-frequency high-tail stability gate;
+3. q2/q6 12-frequency high-tail stability gate;
 4. direct solid ordinary-SOS proxy from the configured q subset;
-5. complete eight-q ordinary all-band SOS and LibRPA energy;
-6. q-mesh, frequency and Gamma head/wing convergence of the accepted basis;
+5. complete thirteen-representative ordinary all-band response and LibRPA
+   energy with 12 frequencies and product PCA `1e-6`;
+6. final qavg head/wing evaluation with `replace_w_head=true`,
+   `option_dielect_func=3`, `rpa_headwing_mode=qavg`, and
+   `rpa_headwing_body_start=1`;
 7. GW band-edge validation when the intended output is GW.
 
 No atom job is part of this route.  Scheduler completion, numerical validity,
@@ -90,7 +100,7 @@ states.
 ## Efficiency
 
 The missing frozen q-star responses are produced once.  Candidate gradients,
-trust-region steps and complete eight-q Galerkin evaluations then reuse those
+trust-region steps and complete thirteen-q Galerkin evaluations then reuse those
 files without rerunning ABACUS.  Most rejected candidates stop at the offline
 or q2/q6 gates.  Only a candidate whose conservative solid-only proxy reaches
 the target interval receives the remaining ordinary-SOS q stars.
@@ -99,11 +109,15 @@ the target interval receives the remaining ordinary-SOS q stars.
 
 Tests are written before implementation and must prove:
 
-- a valid eight-q manifest passes with the exact labels and weights;
+- a valid thirteen-q manifest passes with the exact labels and weights;
+- the standard contract rejects six-frequency and legacy eight-q inputs;
+- product PCA `1e-6` is locked in producer provenance;
+- qavg head/wing appears only in the final LibRPA energy contract, not in the
+  Galerkin producer input;
 - missing, duplicate or misweighted q stars fail;
 - mismatched source, orbital, auxiliary or frequency provenance fails;
 - reduced coverage is explicit and cannot release physics;
 - no atomic input is accepted or required;
-- all eight datasets form one `C_solid` loss family;
+- all thirteen datasets form one `C_solid` loss family;
 - output ordering and hashes are deterministic;
 - the existing atom-solid adapter remains unchanged.
