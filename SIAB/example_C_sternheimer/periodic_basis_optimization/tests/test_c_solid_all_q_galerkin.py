@@ -24,6 +24,11 @@ COMPLEMENT_SCRIPT = (
     / "galerkin_binding_workflow"
     / "build_c_solid_qstar_complement.py"
 )
+REFERENCE_AUDIT_SCRIPT = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "audit_c_solid_direct_reference.py"
+)
 CONFIG = (
     ROOT
     / "galerkin_binding_workflow"
@@ -55,6 +60,16 @@ def load_complement_module():
     spec = importlib.util.spec_from_file_location(
         "build_c_solid_qstar_complement",
         COMPLEMENT_SCRIPT,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_reference_audit_module():
+    spec = importlib.util.spec_from_file_location(
+        "audit_c_solid_direct_reference",
+        REFERENCE_AUDIT_SCRIPT,
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -476,6 +491,77 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
             214.0,
         )
         self.assertEqual(result["direct_solid_reference"]["status"], "missing")
+        self.assertEqual(result["physical_submission_gate"], "hold")
+
+    def test_full_bz_coulomb_diagnostic_is_not_a_direct_response_reference(self):
+        module = load_reference_audit_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "full-bz-coulomb"
+            for index in range(1, 65):
+                output = root / f"q{index}" / f"OUT.Q{index}"
+                output.mkdir(parents=True)
+                (output / "STERNHEIMER_SIAB_STATUS.dat").write_text(
+                    "status abfs_diag_only\n"
+                    f"sternheimer_q_index {index}\n"
+                    "nfreq 6\n",
+                    encoding="ascii",
+                )
+                (output / f"v1_coulomb_full_iq_{index}_rank0.dat").write_text(
+                    "coulomb\n",
+                    encoding="ascii",
+                )
+
+            result = module.audit_direct_reference_candidates(
+                candidate_roots=[root],
+                response_roots=[],
+            )
+
+        record = result["candidate_roots"][0]
+        self.assertEqual(record["classification"], "coulomb_only_diagnostic")
+        self.assertEqual(record["status_file_count"], 64)
+        self.assertEqual(record["status_values"], {"abfs_diag_only": 64})
+        self.assertEqual(record["response_dataset_count"], 0)
+        self.assertEqual(result["direct_solid_reference"]["status"], "missing")
+        self.assertEqual(result["physical_submission_gate"], "hold")
+
+    def test_reduced_converged_response_reports_missing_qstar_weight(self):
+        module = load_reference_audit_module()
+        selected_iq = (1, 22, 43)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "response-root"
+            for index in selected_iq:
+                output = root / f"q{index}" / f"OUT.Q{index}"
+                dataset = output / "STERNHEIMER_BASIS_OPT_V1"
+                dataset.mkdir(parents=True)
+                (output / "STERNHEIMER_SIAB_STATUS.dat").write_text(
+                    "status success\n"
+                    "format basis_opt_v1\n"
+                    f"sternheimer_q_index {index}\n"
+                    "nfreq 6\n"
+                    "all_converged yes\n",
+                    encoding="ascii",
+                )
+                (dataset / "status.dat").write_text(
+                    "status success\n",
+                    encoding="ascii",
+                )
+                (dataset / "response_ik_1_ifreq_0.bin").write_bytes(b"response")
+
+            result = module.audit_direct_reference_candidates(
+                candidate_roots=[],
+                response_roots=[root],
+            )
+
+        self.assertEqual(result["available_selected_iq"], [1, 22, 43])
+        self.assertEqual(result["available_logical_qstars"], [1, 2, 3])
+        self.assertEqual(result["available_multiplicity_sum"], 13)
+        self.assertEqual(result["missing_selected_iq"], [6, 27, 23, 11, 55])
+        self.assertEqual(result["missing_multiplicity_sum"], 51)
+        self.assertEqual(result["direct_solid_reference"]["status"], "missing")
+        self.assertEqual(
+            result["direct_solid_reference"]["reason"],
+            "converged_response_coverage_is_reduced",
+        )
         self.assertEqual(result["physical_submission_gate"], "hold")
 
 
