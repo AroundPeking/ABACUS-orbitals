@@ -19,6 +19,11 @@ AUDIT_SCRIPT = (
     / "galerkin_binding_workflow"
     / "audit_c_solid_qstar_inputs.py"
 )
+COMPLEMENT_SCRIPT = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "build_c_solid_qstar_complement.py"
+)
 CONFIG = (
     ROOT
     / "galerkin_binding_workflow"
@@ -40,6 +45,16 @@ def load_audit_module():
     spec = importlib.util.spec_from_file_location(
         "audit_c_solid_qstar_inputs",
         AUDIT_SCRIPT,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_complement_module():
+    spec = importlib.util.spec_from_file_location(
+        "build_c_solid_qstar_complement",
+        COMPLEMENT_SCRIPT,
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -415,6 +430,46 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertEqual(result["direct_solid_reference"]["status"], "missing")
         self.assertEqual(result["complement_submission_gate"], "hold")
         self.assertEqual(result["physical_release_gate"], "hold")
+
+    def test_builds_hash_locked_missing_qstar_complement(self):
+        module = load_complement_module()
+        inventory = [
+            {
+                "logical_qstar_label": record["label"],
+                "selected_iq": record["selected_iq"],
+                "multiplicity": record["multiplicity"],
+                "q_weight": record["multiplicity"] / 64.0,
+                "physics_hash": f'{record["label"]:064x}',
+            }
+            for record in self.FULL_CONTRACT[:3]
+        ]
+
+        result = module.build_complement_contract(
+            inventory,
+            inventory_sha256="1" * 64,
+            source_commit="2" * 40,
+            measured_q_wall_minutes=[47.5, 52.9, 53.5],
+            nodes_per_q=48,
+            storage_gib_per_q=29.0,
+            direct_reference=None,
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["present_multiplicity_sum"], 13)
+        self.assertEqual(result["missing_multiplicity_sum"], 51)
+        self.assertEqual(result["missing_selected_iq"], [6, 27, 23, 11, 55])
+        self.assertEqual(result["resource_estimate"]["missing_q_count"], 5)
+        self.assertEqual(result["resource_estimate"]["storage_gib"], 145.0)
+        self.assertAlmostEqual(
+            result["resource_estimate"]["node_hours_min"],
+            190.0,
+        )
+        self.assertAlmostEqual(
+            result["resource_estimate"]["node_hours_max"],
+            214.0,
+        )
+        self.assertEqual(result["direct_solid_reference"]["status"], "missing")
+        self.assertEqual(result["physical_submission_gate"], "hold")
 
 
 if __name__ == "__main__":
