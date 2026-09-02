@@ -52,10 +52,10 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         {"label": 2, "selected_iq": 22, "multiplicity": 8},
         {"label": 3, "selected_iq": 43, "multiplicity": 4},
         {"label": 6, "selected_iq": 6, "multiplicity": 6},
-        {"label": 7, "selected_iq": 7, "multiplicity": 24},
-        {"label": 8, "selected_iq": 8, "multiplicity": 12},
+        {"label": 7, "selected_iq": 27, "multiplicity": 24},
+        {"label": 8, "selected_iq": 23, "multiplicity": 12},
         {"label": 11, "selected_iq": 11, "multiplicity": 3},
-        {"label": 28, "selected_iq": 28, "multiplicity": 6},
+        {"label": 28, "selected_iq": 55, "multiplicity": 6},
     )
 
     def dataset(self, record, **changes):
@@ -100,7 +100,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertEqual(result["dataset_contract_gate"], "pass")
         self.assertEqual(result["coverage"], "full")
         self.assertEqual(result["logical_qstar_labels"], [1, 2, 3, 6, 7, 8, 11, 28])
-        self.assertEqual(result["selected_iq"], [1, 22, 43, 6, 7, 8, 11, 28])
+        self.assertEqual(result["selected_iq"], [1, 22, 43, 6, 27, 23, 11, 55])
         self.assertEqual(result["multiplicity_sum"], 64)
         self.assertEqual(result["physical_release_gate"], "pending_candidate")
 
