@@ -45,6 +45,18 @@ def build_complement_contract(
 ):
     if not _valid_hash(inventory_sha256, 64) or not _valid_hash(source_commit, 40):
         raise ValueError("invalid source or inventory hash")
+    if isinstance(inventory, dict):
+        if (
+            inventory.get("coverage") != "reduced"
+            or inventory.get("dataset_contract_gate") != "pass"
+            or inventory.get("physical_release_gate") != "hold"
+            or inventory.get("q_count") != 64
+            or not isinstance(inventory.get("datasets"), list)
+        ):
+            raise ValueError("invalid reduced dataset inventory envelope")
+        inventory = inventory["datasets"]
+    if not isinstance(inventory, list):
+        raise ValueError("dataset inventory must be a list or validated envelope")
     known = {record["label"]: record for record in DIAMOND_QSTAR_CONTRACT}
     present = []
     for record in inventory:

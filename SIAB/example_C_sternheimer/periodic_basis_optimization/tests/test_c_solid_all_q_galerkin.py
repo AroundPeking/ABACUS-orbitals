@@ -433,16 +433,23 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
 
     def test_builds_hash_locked_missing_qstar_complement(self):
         module = load_complement_module()
-        inventory = [
-            {
-                "logical_qstar_label": record["label"],
-                "selected_iq": record["selected_iq"],
-                "multiplicity": record["multiplicity"],
-                "q_weight": record["multiplicity"] / 64.0,
-                "physics_hash": f'{record["label"]:064x}',
-            }
-            for record in self.FULL_CONTRACT[:3]
-        ]
+        inventory = {
+            "coverage": "reduced",
+            "dataset_contract_gate": "pass",
+            "datasets": [
+                {
+                    "logical_qstar_label": record["label"],
+                    "selected_iq": record["selected_iq"],
+                    "multiplicity": record["multiplicity"],
+                    "q_weight": record["multiplicity"] / 64.0,
+                    "physics_hash": f'{record["label"]:064x}',
+                }
+                for record in self.FULL_CONTRACT[:3]
+            ],
+            "multiplicity_sum": 13,
+            "physical_release_gate": "hold",
+            "q_count": 64,
+        }
 
         result = module.build_complement_contract(
             inventory,
