@@ -22,7 +22,7 @@ module load oneapi/2024.2
 workflow=$SIAB_SOURCE_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow
 runner=$workflow/run_c_solid_fd8_q13_standard_q1_df.slurm
 config=$workflow/c_diamond_solid_fd8_q13_standard.json
-reference_grid=$workflow/c_diamond_fd8_nfreq12_reference.tsv
+validator=$workflow/validate_c_solid_fd8_q_dataset.py
 abacus_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825
 abacus=$abacus_root/artifacts/job3117942/abacus_3p
 template=$abacus_root/gate-template-product-pca
@@ -58,7 +58,7 @@ test -d "$SIAB_SOURCE_ROOT/.git"
 test "$(resolve_source_head)" = "$SIAB_SOURCE_COMMIT"
 test "$(sha256sum "$runner" | awk '{print $1}')" = "$SIAB_RUNNER_SHA256"
 test "$(sha256sum "$config" | awk '{print $1}')" = "$SIAB_CONFIG_SHA256"
-test -s "$reference_grid"
+test -s "$validator"
 test -x "$abacus"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 grep -Fq "$abacus_commit" "$abacus_root/artifacts/job3117942/commit_metadata.txt"
@@ -143,7 +143,7 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
   echo response_kpoint_groups=4
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
-  sha256sum "$runner" "$config" "$reference_grid" "$abacus" INPUT STRU KPT \
+  sha256sum "$runner" "$config" "$validator" "$abacus" INPUT STRU KPT \
     C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb
 } > RUN_PROVENANCE.txt
 
@@ -172,100 +172,35 @@ grep -qx 'frequency_count 12' "$dataset/manifest.dat"
 python3 "$abacus_root/validate_periodic_basis_opt.py" \
   "$dataset" --commit "$abacus_commit" | tee BASIS_OPT_VALIDATION.json
 
-python3 - "$dataset/manifest.dat" "$reference_grid" "$orbital_sha256" "$pseudopotential_sha256" "$expected_abacus_sha" \
-  > STANDARD_PROTOCOL_VALIDATION.json <<'PY'
+expected_auxiliary_sha=$(python3 - "$orbital_sha256" <<'PY'
 import hashlib
-import json
-import math
-import pathlib
 import struct
 import sys
 
-(
-    manifest_path,
-    reference_grid_path,
-    orbital_sha256,
-    pseudopotential_sha256,
-    executable_sha256,
-) = sys.argv[1:]
-metadata = {}
-frequencies = []
-with open(manifest_path, encoding="ascii") as handle:
-    for line in handle:
-        fields = line.split()
-        if fields and fields[0] == "frequency":
-            frequencies.append(fields[1:])
-        elif len(fields) >= 2 and fields[0] not in {"kpoint", "eigenvalues_ry", "entry"}:
-            metadata[fields[0]] = fields[1:]
-
-def scalar(key):
-    values = metadata.get(key, [])
-    if len(values) != 1:
-        raise RuntimeError("missing or non-scalar manifest field: " + key)
-    return values[0]
-
-assert scalar("abacus_commit") == "711af860c125b9757c344a1961b63524c550cfe4"
-assert scalar("executable_sha256") == executable_sha256
-assert scalar("orbital_sha256") == orbital_sha256
-assert scalar("pseudopotential_sha256") == pseudopotential_sha256
-assert scalar("auxiliary_basis_source") == "product_pca"
-assert scalar("kernel") == "full_coulomb"
-assert int(scalar("q_count")) == 64
-assert int(scalar("selected_iq")) == 1
-assert math.isclose(float(scalar("q_weight")), 1.0 / 64.0, rel_tol=0.0, abs_tol=1.0e-15)
-assert int(scalar("frequency_count")) == 12
-assert len(frequencies) == 12
-
 digest = hashlib.sha256()
 digest.update(b"ABACUS_STERNHEIMER_AUXILIARY_BASIS_DEFINITION_V1")
-digest.update(orbital_sha256.encode("ascii"))
+digest.update(sys.argv[1].encode("ascii"))
 digest.update(struct.pack(">d", 1.0e-6))
 digest.update(struct.pack(">d", 4.0))
 digest.update(struct.pack(">Q", 0))
-assert scalar("auxiliary_basis_sha256") == digest.hexdigest()
-
-raw_dimension = int(scalar("raw_auxiliary_dimension"))
-retained_rank = int(scalar("whitened_auxiliary_rank"))
-assert raw_dimension == 236
-assert 0 < retained_rank <= raw_dimension
-
-grid_path = pathlib.Path("FREQUENCY_GRID.tsv")
-grid_path.write_text(
-    "\n".join(
-        "\t".join([str(int(values[0]) + 1), values[1], values[2]])
-        for values in frequencies
-    ) + "\n",
-    encoding="ascii",
-)
-reference_grid = pathlib.Path(reference_grid_path)
-reference_rows = [
-    tuple(float(value) for value in line.split())
-    for line in reference_grid.read_text(encoding="ascii").splitlines()
-]
-actual_rows = [
-    tuple(float(value) for value in line.split())
-    for line in grid_path.read_text(encoding="ascii").splitlines()
-]
-if len(reference_rows) != 12 or len(actual_rows) != 12:
-    raise RuntimeError("frequency grid differs from accepted standard reference")
-for reference, actual in zip(reference_rows, actual_rows):
-    if reference[0] != actual[0] or any(
-        not math.isclose(reference[index], actual[index], rel_tol=1.0e-12, abs_tol=1.0e-14)
-        for index in (1, 2)
-    ):
-        raise RuntimeError("frequency grid differs from accepted standard reference")
-print(json.dumps({
-    "status": "success",
-    "frequency_count": len(frequencies),
-    "frequency_grid_sha256": hashlib.sha256(grid_path.read_bytes()).hexdigest(),
-    "frequency_reference_sha256": hashlib.sha256(reference_grid.read_bytes()).hexdigest(),
-    "product_pca_threshold": 1.0e-6,
-    "raw_auxiliary_dimension": raw_dimension,
-    "whitened_auxiliary_rank": retained_rank,
-    "q_index": 1,
-    "q_weight": float(scalar("q_weight")),
-}, indent=2, sort_keys=True))
+print(digest.hexdigest())
 PY
+)
+
+python3 "$validator" \
+  --manifest "$dataset/manifest.dat" \
+  --status "$dataset/status.dat" \
+  --input INPUT \
+  --frequency-grid-output FREQUENCY_GRID.tsv \
+  --frequency-grid-source greenx_minimax \
+  --expected-abacus-commit "$abacus_commit" \
+  --expected-executable-sha256 "$expected_abacus_sha" \
+  --expected-orbital-sha256 "$orbital_sha256" \
+  --expected-pseudopotential-sha256 "$pseudopotential_sha256" \
+  --expected-auxiliary-basis-sha256 "$expected_auxiliary_sha" \
+  --expected-iq 1 \
+  --expected-q-weight 0.015625 \
+  > STANDARD_PROTOCOL_VALIDATION.json
 
 find "$dataset" -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > OUTPUT_SHA256.txt
 dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
@@ -274,7 +209,7 @@ dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
   echo dataset_bytes=$dataset_bytes
   echo final_energy_headwing_protocol=qavg_deferred_not_applied_to_training_dataset
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$reference_grid" FREQUENCY_GRID.tsv STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
+  sha256sum "$validator" FREQUENCY_GRID.tsv STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
 } >> RUN_PROVENANCE.txt
 
 echo "C_SOLID_FD8_Q1_STANDARD_OK work=$work"

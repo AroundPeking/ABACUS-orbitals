@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -53,6 +54,11 @@ STANDARD_FREQUENCY_REFERENCE = (
     ROOT
     / "galerkin_binding_workflow"
     / "c_diamond_fd8_nfreq12_reference.tsv"
+)
+STANDARD_DATASET_VALIDATOR = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "validate_c_solid_fd8_q_dataset.py"
 )
 
 
@@ -258,7 +264,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertIn("rpa_headwing_body_start = 1", final_input)
         self.assertIn("sqrt_coulomb_threshold = 1e-5", final_input)
 
-    def test_standard_frequency_reference_matches_accepted_delta_st_grid(self):
+    def test_standard_frequency_reference_records_external_delta_st_grid(self):
         rows = [
             tuple(float(value) for value in line.split())
             for line in STANDARD_FREQUENCY_REFERENCE.read_text(
@@ -276,8 +282,108 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
             rows[-1],
             (12.0, 38.14573704601481, 41.61618619514986),
         )
-        self.assertIn("c_diamond_fd8_nfreq12_reference.tsv", runner)
-        self.assertIn("frequency grid differs from accepted standard reference", runner)
+        self.assertNotIn("c_diamond_fd8_nfreq12_reference.tsv", runner)
+        self.assertNotIn("frequency grid differs from accepted standard reference", runner)
+        self.assertIn("validate_c_solid_fd8_q_dataset.py", runner)
+
+    def test_standard_dataset_validator_accepts_basis_dependent_greenx_grid(self):
+        frequencies = (
+            (0, 0.04565797059955627, 0.09297562114265379),
+            (1, 0.1472337847704972, 0.11400318473961449),
+            (2, 0.2827118432498664, 0.16243626436455158),
+            (3, 0.4859784125068096, 0.25290839509328883),
+            (4, 0.8116005629258609, 0.4133548859158804),
+            (5, 1.352823794416095, 0.6956366824598177),
+            (6, 2.274954557350092, 1.1969829058135553),
+            (7, 3.880542998542356, 2.1056751676894843),
+            (8, 6.747611505552662, 3.8141644838202287),
+            (9, 12.081256059223758, 7.299548722543752),
+            (10, 23.01483841131379, 16.175317056563447),
+            (11, 53.91237828674242, 59.81730549385242),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "manifest.dat"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        "ABACUS_STERNHEIMER_BASIS_OPT_MANIFEST_V1",
+                        "abacus_commit " + "a" * 40,
+                        "executable_sha256 " + "b" * 64,
+                        "orbital_sha256 " + "c" * 64,
+                        "pseudopotential_sha256 " + "d" * 64,
+                        "auxiliary_basis_source product_pca",
+                        "auxiliary_basis_sha256 " + "e" * 64,
+                        "kernel full_coulomb",
+                        "q_count 64",
+                        "selected_iq 1",
+                        "q_weight 1.5625e-2",
+                        "frequency_count 12",
+                        "raw_auxiliary_dimension 320",
+                        "whitened_auxiliary_rank 301",
+                    ]
+                    + [
+                        f"frequency {index} {omega:.17e} {weight:.17e}"
+                        for index, omega, weight in frequencies
+                    ]
+                )
+                + "\n",
+                encoding="ascii",
+            )
+            status = root / "status.dat"
+            status.write_text(
+                "status success\nall_converged yes\n"
+                "max_solver_relative_residual 9.999e-7\n",
+                encoding="ascii",
+            )
+            input_path = root / "INPUT"
+            input_path.write_text(
+                "sternheimer_nfreq 12\nexx_pca_threshold 1e-6\n",
+                encoding="ascii",
+            )
+            output_grid = root / "FREQUENCY_GRID.tsv"
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(STANDARD_DATASET_VALIDATOR),
+                    "--manifest",
+                    str(manifest),
+                    "--status",
+                    str(status),
+                    "--input",
+                    str(input_path),
+                    "--frequency-grid-output",
+                    str(output_grid),
+                    "--frequency-grid-source",
+                    "greenx_minimax",
+                    "--expected-abacus-commit",
+                    "a" * 40,
+                    "--expected-executable-sha256",
+                    "b" * 64,
+                    "--expected-orbital-sha256",
+                    "c" * 64,
+                    "--expected-pseudopotential-sha256",
+                    "d" * 64,
+                    "--expected-auxiliary-basis-sha256",
+                    "e" * 64,
+                    "--expected-iq",
+                    "1",
+                    "--expected-q-weight",
+                    "0.015625",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = json.loads(result.stdout)
+            grid_lines = output_grid.read_text(encoding="ascii").splitlines()
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["frequency_grid_source"], "greenx_minimax")
+        self.assertEqual(payload["raw_auxiliary_dimension"], 320)
+        self.assertEqual(payload["whitened_auxiliary_rank"], 301)
+        self.assertEqual(payload["frequency_count"], 12)
+        self.assertEqual(len(grid_lines), 12)
 
     def test_accepts_complete_weighted_eight_qstar_contract(self):
         module = load_module()
