@@ -16,9 +16,10 @@ def parse_args(argv=None):
     parser.add_argument("--frequency-grid-output", type=Path, required=True)
     parser.add_argument(
         "--frequency-grid-source",
-        choices=("greenx_minimax",),
+        choices=("greenx_minimax", "frozen_q1_greenx_minimax"),
         required=True,
     )
+    parser.add_argument("--expected-frequency-grid", type=Path)
     parser.add_argument("--expected-abacus-commit", required=True)
     parser.add_argument("--expected-executable-sha256", required=True)
     parser.add_argument("--expected-orbital-sha256", required=True)
@@ -81,6 +82,40 @@ def parse_frequency_rows(records):
     return rows
 
 
+def read_frequency_grid(path):
+    records = {"frequency": []}
+    with Path(path).open(encoding="ascii") as handle:
+        for line in handle:
+            stripped = line.split("#", 1)[0].strip()
+            if not stripped:
+                continue
+            fields = stripped.split()
+            if len(fields) == 2:
+                fields = [str(len(records["frequency"])), *fields]
+            elif len(fields) == 3:
+                index = float(fields[0])
+                if not index.is_integer():
+                    raise ValueError("frequency grid index must be an integer")
+                fields[0] = str(int(index) - 1)
+            else:
+                raise ValueError("frequency grid rows must have two or three columns")
+            records["frequency"].append(fields)
+    return parse_frequency_rows(records)
+
+
+def frequency_rows_match(left, right):
+    return len(left) == len(right) and all(
+        left_index == right_index
+        and math.isclose(left_omega, right_omega, rel_tol=1.0e-12, abs_tol=1.0e-14)
+        and math.isclose(left_weight, right_weight, rel_tol=1.0e-12, abs_tol=1.0e-14)
+        for (left_index, left_omega, left_weight), (
+            right_index,
+            right_omega,
+            right_weight,
+        ) in zip(left, right)
+    )
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -124,10 +159,21 @@ def main(argv=None):
     if raw_dimension <= 0 or not 0 < retained_rank <= raw_dimension:
         raise ValueError("auxiliary dimensions are invalid")
 
-    if "sternheimer_frequency_grid_file" in input_values:
-        raise ValueError("GreenX minimax q1 must generate its basis-dependent grid")
-
     rows = parse_frequency_rows(manifest)
+    input_grid = input_values.get("sternheimer_frequency_grid_file")
+    expected_grid_sha256 = None
+    if args.expected_frequency_grid is None:
+        if args.frequency_grid_source != "greenx_minimax" or input_grid is not None:
+            raise ValueError("GreenX minimax q1 must generate its basis-dependent grid")
+    else:
+        if args.frequency_grid_source != "frozen_q1_greenx_minimax":
+            raise ValueError("a frozen q1 grid requires the frozen-grid source label")
+        if input_grid != [args.expected_frequency_grid.name]:
+            raise ValueError("INPUT does not select the expected frozen q1 frequency grid")
+        expected_rows = read_frequency_grid(args.expected_frequency_grid)
+        if not frequency_rows_match(rows, expected_rows):
+            raise ValueError("dataset frequency grid differs from the frozen q1 grid")
+        expected_grid_sha256 = sha256(args.expected_frequency_grid)
 
     args.frequency_grid_output.write_text(
         "\n".join(
@@ -142,6 +188,7 @@ def main(argv=None):
         "frequency_grid_source": args.frequency_grid_source,
         "frequency_count": len(rows),
         "frequency_grid_sha256": sha256(args.frequency_grid_output),
+        "expected_frequency_grid_sha256": expected_grid_sha256,
         "raw_auxiliary_dimension": raw_dimension,
         "whitened_auxiliary_rank": retained_rank,
         "q_index": args.expected_iq,

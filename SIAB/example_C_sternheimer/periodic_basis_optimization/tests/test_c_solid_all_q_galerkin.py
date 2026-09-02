@@ -45,6 +45,11 @@ STANDARD_Q1_RUNNER = (
     / "galerkin_binding_workflow"
     / "run_c_solid_fd8_q13_standard_q1_df.slurm"
 )
+STANDARD_REMAINING_Q_RUNNER = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "run_c_solid_fd8_q13_standard_remaining_df.slurm"
+)
 STANDARD_QAVG_INPUT = (
     ROOT
     / "galerkin_binding_workflow"
@@ -245,6 +250,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
 
     def test_standard_q1_runner_and_final_qavg_input_keep_stage_boundaries(self):
         runner = STANDARD_Q1_RUNNER.read_text(encoding="ascii")
+        remaining_runner = STANDARD_REMAINING_Q_RUNNER.read_text(encoding="ascii")
         final_input = STANDARD_QAVG_INPUT.read_text(encoding="ascii")
 
         self.assertIn("set_input_key sternheimer_nfreq 12", runner)
@@ -256,6 +262,17 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertIn('source_ref=${source_head#ref: }', runner)
         self.assertNotIn("rpa_headwing_mode", runner)
         self.assertNotIn("replace_w_head", runner)
+        self.assertIn("#SBATCH --array=0-11%1", remaining_runner)
+        self.assertIn("q_labels=(2 3 6 7 8 11 22 23 24 27 28 43)", remaining_runner)
+        self.assertIn("q_multiplicities=(6 3 6 12 6 3 2 6 6 6 6 1)", remaining_runner)
+        self.assertIn(
+            'set_input_key sternheimer_frequency_grid_file "$frequency_name"',
+            remaining_runner,
+        )
+        self.assertIn('--expected-frequency-grid "$frequency_name"', remaining_runner)
+        self.assertIn("--frequency-grid-source frozen_q1_greenx_minimax", remaining_runner)
+        self.assertNotIn("rpa_headwing_mode", remaining_runner)
+        self.assertNotIn("replace_w_head", remaining_runner)
         self.assertIn("nfreq = 12", final_input)
         self.assertIn("use_rpa_gamma = true", final_input)
         self.assertIn("replace_w_head = true", final_input)
@@ -384,6 +401,110 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertEqual(payload["whitened_auxiliary_rank"], 301)
         self.assertEqual(payload["frequency_count"], 12)
         self.assertEqual(len(grid_lines), 12)
+
+    def test_standard_dataset_validator_accepts_frozen_q1_grid_for_other_q(self):
+        frequencies = tuple(
+            (index, 0.05 * (index + 1), 0.1 * (index + 1))
+            for index in range(12)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            frozen_grid = root / "Q1_FREQUENCY_GRID.tsv"
+            frozen_grid.write_text(
+                "\n".join(
+                    f"{index + 1}\t{omega:.17e}\t{weight:.17e}"
+                    for index, omega, weight in frequencies
+                )
+                + "\n",
+                encoding="ascii",
+            )
+            manifest = root / "manifest.dat"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        "ABACUS_STERNHEIMER_BASIS_OPT_MANIFEST_V1",
+                        "abacus_commit " + "a" * 40,
+                        "executable_sha256 " + "b" * 64,
+                        "orbital_sha256 " + "c" * 64,
+                        "pseudopotential_sha256 " + "d" * 64,
+                        "auxiliary_basis_source product_pca",
+                        "auxiliary_basis_sha256 " + "e" * 64,
+                        "kernel full_coulomb",
+                        "q_count 64",
+                        "selected_iq 2",
+                        "q_weight 1.5625e-2",
+                        "frequency_count 12",
+                        "raw_auxiliary_dimension 320",
+                        "whitened_auxiliary_rank 301",
+                    ]
+                    + [
+                        f"frequency {index} {omega:.17e} {weight:.17e}"
+                        for index, omega, weight in frequencies
+                    ]
+                )
+                + "\n",
+                encoding="ascii",
+            )
+            status = root / "status.dat"
+            status.write_text(
+                "status success\nall_converged yes\n"
+                "max_solver_relative_residual 9.999e-7\n",
+                encoding="ascii",
+            )
+            input_path = root / "INPUT"
+            input_path.write_text(
+                "sternheimer_nfreq 12\n"
+                "sternheimer_frequency_grid_file Q1_FREQUENCY_GRID.tsv\n"
+                "exx_pca_threshold 1e-6\n",
+                encoding="ascii",
+            )
+            output_grid = root / "FREQUENCY_GRID.tsv"
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(STANDARD_DATASET_VALIDATOR),
+                    "--manifest",
+                    str(manifest),
+                    "--status",
+                    str(status),
+                    "--input",
+                    str(input_path),
+                    "--frequency-grid-output",
+                    str(output_grid),
+                    "--frequency-grid-source",
+                    "frozen_q1_greenx_minimax",
+                    "--expected-frequency-grid",
+                    str(frozen_grid),
+                    "--expected-abacus-commit",
+                    "a" * 40,
+                    "--expected-executable-sha256",
+                    "b" * 64,
+                    "--expected-orbital-sha256",
+                    "c" * 64,
+                    "--expected-pseudopotential-sha256",
+                    "d" * 64,
+                    "--expected-auxiliary-basis-sha256",
+                    "e" * 64,
+                    "--expected-iq",
+                    "2",
+                    "--expected-q-weight",
+                    "0.015625",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(
+            payload["frequency_grid_source"],
+            "frozen_q1_greenx_minimax",
+        )
+        self.assertEqual(
+            payload["expected_frequency_grid_sha256"],
+            payload["frequency_grid_sha256"],
+        )
 
     def test_accepts_complete_weighted_eight_qstar_contract(self):
         module = load_module()

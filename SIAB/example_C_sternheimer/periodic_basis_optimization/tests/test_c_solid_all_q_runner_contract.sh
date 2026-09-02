@@ -4,6 +4,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 runner=$root/galerkin_binding_workflow/run_c_solid_q123_reduced_df.slurm
 standard_q1_runner=$root/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_q1_df.slurm
+standard_remaining_runner=$root/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_remaining_df.slurm
 standard_q_validator=$root/galerkin_binding_workflow/validate_c_solid_fd8_q_dataset.py
 
 test -s "$runner"
@@ -39,6 +40,17 @@ grep -Fq 'source_head=$(cat "$SIAB_SOURCE_ROOT/.git/HEAD")' "$standard_q1_runner
 grep -Fq 'source_ref=${source_head#ref: }' "$standard_q1_runner"
 if grep -Eq '(^|[ ;])git[[:space:]]' "$standard_q1_runner"; then
   echo "standard q1 compute-node runner depends on an unavailable Git executable" >&2
+  exit 1
+fi
+
+test -s "$standard_remaining_runner"
+grep -q '^#SBATCH --array=0-11%1$' "$standard_remaining_runner"
+grep -Fq 'q_labels=(2 3 6 7 8 11 22 23 24 27 28 43)' "$standard_remaining_runner"
+grep -Fq 'q_multiplicities=(6 3 6 12 6 3 2 6 6 6 6 1)' "$standard_remaining_runner"
+grep -Fq 'set_input_key sternheimer_frequency_grid_file "$frequency_name"' "$standard_remaining_runner"
+grep -Fq -- '--expected-frequency-grid "$frequency_name"' "$standard_remaining_runner"
+if grep -Eq '(^|[ ;])git[[:space:]]' "$standard_remaining_runner"; then
+  echo "standard remaining-q compute-node runner depends on an unavailable Git executable" >&2
   exit 1
 fi
 
