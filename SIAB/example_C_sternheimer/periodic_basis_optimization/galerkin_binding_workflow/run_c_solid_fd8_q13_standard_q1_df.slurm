@@ -33,12 +33,29 @@ pseudopotential_sha256=e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec48
 work=$OUTPUT_ROOT
 suffix=C_DIAMOND_FD8_Q1_NFREQ12_PCA1E6_BASIS_OPT
 
+resolve_source_head() {
+  local source_head source_ref ref_path
+  source_head=$(cat "$SIAB_SOURCE_ROOT/.git/HEAD")
+  if [[ "$source_head" == "ref: "* ]]; then
+    source_ref=${source_head#ref: }
+    ref_path=$SIAB_SOURCE_ROOT/.git/$source_ref
+    if [[ -s "$ref_path" ]]; then
+      cat "$ref_path"
+    else
+      awk -v ref="$source_ref" '$2 == ref {print $1; found=1} END {exit !found}' \
+        "$SIAB_SOURCE_ROOT/.git/packed-refs"
+    fi
+  else
+    printf '%s\n' "$source_head"
+  fi
+}
+
 test "$SLURM_JOB_PARTITION" = p1
 test "$SLURM_NTASKS" = 48
 test "$SLURM_NTASKS_PER_NODE" = 1
 test "$SLURM_CPUS_PER_TASK" = 40
 test -d "$SIAB_SOURCE_ROOT/.git"
-test "$(git -C "$SIAB_SOURCE_ROOT" rev-parse HEAD)" = "$SIAB_SOURCE_COMMIT"
+test "$(resolve_source_head)" = "$SIAB_SOURCE_COMMIT"
 test "$(sha256sum "$runner" | awk '{print $1}')" = "$SIAB_RUNNER_SHA256"
 test "$(sha256sum "$config" | awk '{print $1}')" = "$SIAB_CONFIG_SHA256"
 test -s "$reference_grid"
