@@ -374,7 +374,46 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertEqual(result["present_selected_iq"], [1, 22, 43])
         self.assertEqual(result["present_multiplicity_sum"], 13)
         self.assertEqual(result["missing_logical_qstars"], [6, 7, 8, 11, 28])
+        self.assertEqual(result["missing_selected_iq"], [6, 27, 23, 11, 55])
+        self.assertEqual(result["missing_multiplicity_sum"], 51)
+        self.assertEqual(
+            result["missing_qstars"],
+            [
+                {
+                    "logical_qstar_label": 6,
+                    "selected_iq": 6,
+                    "multiplicity": 6,
+                    "q_weight": 6.0 / 64.0,
+                },
+                {
+                    "logical_qstar_label": 7,
+                    "selected_iq": 27,
+                    "multiplicity": 24,
+                    "q_weight": 24.0 / 64.0,
+                },
+                {
+                    "logical_qstar_label": 8,
+                    "selected_iq": 23,
+                    "multiplicity": 12,
+                    "q_weight": 12.0 / 64.0,
+                },
+                {
+                    "logical_qstar_label": 11,
+                    "selected_iq": 11,
+                    "multiplicity": 3,
+                    "q_weight": 3.0 / 64.0,
+                },
+                {
+                    "logical_qstar_label": 28,
+                    "selected_iq": 55,
+                    "multiplicity": 6,
+                    "q_weight": 6.0 / 64.0,
+                },
+            ],
+        )
         self.assertFalse(result["direct_solid_reference"]["exists"])
+        self.assertEqual(result["direct_solid_reference"]["status"], "missing")
+        self.assertEqual(result["complement_submission_gate"], "hold")
         self.assertEqual(result["physical_release_gate"], "hold")
 
 

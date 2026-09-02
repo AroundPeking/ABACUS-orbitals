@@ -76,6 +76,11 @@ def audit_qstar_inputs(
         )
     reference_path = Path(direct_reference) if direct_reference is not None else None
     reference_exists = reference_path is not None and reference_path.exists()
+    missing_contract = tuple(
+        record
+        for record in DIAMOND_QSTAR_CONTRACT
+        if record["label"] not in qstar_paths
+    )
     direct_reference_record = {
         "exists": reference_exists,
         "path": str(reference_path) if reference_path is not None else None,
@@ -84,6 +89,7 @@ def audit_qstar_inputs(
             if reference_exists and reference_path.is_file()
             else None
         ),
+        "status": "present" if reference_exists else "missing",
     }
     return {
         "status": "success",
@@ -91,11 +97,31 @@ def audit_qstar_inputs(
         "present_logical_qstars": present_labels,
         "present_selected_iq": validation["selected_iq"],
         "present_multiplicity_sum": validation["multiplicity_sum"],
-        "missing_logical_qstars": [
-            label for label in known if label not in qstar_paths
+        "missing_logical_qstars": [record["label"] for record in missing_contract],
+        "missing_selected_iq": [
+            record["selected_iq"] for record in missing_contract
+        ],
+        "missing_multiplicity_sum": sum(
+            record["multiplicity"] for record in missing_contract
+        ),
+        "missing_qstars": [
+            {
+                "logical_qstar_label": record["label"],
+                "selected_iq": record["selected_iq"],
+                "multiplicity": record["multiplicity"],
+                "q_weight": float(record["multiplicity"] / 64.0),
+            }
+            for record in missing_contract
         ],
         "datasets": records,
         "direct_solid_reference": direct_reference_record,
+        "complement_submission_gate": (
+            "not_required"
+            if not missing_contract
+            else "pending_input_freeze"
+            if reference_exists
+            else "hold"
+        ),
         "physical_release_gate": (
             "pending_candidate"
             if coverage == "full" and reference_exists
