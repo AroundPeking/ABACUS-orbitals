@@ -35,6 +35,16 @@ from periodic_galerkin_data import read_periodic_galerkin_dataset  # noqa: E402
 
 
 FULL_QSTAR_LABELS = (1, 2, 3, 6, 7, 8, 11, 28)
+DIAMOND_QSTAR_CONTRACT = (
+    {"label": 1, "selected_iq": 1, "multiplicity": 1},
+    {"label": 2, "selected_iq": 22, "multiplicity": 8},
+    {"label": 3, "selected_iq": 43, "multiplicity": 4},
+    {"label": 6, "selected_iq": 6, "multiplicity": 6},
+    {"label": 7, "selected_iq": 7, "multiplicity": 24},
+    {"label": 8, "selected_iq": 8, "multiplicity": 12},
+    {"label": 11, "selected_iq": 11, "multiplicity": 3},
+    {"label": 28, "selected_iq": 28, "multiplicity": 6},
+)
 SHARED_PROVENANCE_FIELDS = (
     "abacus_commit",
     "executable_sha256",

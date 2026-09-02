@@ -14,6 +14,11 @@ SCRIPT = (
     / "galerkin_binding_workflow"
     / "build_c_solid_all_q_candidate.py"
 )
+AUDIT_SCRIPT = (
+    ROOT
+    / "galerkin_binding_workflow"
+    / "audit_c_solid_qstar_inputs.py"
+)
 CONFIG = (
     ROOT
     / "galerkin_binding_workflow"
@@ -25,6 +30,16 @@ def load_module():
     spec = importlib.util.spec_from_file_location(
         "build_c_solid_all_q_candidate",
         SCRIPT,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_audit_module():
+    spec = importlib.util.spec_from_file_location(
+        "audit_c_solid_qstar_inputs",
+        AUDIT_SCRIPT,
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -313,6 +328,30 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
             status = json.loads((output / "STATUS.json").read_text(encoding="ascii"))
             self.assertEqual(status["status"], "success")
             self.assertEqual(status["coverage"], "reduced")
+
+    def test_read_only_audit_reports_present_and_missing_qstars(self):
+        module = load_audit_module()
+
+        def reader(path):
+            label = int(Path(path).name[1:])
+            record = next(
+                item for item in self.FULL_CONTRACT if item["label"] == label
+            )
+            return self.dataset(record)
+
+        result = module.audit_qstar_inputs(
+            {1: Path("q1"), 2: Path("q2"), 3: Path("q3")},
+            dataset_reader=reader,
+            direct_reference=None,
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["present_logical_qstars"], [1, 2, 3])
+        self.assertEqual(result["present_selected_iq"], [1, 22, 43])
+        self.assertEqual(result["present_multiplicity_sum"], 13)
+        self.assertEqual(result["missing_logical_qstars"], [6, 7, 8, 11, 28])
+        self.assertFalse(result["direct_solid_reference"]["exists"])
+        self.assertEqual(result["physical_release_gate"], "hold")
 
 
 if __name__ == "__main__":
