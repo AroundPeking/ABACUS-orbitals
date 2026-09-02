@@ -67,6 +67,8 @@ REQUIRED_CONFIG_FIELDS = {
     "system",
     "trust_radius",
 }
+FREQUENCY_RTOL = 1.0e-12
+FREQUENCY_ATOL = 1.0e-14
 
 
 def _positive_integer(value, name):
@@ -259,9 +261,19 @@ def validate_qstar_datasets(
             reference_weights = weights
             reference_provenance = provenance
         else:
-            if not torch.equal(frequency, reference_frequency):
+            if not torch.allclose(
+                frequency,
+                reference_frequency,
+                rtol=FREQUENCY_RTOL,
+                atol=FREQUENCY_ATOL,
+            ):
                 raise ValueError("frequency grid differs across q-star datasets")
-            if not torch.equal(weights, reference_weights):
+            if not torch.allclose(
+                weights,
+                reference_weights,
+                rtol=FREQUENCY_RTOL,
+                atol=FREQUENCY_ATOL,
+            ):
                 raise ValueError("frequency weights differ across q-star datasets")
             if provenance != reference_provenance:
                 raise ValueError("shared provenance differs across q-star datasets")

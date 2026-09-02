@@ -168,6 +168,30 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
                 coverage="full",
             )
 
+    def test_accepts_roundoff_level_frequency_grid_differences(self):
+        module = load_module()
+        datasets = list(self.datasets())
+        datasets[1] = self.dataset(
+            self.FULL_CONTRACT[1],
+            frequency_ha=torch.tensor(
+                [0.1, 0.3, 0.8, 2.0, 5.8, 20.8 + 2.0e-13],
+                dtype=torch.float64,
+            ),
+            frequency_weights_ha=torch.tensor(
+                [0.2, 0.3, 0.7, 2.0, 6.7, 30.9 - 2.0e-13],
+                dtype=torch.float64,
+            ),
+        )
+
+        result = module.validate_qstar_datasets(
+            tuple(datasets),
+            qstar_contract=self.FULL_CONTRACT,
+            q_count=64,
+            coverage="full",
+        )
+
+        self.assertEqual(result["dataset_contract_gate"], "pass")
+
     def test_rejects_shared_provenance_mismatch(self):
         module = load_module()
         datasets = list(self.datasets())
