@@ -202,6 +202,56 @@ class PeriodicGalerkinCandidatesTest(unittest.TestCase):
             )
             self.assertAlmostEqual(item.trust_radius, 0.02)
 
+    def test_builds_deterministic_single_family_descent_candidate(self):
+        result = self.candidate_gradient_result()
+
+        first = periodic_galerkin_candidates.build_single_family_candidate(
+            result,
+            fixed_nu={"C": (1,)},
+            family="C_solid",
+            trust_radius=0.02,
+        )
+        second = periodic_galerkin_candidates.build_single_family_candidate(
+            result,
+            fixed_nu={"C": (1,)},
+            family="C_solid",
+            trust_radius=0.02,
+        )
+
+        self.assertEqual(first.family, "C_solid")
+        self.assertAlmostEqual(first.trust_radius, 0.02)
+        self.assertEqual(first.coefficients_sha256, second.coefficients_sha256)
+        torch.testing.assert_close(
+            first.coefficients["C"][0][:, :1],
+            result.coefficients["C"][0][:, :1],
+        )
+        variable = first.coefficients["C"][0][:, 1:]
+        torch.testing.assert_close(
+            variable.transpose(0, 1).matmul(variable),
+            torch.eye(2, dtype=torch.float64),
+            rtol=1.0e-13,
+            atol=1.0e-13,
+        )
+        self.assertLess(float(first.coefficients["C"][0][3, 2]), 0.0)
+
+    def test_single_family_candidate_rejects_unknown_family(self):
+        with self.assertRaisesRegex(ValueError, "evaluated family"):
+            periodic_galerkin_candidates.build_single_family_candidate(
+                self.candidate_gradient_result(),
+                fixed_nu={"C": (1,)},
+                family="missing",
+                trust_radius=0.02,
+            )
+
+    def test_single_family_candidate_rejects_invalid_trust_radius(self):
+        with self.assertRaisesRegex(ValueError, "trust_radius"):
+            periodic_galerkin_candidates.build_single_family_candidate(
+                self.candidate_gradient_result(),
+                fixed_nu={"C": (1,)},
+                family="C_solid",
+                trust_radius=0.0,
+            )
+
     def test_candidate_family_gate_requires_improvement_without_large_tradeoff(self):
         baseline = {"C_atom": 1.0, "C_solid": 2.0}
 

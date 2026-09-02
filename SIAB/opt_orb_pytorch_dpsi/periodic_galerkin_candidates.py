@@ -43,6 +43,14 @@ class PeriodicGalerkinParetoCandidate:
     coefficients_sha256: str
 
 
+@dataclass(frozen=True)
+class PeriodicGalerkinSingleFamilyCandidate:
+    family: str
+    trust_radius: float
+    coefficients: dict
+    coefficients_sha256: str
+
+
 def _clone_blocks(values):
     return {
         element: [channel.detach().clone() for channel in channels]
@@ -202,6 +210,44 @@ def coefficient_sha256(coefficients):
             )
             digest.update(channel.detach().contiguous().numpy().tobytes(order="C"))
     return digest.hexdigest()
+
+
+def build_single_family_candidate(
+    result,
+    *,
+    fixed_nu,
+    family,
+    trust_radius=0.01,
+):
+    """Build one deterministic trust-region descent for a named family."""
+    if not isinstance(result, PeriodicGalerkinFamilyGradientResult):
+        raise ValueError("result must be a family-gradient result")
+    if not isinstance(family, str) or family not in result.family_order:
+        raise ValueError("family must name one evaluated family")
+    if (
+        not isinstance(trust_radius, (int, float))
+        or isinstance(trust_radius, bool)
+        or not math.isfinite(trust_radius)
+        or trust_radius <= 0.0
+    ):
+        raise ValueError("trust_radius must be finite and positive")
+    trust_radius = float(trust_radius)
+    direction = {
+        element: [-channel for channel in channels]
+        for element, channels in result.normalized_gradients[family].items()
+    }
+    coefficients = _retract_candidate(
+        result.coefficients,
+        fixed_nu,
+        direction,
+        trust_radius,
+    )
+    return PeriodicGalerkinSingleFamilyCandidate(
+        family=family,
+        trust_radius=trust_radius,
+        coefficients=_clone_blocks(coefficients),
+        coefficients_sha256=coefficient_sha256(coefficients),
+    )
 
 
 def build_pareto_candidate_bank(
