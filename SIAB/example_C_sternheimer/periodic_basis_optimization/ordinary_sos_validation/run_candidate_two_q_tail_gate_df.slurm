@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=c_f_twoq_tail
-#SBATCH --partition=p1,48cp2
+#SBATCH --partition=p1,48cp2,normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
@@ -12,7 +12,11 @@
 
 set -euo pipefail
 trap 'status=$?; echo "C_F_TWO_Q_TAIL_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
-module load oneapi/2024.2
+if test -n "${C_BASIS_ENV_SCRIPT:-}"; then
+  source "$C_BASIS_ENV_SCRIPT"
+else
+  module load oneapi/2024.2
+fi
 
 candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
@@ -22,12 +26,13 @@ grid_root=$run_root/solid-grid
 work=$run_root/two-q-tail
 reader=$work/reader_v1
 q_indices=(2 6)
-python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
+python=${C_BASIS_PYTHON:-/data/home/df_iopcas_ghj/app/miniconda3/bin/python}
+expected_cpus=${C_BASIS_CPUS_PER_TASK:-40}
 scripts=$source_root/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation
 zero_writer=$scripts/sparse_qstar_coulomb.py
 parser=$scripts/build_qstar_frequency_decomposition.py
 manifest_reader=$scripts/read_periodic_candidate_manifest.py
-librpa=/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-freqdiag-87cf66a7/build-df-intel/chi0_main.exe
+librpa=${C_BASIS_LIBRPA:-/data/home/df_iopcas_ghj/app/librpa/LibRPA-rpa-freqdiag-87cf66a7/build-df-intel/chi0_main.exe}
 librpa_commit=87cf66a768afaa45714a5aed5431b53ac7ea0eb3
 parent_commit=d4810f73aab20c36e69b1c353c945b77f40931c9
 expected_librpa_sha=de334e398cccd3343da3003bd3c654474faabc467e72ba321ff3d215e4e300e4
@@ -35,11 +40,11 @@ expected_librpa_sha=de334e398cccd3343da3003bd3c654474faabc467e72ba321ff3d215e4e3
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
 test "${source_commit:0:8}" = "${source_root##*-}"
 case "${SLURM_JOB_PARTITION:?}" in
-  p1|48cp2) ;;
+  p1|48cp2|normal) ;;
   *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
 esac
 test "${SLURM_NTASKS:?}" = 1
-test "${SLURM_CPUS_PER_TASK:?}" = 40
+test "${SLURM_CPUS_PER_TASK:?}" = "$expected_cpus"
 test ! -e "$work"
 test -n "${QSTAR_ARRAY_JOB_ID:?missing q2/q6 array job id}"
 grep -qx 'status=success' "$candidate_root/provenance.txt"

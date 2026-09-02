@@ -6,7 +6,7 @@ root=$(cd "$(dirname "$0")" && pwd)
 script=$root/run_candidate_two_q_tail_gate_df.slurm
 
 test -s "$script"
-grep -qx '#SBATCH --partition=p1,48cp2' "$script"
+grep -Fq '#SBATCH --partition=p1,48cp2,normal' "$script"
 grep -qx '#SBATCH --nodes=1' "$script"
 grep -qx '#SBATCH --ntasks-per-node=1' "$script"
 grep -qx '#SBATCH --cpus-per-task=40' "$script"
@@ -26,6 +26,11 @@ grep -Fq '0.010130257316' "$script"
 grep -Fq '0.021125217918' "$script"
 grep -Fq 'printf '\''rejected\n'\'' > STATUS' "$script"
 grep -Fq 'printf '\''success\n'\'' > STATUS' "$script"
+grep -Fq 'python=${C_BASIS_PYTHON:-' "$script"
+grep -Fq 'librpa=${C_BASIS_LIBRPA:-' "$script"
+grep -Fq 'expected_cpus=${C_BASIS_CPUS_PER_TASK:-40}' "$script"
+grep -Fq 'C_BASIS_ENV_SCRIPT' "$script"
+grep -Fq 'p1|48cp2|normal)' "$script"
 ! grep -Fq 'q_indices=(1 2 3 6 7 8 11 28)' "$script"
 
 echo CANDIDATE_TWO_Q_TAIL_GATE_CONTRACT_OK

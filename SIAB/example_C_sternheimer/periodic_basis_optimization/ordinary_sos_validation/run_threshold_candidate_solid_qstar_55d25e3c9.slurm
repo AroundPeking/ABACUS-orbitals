@@ -13,15 +13,20 @@
 
 set -euo pipefail
 trap 'status=$?; echo "C_THRESHOLD_QSTAR_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
-module load oneapi/2024.2
+if test -n "${C_BASIS_ENV_SCRIPT:-}"; then
+  source "$C_BASIS_ENV_SCRIPT"
+else
+  module load oneapi/2024.2
+fi
 
 candidate_root=${CANDIDATE_ROOT:?missing immutable candidate root}
 run_root=${RUN_ROOT:?missing immutable run root}
-source=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1
-abacus=/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artifacts/job3137534/abacus_3p
+source=${C_SOLID_SOURCE_ROOT:-/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825/runs/c-periodic-basis-opt-product-pca-20260825/retry1/c-diamond-g24-fd8-nfreq6-q1-product-pca-711af860c-kpar8-retry1}
+abacus=${C_BASIS_ABACUS:-/data/home/df_iopcas_ghj/app/abacus/response-pca-55d25e3c9-20260827/artifacts/job3137534/abacus_3p}
 abacus_commit=55d25e3c9bb8255fb17bcdf127c653a72402a5d5
 expected_abacus_sha=25a9133c3facfe44d64d34f2696fe899b82e55be6e22c15c20ade0c00721a3d9
-python=/data/home/df_iopcas_ghj/app/miniconda3/bin/python
+python=${C_BASIS_PYTHON:-/data/home/df_iopcas_ghj/app/miniconda3/bin/python}
+expected_cpus=${C_BASIS_CPUS_PER_TASK:-40}
 manifest_reader=${SIAB_SOURCE_ROOT:?missing exact SIAB source deployment}/SIAB/example_C_sternheimer/periodic_basis_optimization/ordinary_sos_validation/read_periodic_candidate_manifest.py
 q_indices=(1 2 3 6 7 8 11 28)
 task=${SLURM_ARRAY_TASK_ID:?missing q-star task}
@@ -30,11 +35,11 @@ work=$run_root/solid-grid/q${full_q_index}
 suffix=C_DIAMOND_THRESHOLD_Q${full_q_index}
 
 case "${SLURM_JOB_PARTITION:?}" in
-  p1|48cp2) ;;
+  p1|48cp2|normal) ;;
   *) echo "unsupported df partition: $SLURM_JOB_PARTITION" >&2; exit 1 ;;
 esac
 test "${SLURM_NTASKS:?}" = 1
-test "${SLURM_CPUS_PER_TASK:?}" = 40
+test "${SLURM_CPUS_PER_TASK:?}" = "$expected_cpus"
 test "$task" -ge 1 && test "$task" -le 8
 test ! -e "$work"
 grep -qx 'status=success' "$candidate_root/provenance.txt"

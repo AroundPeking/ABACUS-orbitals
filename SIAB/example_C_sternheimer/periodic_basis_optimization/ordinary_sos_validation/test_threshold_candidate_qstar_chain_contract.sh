@@ -16,9 +16,10 @@ done
 
 for job in "$atom" "$solid_q" "$solid_sos"; do
   grep -Fq 'case "${SLURM_JOB_PARTITION:?}" in' "$job"
-  grep -Fq 'p1|48cp2)' "$job"
   ! grep -Fq 'test "${SLURM_JOB_PARTITION:?}" = p1' "$job"
 done
+
+grep -Fq 'p1|48cp2|normal)' "$solid_q"
 
 grep -q 'read_periodic_candidate_manifest.py' "$atom"
 grep -q 'set_input_key nbands "$nbands"' "$atom"
@@ -40,6 +41,11 @@ grep -q 'set_input_key nbands "$nbands"' "$solid_q"
 grep -q 'remove_input_key rpa_pca_fixed_nu' "$solid_q"
 grep -q 'set_input_key exx_pca_threshold 1e-4' "$solid_q"
 grep -q 'exact_rhs_full_periodic_poisson' "$solid_q"
+grep -Fq 'source=${C_SOLID_SOURCE_ROOT:-' "$solid_q"
+grep -Fq 'abacus=${C_BASIS_ABACUS:-' "$solid_q"
+grep -Fq 'python=${C_BASIS_PYTHON:-' "$solid_q"
+grep -Fq 'expected_cpus=${C_BASIS_CPUS_PER_TASK:-40}' "$solid_q"
+grep -Fq 'C_BASIS_ENV_SCRIPT' "$solid_q"
 
 grep -q 'sparse_qstar_coulomb.py' "$solid_sos"
 grep -q 'sparse_qstar_sos_gate.py' "$solid_sos"
