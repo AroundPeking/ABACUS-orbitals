@@ -20,7 +20,8 @@ trap 'status=$?; echo "C_SOLID_Q123_FAILED line=$LINENO command=$BASH_COMMAND st
 : "${Q3_PHYSICS_HASH:?missing q3 physics hash}"
 : "${OUTPUT_ROOT:?missing immutable output root}"
 
-test "$(cat "$SIAB_SOURCE_ROOT/.git/HEAD")" = "$SIAB_SOURCE_COMMIT"
+test "$(git -C "$SIAB_SOURCE_ROOT" rev-parse HEAD)" = "$SIAB_SOURCE_COMMIT"
+test -z "$(git -C "$SIAB_SOURCE_ROOT" status --porcelain)"
 test "$(sha256sum "$INITIAL_COEFFICIENTS" | awk '{print $1}')" = "$INITIAL_SHA256"
 output=$OUTPUT_ROOT
 test ! -e "$output"
