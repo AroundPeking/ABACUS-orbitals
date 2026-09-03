@@ -4,6 +4,7 @@ import io
 import json
 import math
 import struct
+import sys
 import tempfile
 import tracemalloc
 import unittest
@@ -22,6 +23,7 @@ VALIDATOR_PATH = (
 SPEC = importlib.util.spec_from_file_location("validate_periodic_basis_opt_streaming", VALIDATOR_PATH)
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
+sys.modules["validate_periodic_basis_opt_streaming"] = VALIDATOR
 
 ACCEPTOR_PATH = (
     ROOT
@@ -35,6 +37,19 @@ ACCEPTOR_SPEC = importlib.util.spec_from_file_location(
 )
 ACCEPTOR = importlib.util.module_from_spec(ACCEPTOR_SPEC)
 ACCEPTOR_SPEC.loader.exec_module(ACCEPTOR)
+
+SIGNATURE_PATH = (
+    ROOT
+    / "example_C_sternheimer"
+    / "periodic_basis_optimization"
+    / "galerkin_binding_workflow"
+    / "basis_opt_response_signature.py"
+)
+SIGNATURE_SPEC = importlib.util.spec_from_file_location(
+    "basis_opt_response_signature", SIGNATURE_PATH
+)
+SIGNATURE = importlib.util.module_from_spec(SIGNATURE_SPEC)
+SIGNATURE_SPEC.loader.exec_module(SIGNATURE)
 
 
 HEADER = struct.Struct("<16sIIiiiQQ")
@@ -264,6 +279,66 @@ class CompletedStreamingValidationAcceptanceTest(unittest.TestCase):
         actual = self._validation()
         with self.assertRaisesRegex(RuntimeError, "memory gate"):
             ACCEPTOR.accept_validation(actual, reference, 5000, 4096)
+
+
+@unittest.skipIf(VALIDATOR.np is None, "NumPy is required for response signatures")
+class ResponseSignatureTest(unittest.TestCase):
+    def _signature(self, eigenvalues):
+        return {
+            "status": "success",
+            "protocol": {
+                "raw_auxiliary_dimension": 2,
+                "whitened_auxiliary_rank": 2,
+                "primitive_count": 2,
+                "kpoints": 1,
+                "frequencies": [[0, 0.5, 1.0]],
+            },
+            "reference_response": [
+                {
+                    "ifrequency": 0,
+                    "frequency": 0.5,
+                    "weight": 1.0,
+                    "trace_real": sum(eigenvalues),
+                    "trace_imag": 0.0,
+                    "frobenius_norm": math.sqrt(
+                        sum(value * value for value in eigenvalues)
+                    ),
+                    "eigenvalues": list(eigenvalues),
+                }
+            ],
+        }
+
+    def test_unitary_invariant_response_signature_comparison_passes(self):
+        reference = self._signature([-0.2, -0.1])
+        candidate = self._signature([-0.2 * (1.0 + 1.0e-10), -0.1])
+        result = SIGNATURE.compare_signatures(
+            candidate, reference, relative_tolerance=1.0e-8
+        )
+        self.assertEqual(result["status"], "success")
+        self.assertLess(result["max_response_spectrum_relative_error"], 1.0e-8)
+
+    def test_response_signature_comparison_rejects_spectrum_change(self):
+        reference = self._signature([-0.2, -0.1])
+        candidate = self._signature([-0.25, -0.1])
+        with self.assertRaisesRegex(RuntimeError, "response spectrum mismatch"):
+            SIGNATURE.compare_signatures(
+                candidate, reference, relative_tolerance=1.0e-8
+            )
+
+    def test_small_dataset_signature_contains_reference_spectrum(self):
+        dataset_test = StreamingDatasetTest()
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset_test._make_dataset(tmp)
+            result = SIGNATURE.build_signature(Path(tmp), "test-commit")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["protocol"]["frequencies"], [[0, 0.5, 1.0]])
+        self.assertEqual(len(result["reference_response"]), 1)
+        self.assertAlmostEqual(
+            result["reference_response"][0]["trace_real"], -0.3
+        )
+        self.assertEqual(
+            len(result["reference_response"][0]["eigenvalues"]), 2
+        )
 
 
 if __name__ == "__main__":
