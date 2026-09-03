@@ -24,6 +24,7 @@ source_root=$C_SOLID_DFDCU_STAGE_ROOT/abacus-source-711af860c
 deps=$C_SOLID_DFDCU_STAGE_ROOT/deps
 build_root=$C_SOLID_DFDCU_STAGE_ROOT/build-711af860c-intel2021
 artifact_root=$C_SOLID_DFDCU_STAGE_ROOT/artifacts/abacus-711af860c-intel2021
+libxc_pc_root=$artifact_root/pkgconfig
 runner=$C_SOLID_DFDCU_STAGE_ROOT/source/build_c_solid_fd8_q13_standard_abacus_dfdcu.slurm
 metadata=$C_SOLID_DFDCU_STAGE_ROOT/artifacts/job3117942/commit_metadata.txt
 
@@ -35,17 +36,24 @@ test -d "$deps/LibComm_fix_status"
 test -d "$deps/cereal-1.3.0/include"
 test -d "$DFDCU_ELPA_ROOT"
 test -d "$deps/lib/pkgconfig"
+test -s "$deps/include/xc.h"
+test -s "$deps/lib/libxc.so.12.2.2"
+test -s "$deps/lib/pkgconfig/libxc.pc"
 test -s "$metadata"
 grep -Fq "$source_commit" "$metadata"
 test "$(sha256sum "$runner" | awk '{print $1}')" = "$BUILD_RUNNER_SHA256"
 test ! -e "$build_root"
 test ! -e "$artifact_root"
 mkdir -p "$build_root" "$artifact_root"
+mkdir -p "$libxc_pc_root"
+sed -E "s|^prefix=.*|prefix=$deps|" "$deps/lib/pkgconfig/libxc.pc" \
+  > "$libxc_pc_root/libxc.pc"
+grep -Fxq "prefix=$deps" "$libxc_pc_root/libxc.pc"
 
 export CC=mpiicc
 export CXX=mpiicpc
 export FC=mpiifort
-export PKG_CONFIG_PATH=$deps/lib/pkgconfig:${PKG_CONFIG_PATH:-}
+export PKG_CONFIG_PATH=$libxc_pc_root:${PKG_CONFIG_PATH:-}
 export LD_LIBRARY_PATH=$DFDCU_ELPA_ROOT/lib:$deps/lib:${LD_LIBRARY_PATH:-}
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -95,11 +103,13 @@ find "$deps/LibRI_latest" "$deps/LibComm_fix_status" "$deps/cereal-1.3.0" \
   echo cluster=df_dcu
   echo environment=$DFDCU_ENV
   echo elpa_root=$DFDCU_ELPA_ROOT
+  echo libxc_prefix=$deps
   echo compiler="$($CXX --version | head -1)"
   echo mpi="$(mpirun --version | head -1)"
   echo slurm_job_id=$SLURM_JOB_ID
   sha256sum "$runner" "$artifact_root/abacus_3p" "$artifact_root/CMakeCache.txt" \
-    "$artifact_root/source_sha256.txt" "$artifact_root/header_dependency_sha256.txt"
+    "$artifact_root/source_sha256.txt" "$artifact_root/header_dependency_sha256.txt" \
+    "$deps/lib/pkgconfig/libxc.pc" "$libxc_pc_root/libxc.pc"
 } > "$artifact_root/BUILD_PROVENANCE.txt"
 
 echo "C_SOLID_FD8_DFDCU_BUILD_OK artifact=$artifact_root/abacus_3p"
