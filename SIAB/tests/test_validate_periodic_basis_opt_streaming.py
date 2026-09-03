@@ -155,6 +155,17 @@ class RunnerContractTest(unittest.TestCase):
         self.assertIn("BASIS_OPT_VALIDATOR_SHA256", dfdcu)
         self.assertIn('sha256sum "$basis_opt_validator"', dfdcu)
 
+    def test_recovery_runner_is_read_only_and_memory_gated(self):
+        runner = (
+            VALIDATOR_PATH.parent
+            / "recover_c_solid_fd8_q_dataset_validation.slurm"
+        ).read_text(encoding="ascii")
+        self.assertIn("validate_periodic_basis_opt_streaming.py", runner)
+        self.assertIn("REFERENCE_VALIDATION_JSON", runner)
+        self.assertIn("MAX_VALIDATOR_RSS_KB", runner)
+        self.assertNotIn("mpirun", runner)
+        self.assertNotIn('"$abacus"', runner)
+
 
 if __name__ == "__main__":
     unittest.main()
