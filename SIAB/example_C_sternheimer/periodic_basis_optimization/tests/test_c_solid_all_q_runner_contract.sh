@@ -5,6 +5,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 runner=$root/galerkin_binding_workflow/run_c_solid_q123_reduced_df.slurm
 standard_q1_runner=$root/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_q1_df.slurm
 standard_remaining_runner=$root/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_remaining_df.slurm
+standard_dfdcu_build=$root/galerkin_binding_workflow/build_c_solid_fd8_q13_standard_abacus_dfdcu.slurm
+standard_dfdcu_runner=$root/galerkin_binding_workflow/run_c_solid_fd8_q13_standard_dfdcu.slurm
 standard_q_validator=$root/galerkin_binding_workflow/validate_c_solid_fd8_q_dataset.py
 
 test -s "$runner"
@@ -51,6 +53,33 @@ grep -Fq 'set_input_key sternheimer_frequency_grid_file "$frequency_name"' "$sta
 grep -Fq -- '--expected-frequency-grid "$frequency_name"' "$standard_remaining_runner"
 if grep -Eq '(^|[ ;])git[[:space:]]' "$standard_remaining_runner"; then
   echo "standard remaining-q compute-node runner depends on an unavailable Git executable" >&2
+  exit 1
+fi
+
+test -s "$standard_dfdcu_build"
+grep -q '^#SBATCH --partition=debug$' "$standard_dfdcu_build"
+grep -q '^#SBATCH --cpus-per-task=32$' "$standard_dfdcu_build"
+grep -Fq 'source "$DFDCU_ENV"' "$standard_dfdcu_build"
+grep -Fq 'DFDCU_ELPA_ROOT=${DFDCU_ELPA_ROOT:-/public/home/ghj/app/deps/elpa-2021.11.002-intelmpi2021}' "$standard_dfdcu_build"
+grep -Fq -- '-DENABLE_GREENX_MINIMAX=ON' "$standard_dfdcu_build"
+grep -Fq -- '-DENABLE_LIBRI=ON' "$standard_dfdcu_build"
+grep -Fq -- '-DENABLE_LIBCOMM=ON' "$standard_dfdcu_build"
+grep -Fq '711af860c125b9757c344a1961b63524c550cfe4' "$standard_dfdcu_build"
+
+test -s "$standard_dfdcu_runner"
+grep -q '^#SBATCH --partition=normal$' "$standard_dfdcu_runner"
+grep -q '^#SBATCH --nodes=48$' "$standard_dfdcu_runner"
+grep -q '^#SBATCH --ntasks=48$' "$standard_dfdcu_runner"
+grep -q '^#SBATCH --cpus-per-task=30$' "$standard_dfdcu_runner"
+grep -Fq 'DFDCU_ELPA_ROOT=${DFDCU_ELPA_ROOT:-/public/home/ghj/app/deps/elpa-2021.11.002-intelmpi2021}' "$standard_dfdcu_runner"
+grep -Fq 'q_labels=(1 2 3 6 7 8 11 22 23 24 27 28 43)' "$standard_dfdcu_runner"
+grep -Fq 'q_multiplicities=(1 6 3 6 12 6 3 2 6 6 6 6 1)' "$standard_dfdcu_runner"
+grep -Fq 'set_input_key sternheimer_frequency_grid_file "$frequency_name"' "$standard_dfdcu_runner"
+grep -Fq -- '--expected-frequency-grid "$frequency_name"' "$standard_dfdcu_runner"
+grep -Fq 'DF_Q1_STANDARD_VALIDATION_SHA256' "$standard_dfdcu_runner"
+grep -Fq 'cross_host_anchor=' "$standard_dfdcu_runner"
+if grep -Eq '(^|[ ;])git[[:space:]]' "$standard_dfdcu_runner"; then
+  echo "df_dcu standard runner depends on Git" >&2
   exit 1
 fi
 
