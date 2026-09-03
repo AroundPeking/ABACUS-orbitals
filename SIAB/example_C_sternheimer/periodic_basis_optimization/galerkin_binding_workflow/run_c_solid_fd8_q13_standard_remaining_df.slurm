@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=190000
 #SBATCH --time=12:00:00
-#SBATCH --array=0-11%1
+#SBATCH --array=0-6%1
 
 set -euo pipefail
 trap 'status=$?; echo "C_SOLID_FD8_QREST_STANDARD_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -39,15 +39,18 @@ expected_abacus_sha=5a7ab8f2fc14424c8b47c5a9cbe22d1784016140cc9fa302f7e032662eed
 orbital_sha256=7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d
 pseudopotential_sha256=e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99
 frequency_name=Q1_FREQUENCY_GRID.tsv
-q_labels=(2 3 6 7 8 11 22 23 24 27 28 43)
-q_multiplicities=(6 3 6 12 6 3 2 6 6 6 6 1)
+q_labels=(2 3 6 7 8 11 28)
+selected_iq=(22 43 6 27 23 11 55)
+q_multiplicities=(8 4 6 24 12 3 6)
 slot=${SLURM_ARRAY_TASK_ID:?missing array slot}
 test "$slot" -ge 0
 test "$slot" -lt "${#q_labels[@]}"
-iq=${q_labels[$slot]}
+q_label=${q_labels[$slot]}
+iq=${selected_iq[$slot]}
 multiplicity=${q_multiplicities[$slot]}
-work=$OUTPUT_ROOT/q${iq}
-suffix=C_DIAMOND_FD8_Q${iq}_NFREQ12_PCA1E6_BASIS_OPT
+expected_q_weight=$(awk -v multiplicity="$multiplicity" 'BEGIN {printf "%.17g", multiplicity / 64.0}')
+work=$OUTPUT_ROOT/q${q_label}
+suffix=C_DIAMOND_FD8_Q${q_label}_NFREQ12_PCA1E6_BASIS_OPT
 
 resolve_source_head() {
   local source_head source_ref ref_path
@@ -165,8 +168,9 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
   echo siab_source_commit=$SIAB_SOURCE_COMMIT
   echo abacus_commit=$abacus_commit
   echo abacus_sha256=$expected_abacus_sha
-  echo qstar_scheme=fd8_discrete_13
-  echo q_index=$iq
+  echo qstar_scheme=fd8_symmetry_8
+  echo q_label=$q_label
+  echo selected_iq=$iq
   echo q_multiplicity=$multiplicity
   echo q_count=64
   echo frequency_count=12
@@ -239,7 +243,7 @@ python3 "$validator" \
   --expected-pseudopotential-sha256 "$pseudopotential_sha256" \
   --expected-auxiliary-basis-sha256 "$expected_auxiliary_sha" \
   --expected-iq "$iq" \
-  --expected-q-weight 0.015625 \
+  --expected-q-weight "$expected_q_weight" \
   > STANDARD_PROTOCOL_VALIDATION.json
 
 test "$(sha256sum FREQUENCY_GRID.tsv | awk '{print $1}')" = "$Q1_FREQUENCY_GRID_SHA256"
@@ -254,4 +258,4 @@ dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
     STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
 } >> RUN_PROVENANCE.txt
 
-echo "C_SOLID_FD8_QREST_STANDARD_OK q=$iq multiplicity=$multiplicity work=$work"
+echo "C_SOLID_FD8_QREST_STANDARD_OK label=$q_label selected_iq=$iq multiplicity=$multiplicity work=$work"

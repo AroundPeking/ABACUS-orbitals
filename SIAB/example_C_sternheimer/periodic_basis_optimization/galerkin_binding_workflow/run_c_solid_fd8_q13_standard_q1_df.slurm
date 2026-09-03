@@ -132,7 +132,7 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
   echo siab_source_commit=$SIAB_SOURCE_COMMIT
   echo abacus_commit=$abacus_commit
   echo abacus_sha256=$expected_abacus_sha
-  echo qstar_scheme=fd8_discrete_13
+  echo qstar_scheme=fd8_symmetry_8
   echo q_index=1
   echo q_multiplicity=1
   echo q_count=64

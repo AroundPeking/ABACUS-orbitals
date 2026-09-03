@@ -45,22 +45,6 @@ DIAMOND_QSTAR_CONTRACT = (
     {"label": 11, "selected_iq": 11, "multiplicity": 3},
     {"label": 28, "selected_iq": 55, "multiplicity": 6},
 )
-STANDARD_FD8_QSTAR_LABELS = (1, 2, 3, 6, 7, 8, 11, 22, 23, 24, 27, 28, 43)
-STANDARD_FD8_QSTAR_CONTRACT = (
-    {"label": 1, "selected_iq": 1, "multiplicity": 1},
-    {"label": 2, "selected_iq": 2, "multiplicity": 6},
-    {"label": 3, "selected_iq": 3, "multiplicity": 3},
-    {"label": 6, "selected_iq": 6, "multiplicity": 6},
-    {"label": 7, "selected_iq": 7, "multiplicity": 12},
-    {"label": 8, "selected_iq": 8, "multiplicity": 6},
-    {"label": 11, "selected_iq": 11, "multiplicity": 3},
-    {"label": 22, "selected_iq": 22, "multiplicity": 2},
-    {"label": 23, "selected_iq": 23, "multiplicity": 6},
-    {"label": 24, "selected_iq": 24, "multiplicity": 6},
-    {"label": 27, "selected_iq": 27, "multiplicity": 6},
-    {"label": 28, "selected_iq": 28, "multiplicity": 6},
-    {"label": 43, "selected_iq": 43, "multiplicity": 1},
-)
 SHARED_PROVENANCE_FIELDS = (
     "abacus_commit",
     "executable_sha256",
@@ -149,15 +133,14 @@ def _parse_qstar_contract(
         raise ValueError("logical q-star labels and selected_iq values must be unique")
     expected_labels = tuple(expected_labels)
     if coverage == "full" and tuple(labels) != expected_labels:
-        if expected_labels == STANDARD_FD8_QSTAR_LABELS:
-            raise ValueError("full coverage requires the 13 standard FD8 q stars")
         raise ValueError("full coverage requires the eight logical q stars")
     if (
         coverage == "full"
-        and expected_labels == STANDARD_FD8_QSTAR_LABELS
-        and tuple(selected_iq) != STANDARD_FD8_QSTAR_LABELS
+        and expected_labels == FULL_QSTAR_LABELS
+        and tuple(selected_iq)
+        != tuple(record["selected_iq"] for record in DIAMOND_QSTAR_CONTRACT)
     ):
-        raise ValueError("standard FD8 labels and selected_iq values must match")
+        raise ValueError("full coverage requires canonical selected_iq values")
     if coverage == "full" and sum(multiplicities) != q_count:
         raise ValueError("full q-star multiplicities must cover the q mesh")
     return contract, labels, selected_iq, multiplicities
@@ -220,7 +203,7 @@ def load_config(path):
     if format_version == 2:
         if payload["coverage"] != "full":
             raise ValueError("standard FD8 workflow requires full coverage")
-        if payload["qstar_scheme"] != "fd8_discrete_13":
+        if payload["qstar_scheme"] != "fd8_symmetry_8":
             raise ValueError("unsupported standard q-star scheme")
         if payload["frequency_count"] != 12:
             raise ValueError("standard FD8 workflow requires 12 frequencies")
@@ -241,7 +224,7 @@ def load_config(path):
         }
         if payload["final_energy_protocol"] != expected_final:
             raise ValueError("standard final qavg head/wing protocol differs")
-        expected_labels = STANDARD_FD8_QSTAR_LABELS
+        expected_labels = FULL_QSTAR_LABELS
     _, labels, _, _ = _parse_qstar_contract(
         payload["qstar_contract"],
         coverage=payload["coverage"],
@@ -440,11 +423,7 @@ def main(
         qstar_contract=config["qstar_contract"],
         q_count=config["q_count"],
         coverage=config["coverage"],
-        expected_labels=(
-            STANDARD_FD8_QSTAR_LABELS
-            if config["format_version"] == 2
-            else FULL_QSTAR_LABELS
-        ),
+        expected_labels=FULL_QSTAR_LABELS,
         expected_frequency_count=config.get("frequency_count", 6),
     )
     inventory = build_dataset_inventory(datasets, contract_result)

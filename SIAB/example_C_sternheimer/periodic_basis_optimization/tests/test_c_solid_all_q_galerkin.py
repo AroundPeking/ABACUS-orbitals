@@ -118,21 +118,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         {"label": 11, "selected_iq": 11, "multiplicity": 3},
         {"label": 28, "selected_iq": 55, "multiplicity": 6},
     )
-    STANDARD_FD8_CONTRACT = (
-        {"label": 1, "selected_iq": 1, "multiplicity": 1},
-        {"label": 2, "selected_iq": 2, "multiplicity": 6},
-        {"label": 3, "selected_iq": 3, "multiplicity": 3},
-        {"label": 6, "selected_iq": 6, "multiplicity": 6},
-        {"label": 7, "selected_iq": 7, "multiplicity": 12},
-        {"label": 8, "selected_iq": 8, "multiplicity": 6},
-        {"label": 11, "selected_iq": 11, "multiplicity": 3},
-        {"label": 22, "selected_iq": 22, "multiplicity": 2},
-        {"label": 23, "selected_iq": 23, "multiplicity": 6},
-        {"label": 24, "selected_iq": 24, "multiplicity": 6},
-        {"label": 27, "selected_iq": 27, "multiplicity": 6},
-        {"label": 28, "selected_iq": 28, "multiplicity": 6},
-        {"label": 43, "selected_iq": 43, "multiplicity": 1},
-    )
+    STANDARD_FD8_CONTRACT = FULL_CONTRACT
 
     def dataset(self, record, **changes):
         values = {
@@ -187,7 +173,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         config = module.load_config(STANDARD_CONFIG)
 
         self.assertEqual(config["format_version"], 2)
-        self.assertEqual(config["qstar_scheme"], "fd8_discrete_13")
+        self.assertEqual(config["qstar_scheme"], "fd8_symmetry_8")
         self.assertEqual(config["frequency_count"], 12)
         self.assertEqual(config["product_pca_threshold"], 1.0e-6)
         self.assertEqual(config["training_coulomb"], "full_periodic")
@@ -207,7 +193,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
             },
         )
 
-    def test_accepts_standard_fd8_thirteen_q_twelve_frequency_contract(self):
+    def test_accepts_standard_fd8_eight_q_twelve_frequency_contract(self):
         module = load_module()
 
         result = module.validate_qstar_datasets(
@@ -215,7 +201,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
             qstar_contract=self.STANDARD_FD8_CONTRACT,
             q_count=64,
             coverage="full",
-            expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+            expected_labels=module.FULL_QSTAR_LABELS,
             expected_frequency_count=12,
         )
 
@@ -224,18 +210,22 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertEqual(result["multiplicity_sum"], 64)
         self.assertEqual(
             result["logical_qstar_labels"],
-            [1, 2, 3, 6, 7, 8, 11, 22, 23, 24, 27, 28, 43],
+            [1, 2, 3, 6, 7, 8, 11, 28],
         )
 
-    def test_standard_contract_rejects_legacy_eight_q_and_six_frequency_data(self):
+    def test_standard_contract_rejects_noncanonical_q_and_six_frequency_data(self):
         module = load_module()
-        with self.assertRaisesRegex(ValueError, "13 standard FD8 q stars"):
+        noncanonical = tuple(
+            dict(record, selected_iq=record["label"])
+            for record in self.STANDARD_FD8_CONTRACT
+        )
+        with self.assertRaisesRegex(ValueError, "canonical selected_iq"):
             module.validate_qstar_datasets(
-                self.datasets(),
-                qstar_contract=self.FULL_CONTRACT,
+                self.datasets(noncanonical),
+                qstar_contract=noncanonical,
                 q_count=64,
                 coverage="full",
-                expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+                expected_labels=module.FULL_QSTAR_LABELS,
                 expected_frequency_count=12,
             )
         with self.assertRaisesRegex(ValueError, "twelve-point"):
@@ -244,7 +234,7 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
                 qstar_contract=self.STANDARD_FD8_CONTRACT,
                 q_count=64,
                 coverage="full",
-                expected_labels=module.STANDARD_FD8_QSTAR_LABELS,
+                expected_labels=module.FULL_QSTAR_LABELS,
                 expected_frequency_count=12,
             )
 
@@ -262,9 +252,12 @@ class CSolidAllQGalerkinTest(unittest.TestCase):
         self.assertIn('source_ref=${source_head#ref: }', runner)
         self.assertNotIn("rpa_headwing_mode", runner)
         self.assertNotIn("replace_w_head", runner)
-        self.assertIn("#SBATCH --array=0-11%1", remaining_runner)
-        self.assertIn("q_labels=(2 3 6 7 8 11 22 23 24 27 28 43)", remaining_runner)
-        self.assertIn("q_multiplicities=(6 3 6 12 6 3 2 6 6 6 6 1)", remaining_runner)
+        self.assertIn("#SBATCH --array=0-6%1", remaining_runner)
+        self.assertIn("q_labels=(2 3 6 7 8 11 28)", remaining_runner)
+        self.assertIn("selected_iq=(22 43 6 27 23 11 55)", remaining_runner)
+        self.assertIn("q_multiplicities=(8 4 6 24 12 3 6)", remaining_runner)
+        self.assertIn('set_input_key sternheimer_q_index "$iq"', remaining_runner)
+        self.assertIn('--expected-q-weight "$expected_q_weight"', remaining_runner)
         self.assertIn(
             'set_input_key sternheimer_frequency_grid_file "$frequency_name"',
             remaining_runner,

@@ -202,6 +202,13 @@ class RunnerContractTest(unittest.TestCase):
             'sha256sum "$q1_root/Q1_CROSS_HOST_RESPONSE_COMPARISON.json"',
             dfdcu,
         )
+        self.assertIn("#SBATCH --array=0-6%2", dfdcu)
+        self.assertIn("q_labels=(2 3 6 7 8 11 28)", dfdcu)
+        self.assertIn("selected_iq=(22 43 6 27 23 11 55)", dfdcu)
+        self.assertIn("q_multiplicities=(8 4 6 24 12 3 6)", dfdcu)
+        self.assertIn('set_input_key sternheimer_q_index "$iq"', dfdcu)
+        self.assertIn('--expected-q-weight "$expected_q_weight"', dfdcu)
+        self.assertNotIn("--expected-q-weight 0.015625", dfdcu)
 
     def test_recovery_runner_is_read_only_and_memory_gated(self):
         runner = (

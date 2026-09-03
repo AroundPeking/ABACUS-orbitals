@@ -7,6 +7,7 @@
 #SBATCH --cpus-per-task=30
 #SBATCH --mem=110000
 #SBATCH --time=12:00:00
+#SBATCH --array=0-6%2
 
 set -euo pipefail
 trap 'status=$?; echo "C_SOLID_FD8_DFDCU_FAILED line=$LINENO command=$BASH_COMMAND status=$status" >&2; exit $status' ERR
@@ -44,15 +45,18 @@ q1_root=$C_SOLID_DFDCU_STAGE_ROOT/inputs/q1
 frequency_name=Q1_FREQUENCY_GRID.tsv
 orbital_sha256=7ba114ee382d50ed831a0c90919ce291f97a08075e0e18851977d3217597289d
 pseudopotential_sha256=e95d682a8b918557fb57e2e0ec11b2f48cf693cb72a11d078cf07ec489a8fa99
-q_labels=(1 2 3 6 7 8 11 22 23 24 27 28 43)
-q_multiplicities=(1 6 3 6 12 6 3 2 6 6 6 6 1)
+q_labels=(2 3 6 7 8 11 28)
+selected_iq=(22 43 6 27 23 11 55)
+q_multiplicities=(8 4 6 24 12 3 6)
 slot=${SLURM_ARRAY_TASK_ID:?missing array slot}
 test "$slot" -ge 0
 test "$slot" -lt "${#q_labels[@]}"
-iq=${q_labels[$slot]}
+q_label=${q_labels[$slot]}
+iq=${selected_iq[$slot]}
 multiplicity=${q_multiplicities[$slot]}
-work=$OUTPUT_ROOT/q${iq}
-suffix=C_DIAMOND_FD8_Q${iq}_NFREQ12_PCA1E6_BASIS_OPT_DFDCU
+expected_q_weight=$(awk -v multiplicity="$multiplicity" 'BEGIN {printf "%.17g", multiplicity / 64.0}')
+work=$OUTPUT_ROOT/q${q_label}
+suffix=C_DIAMOND_FD8_Q${q_label}_NFREQ12_PCA1E6_BASIS_OPT_DFDCU
 
 test "$SLURM_JOB_PARTITION" = normal
 test "$SLURM_NTASKS" = 48
@@ -151,25 +155,20 @@ export I_MPI_FABRICS=shm:ofi
 export ABACUS_STERNHEIMER_CHANNEL_THREADS=$OMP_NUM_THREADS
 unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
 
-if [ "$iq" = 1 ]; then
-  cross_host_anchor=yes
-else
-  cross_host_anchor=no
-fi
-
 {
   echo status=running
   echo purpose=c_solid_fd8_q13_standard_df_dcu
   echo source_commit=$source_commit
   echo abacus_sha256=$ABACUS_SHA256
-  echo cross_host_anchor=$cross_host_anchor
+  echo cross_host_anchor=reused_accepted_q1
   echo df_q1_standard_validation_sha256=$DF_Q1_STANDARD_VALIDATION_SHA256
   echo df_q1_recovery_acceptance_sha256=$DF_Q1_RECOVERY_ACCEPTANCE_SHA256
   echo df_q1_response_signature_sha256=$DF_Q1_RESPONSE_SIGNATURE_SHA256
   echo dfdcu_q1_response_signature_sha256=$DFDCU_Q1_RESPONSE_SIGNATURE_SHA256
   echo q1_cross_host_response_comparison_sha256=$Q1_CROSS_HOST_RESPONSE_COMPARISON_SHA256
-  echo qstar_scheme=fd8_discrete_13
-  echo q_index=$iq
+  echo qstar_scheme=fd8_symmetry_8
+  echo q_label=$q_label
+  echo selected_iq=$iq
   echo q_multiplicity=$multiplicity
   echo q_count=64
   echo frequency_count=12
@@ -242,7 +241,7 @@ python3 "$validator" \
   --expected-pseudopotential-sha256 "$pseudopotential_sha256" \
   --expected-auxiliary-basis-sha256 "$expected_auxiliary_sha" \
   --expected-iq "$iq" \
-  --expected-q-weight 0.015625 \
+  --expected-q-weight "$expected_q_weight" \
   > STANDARD_PROTOCOL_VALIDATION.json
 
 test "$(sha256sum FREQUENCY_GRID.tsv | awk '{print $1}')" = "$DF_Q1_FREQUENCY_GRID_SHA256"
@@ -257,4 +256,4 @@ dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
     STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
 } >> RUN_PROVENANCE.txt
 
-echo "C_SOLID_FD8_DFDCU_OK q=$iq multiplicity=$multiplicity work=$work"
+echo "C_SOLID_FD8_DFDCU_OK label=$q_label selected_iq=$iq multiplicity=$multiplicity work=$work"
