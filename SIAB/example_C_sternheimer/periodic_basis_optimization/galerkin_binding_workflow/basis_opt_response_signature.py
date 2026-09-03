@@ -46,6 +46,13 @@ def _response_record(path, entry, frequency, weight):
     }
 
 
+def _metadata_value(metadata, key, index=0):
+    values = metadata.get(key)
+    if values is None or len(values) <= index:
+        raise RuntimeError("response manifest is missing metadata: " + key)
+    return values[index]
+
+
 def build_signature(dataset, expected_commit):
     dataset = Path(dataset)
     metadata, frequencies, kpoints, entries = parse_manifest(dataset / "manifest.dat")
@@ -79,7 +86,26 @@ def build_signature(dataset, expected_commit):
         "status_sha256": _sha256(dataset / "status.dat"),
         "protocol": {
             "abacus_commit": expected_commit,
-            "physics_hash": metadata["physics_hash"][0],
+            "executable_sha256": _metadata_value(metadata, "executable_sha256"),
+            "orbital_sha256": _metadata_value(metadata, "orbital_sha256"),
+            "pseudopotential_sha256": _metadata_value(
+                metadata, "pseudopotential_sha256"
+            ),
+            "auxiliary_basis_source": _metadata_value(
+                metadata, "auxiliary_basis_source"
+            ),
+            "auxiliary_basis_sha256": _metadata_value(
+                metadata, "auxiliary_basis_sha256"
+            ),
+            "primitive_blocks_sha256": _metadata_value(
+                metadata, "primitive_blocks_sha256"
+            ),
+            "physics_hash": _metadata_value(metadata, "physics_hash"),
+            "kernel": _metadata_value(metadata, "kernel"),
+            "q_count": int(_metadata_value(metadata, "q_count")),
+            "selected_iq": int(_metadata_value(metadata, "selected_iq")),
+            "qpoint": [float(value) for value in metadata["qpoint"]],
+            "q_weight": float(_metadata_value(metadata, "q_weight")),
             "raw_auxiliary_dimension": raw_dimension,
             "whitened_auxiliary_rank": retained_rank,
             "primitive_count": primitive_count,
@@ -108,7 +134,16 @@ def compare_signatures(actual, reference, relative_tolerance):
         raise RuntimeError("response signature definition mismatch")
     protocol_fields = (
         "abacus_commit",
-        "physics_hash",
+        "orbital_sha256",
+        "pseudopotential_sha256",
+        "auxiliary_basis_source",
+        "auxiliary_basis_sha256",
+        "primitive_blocks_sha256",
+        "kernel",
+        "q_count",
+        "selected_iq",
+        "qpoint",
+        "q_weight",
         "raw_auxiliary_dimension",
         "whitened_auxiliary_rank",
         "primitive_count",
@@ -162,6 +197,22 @@ def compare_signatures(actual, reference, relative_tolerance):
     return {
         "status": "success",
         "gate": "pass",
+        "physics_hash_match": (
+            actual["protocol"].get("physics_hash")
+            == reference["protocol"].get("physics_hash")
+        ),
+        "actual_physics_hash": actual["protocol"].get("physics_hash"),
+        "reference_physics_hash": reference["protocol"].get("physics_hash"),
+        "executable_hash_match": (
+            actual["protocol"].get("executable_sha256")
+            == reference["protocol"].get("executable_sha256")
+        ),
+        "actual_executable_sha256": actual["protocol"].get(
+            "executable_sha256"
+        ),
+        "reference_executable_sha256": reference["protocol"].get(
+            "executable_sha256"
+        ),
         "relative_tolerance": float(relative_tolerance),
         "max_response_spectrum_relative_error": maximum,
         "frequency_comparisons": comparisons,

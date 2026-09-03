@@ -122,6 +122,17 @@ class StreamingDatasetTest(unittest.TestCase):
         manifest = [
             "ABACUS_STERNHEIMER_BASIS_OPT_MANIFEST_V1",
             "abacus_commit test-commit",
+            "executable_sha256 test-executable",
+            "orbital_sha256 test-orbital",
+            "pseudopotential_sha256 test-pseudopotential",
+            "auxiliary_basis_source product_pca",
+            "auxiliary_basis_sha256 test-auxiliary",
+            "primitive_blocks_sha256 test-primitives",
+            "kernel full_coulomb",
+            "q_count 1",
+            "selected_iq 1",
+            "qpoint 0.0 0.0 0.0",
+            "q_weight 1.0",
             "entry_count 8",
             "raw_auxiliary_dimension 2",
             "whitened_auxiliary_rank 2",
@@ -287,6 +298,17 @@ class ResponseSignatureTest(unittest.TestCase):
         return {
             "status": "success",
             "protocol": {
+                "abacus_commit": "test-commit",
+                "orbital_sha256": "test-orbital",
+                "pseudopotential_sha256": "test-pseudopotential",
+                "auxiliary_basis_source": "product_pca",
+                "auxiliary_basis_sha256": "test-auxiliary",
+                "primitive_blocks_sha256": "test-primitives",
+                "kernel": "full_coulomb",
+                "q_count": 1,
+                "selected_iq": 1,
+                "qpoint": [0.0, 0.0, 0.0],
+                "q_weight": 1.0,
                 "raw_auxiliary_dimension": 2,
                 "whitened_auxiliary_rank": 2,
                 "primitive_count": 2,
@@ -316,6 +338,28 @@ class ResponseSignatureTest(unittest.TestCase):
         )
         self.assertEqual(result["status"], "success")
         self.assertLess(result["max_response_spectrum_relative_error"], 1.0e-8)
+
+    def test_response_signature_records_cross_build_physics_hash_difference(self):
+        reference = self._signature([-0.2, -0.1])
+        candidate = self._signature([-0.2, -0.1])
+        reference["protocol"]["physics_hash"] = "reference-build"
+        candidate["protocol"]["physics_hash"] = "candidate-build"
+        result = SIGNATURE.compare_signatures(
+            candidate, reference, relative_tolerance=1.0e-8
+        )
+        self.assertEqual(result["gate"], "pass")
+        self.assertFalse(result["physics_hash_match"])
+        self.assertEqual(result["actual_physics_hash"], "candidate-build")
+        self.assertEqual(result["reference_physics_hash"], "reference-build")
+
+    def test_response_signature_rejects_immutable_input_difference(self):
+        reference = self._signature([-0.2, -0.1])
+        candidate = self._signature([-0.2, -0.1])
+        candidate["protocol"]["orbital_sha256"] = "different-orbital"
+        with self.assertRaisesRegex(RuntimeError, "orbital_sha256"):
+            SIGNATURE.compare_signatures(
+                candidate, reference, relative_tolerance=1.0e-8
+            )
 
     def test_response_signature_comparison_rejects_spectrum_change(self):
         reference = self._signature([-0.2, -0.1])
