@@ -3,7 +3,7 @@
 #SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=30
 #SBATCH --mem=110000
 #SBATCH --time=02:00:00
 
@@ -26,7 +26,7 @@ runner=$C_SOLID_DFDCU_STAGE_ROOT/source/build_c_solid_fd8_q13_standard_abacus_df
 metadata=$C_SOLID_DFDCU_STAGE_ROOT/artifacts/job3117942/commit_metadata.txt
 
 test "$SLURM_JOB_PARTITION" = debug
-test "$SLURM_CPUS_PER_TASK" = 32
+test "$SLURM_CPUS_PER_TASK" = 30
 test -d "$source_root/source"
 test -d "$deps/LibRI_latest"
 test -d "$deps/LibComm_fix_status"

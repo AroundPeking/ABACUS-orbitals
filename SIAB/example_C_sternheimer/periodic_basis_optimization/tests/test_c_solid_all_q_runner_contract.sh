@@ -58,7 +58,7 @@ fi
 
 test -s "$standard_dfdcu_build"
 grep -q '^#SBATCH --partition=debug$' "$standard_dfdcu_build"
-grep -q '^#SBATCH --cpus-per-task=32$' "$standard_dfdcu_build"
+grep -q '^#SBATCH --cpus-per-task=30$' "$standard_dfdcu_build"
 grep -Fq 'source "$DFDCU_ENV"' "$standard_dfdcu_build"
 grep -Fq 'DFDCU_ELPA_ROOT=${DFDCU_ELPA_ROOT:-/public/home/ghj/app/deps/elpa-2021.11.002-intelmpi2021}' "$standard_dfdcu_build"
 grep -Fq -- '-DENABLE_GREENX_MINIMAX=ON' "$standard_dfdcu_build"
