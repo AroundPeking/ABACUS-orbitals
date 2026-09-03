@@ -193,6 +193,15 @@ class RunnerContractTest(unittest.TestCase):
         dfdcu = (workflow / runners[-1]).read_text(encoding="ascii")
         self.assertIn("BASIS_OPT_VALIDATOR_SHA256", dfdcu)
         self.assertIn('sha256sum "$basis_opt_validator"', dfdcu)
+        self.assertIn("DF_Q1_RESPONSE_SIGNATURE_SHA256", dfdcu)
+        self.assertIn("DFDCU_Q1_RESPONSE_SIGNATURE_SHA256", dfdcu)
+        self.assertIn("Q1_CROSS_HOST_RESPONSE_COMPARISON_SHA256", dfdcu)
+        self.assertIn('sha256sum "$q1_root/DF_Q1_RESPONSE_SIGNATURE.json"', dfdcu)
+        self.assertIn('sha256sum "$q1_root/DFDCU_Q1_RESPONSE_SIGNATURE.json"', dfdcu)
+        self.assertIn(
+            'sha256sum "$q1_root/Q1_CROSS_HOST_RESPONSE_COMPARISON.json"',
+            dfdcu,
+        )
 
     def test_recovery_runner_is_read_only_and_memory_gated(self):
         runner = (
@@ -360,6 +369,35 @@ class ResponseSignatureTest(unittest.TestCase):
             SIGNATURE.compare_signatures(
                 candidate, reference, relative_tolerance=1.0e-8
             )
+
+    def test_compare_cli_binds_input_signature_hashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            actual_path = Path(tmp) / "actual.json"
+            reference_path = Path(tmp) / "reference.json"
+            actual_path.write_text(
+                json.dumps(self._signature([-0.2, -0.1])), encoding="ascii"
+            )
+            reference_path.write_text(
+                json.dumps(self._signature([-0.2, -0.1])), encoding="ascii"
+            )
+            actual_sha256 = hashlib.sha256(actual_path.read_bytes()).hexdigest()
+            reference_sha256 = hashlib.sha256(
+                reference_path.read_bytes()
+            ).hexdigest()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                payload = SIGNATURE.main(
+                    ["compare", str(actual_path), str(reference_path)]
+                )
+        self.assertEqual(payload, json.loads(output.getvalue()))
+        self.assertEqual(
+            payload["actual_signature_sha256"],
+            actual_sha256,
+        )
+        self.assertEqual(
+            payload["reference_signature_sha256"],
+            reference_sha256,
+        )
 
     def test_response_signature_comparison_rejects_spectrum_change(self):
         reference = self._signature([-0.2, -0.1])

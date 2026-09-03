@@ -21,6 +21,9 @@ trap 'status=$?; echo "C_SOLID_FD8_DFDCU_FAILED line=$LINENO command=$BASH_COMMA
 : "${DF_Q1_FREQUENCY_GRID_SHA256:?missing accepted df q1 frequency-grid SHA256}"
 : "${DF_Q1_STANDARD_VALIDATION_SHA256:?missing accepted df q1 validation SHA256}"
 : "${DF_Q1_RECOVERY_ACCEPTANCE_SHA256:?missing accepted df q1 recovery SHA256}"
+: "${DF_Q1_RESPONSE_SIGNATURE_SHA256:?missing df q1 response signature SHA256}"
+: "${DFDCU_Q1_RESPONSE_SIGNATURE_SHA256:?missing df_dcu q1 response signature SHA256}"
+: "${Q1_CROSS_HOST_RESPONSE_COMPARISON_SHA256:?missing q1 response comparison SHA256}"
 
 DFDCU_ENV=${DFDCU_ENV:-/public/home/ghj/app/src/env_60_245_intel2021.sh}
 DFDCU_ELPA_ROOT=${DFDCU_ELPA_ROOT:-/public/home/ghj/app/deps/elpa-2021.11.002-intelmpi2021}
@@ -68,6 +71,25 @@ test -d "$template"
 test "$(sha256sum "$q1_root/FREQUENCY_GRID.tsv" | awk '{print $1}')" = "$DF_Q1_FREQUENCY_GRID_SHA256"
 test "$(sha256sum "$q1_root/STANDARD_PROTOCOL_VALIDATION.json" | awk '{print $1}')" = "$DF_Q1_STANDARD_VALIDATION_SHA256"
 test "$(sha256sum "$q1_root/Q1_RECOVERY_ACCEPTANCE.json" | awk '{print $1}')" = "$DF_Q1_RECOVERY_ACCEPTANCE_SHA256"
+test "$(sha256sum "$q1_root/DF_Q1_RESPONSE_SIGNATURE.json" | awk '{print $1}')" = "$DF_Q1_RESPONSE_SIGNATURE_SHA256"
+test "$(sha256sum "$q1_root/DFDCU_Q1_RESPONSE_SIGNATURE.json" | awk '{print $1}')" = "$DFDCU_Q1_RESPONSE_SIGNATURE_SHA256"
+test "$(sha256sum "$q1_root/Q1_CROSS_HOST_RESPONSE_COMPARISON.json" | awk '{print $1}')" = "$Q1_CROSS_HOST_RESPONSE_COMPARISON_SHA256"
+"$validator_python" - "$q1_root/Q1_CROSS_HOST_RESPONSE_COMPARISON.json" \
+  "$DFDCU_Q1_RESPONSE_SIGNATURE_SHA256" "$DF_Q1_RESPONSE_SIGNATURE_SHA256" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="ascii") as handle:
+    payload = json.load(handle)
+if payload.get("status") != "success" or payload.get("gate") != "pass":
+    raise SystemExit("q1 cross-host response comparison did not pass")
+if payload.get("actual_signature_sha256") != sys.argv[2]:
+    raise SystemExit("df_dcu q1 signature is not bound to comparison")
+if payload.get("reference_signature_sha256") != sys.argv[3]:
+    raise SystemExit("df q1 signature is not bound to comparison")
+if float(payload.get("max_response_spectrum_relative_error", 1.0)) > 1.0e-8:
+    raise SystemExit("q1 response spectrum exceeds cross-host tolerance")
+PY
 
 mkdir -p "$OUTPUT_ROOT"
 mkdir "$work"
@@ -143,6 +165,9 @@ fi
   echo cross_host_anchor=$cross_host_anchor
   echo df_q1_standard_validation_sha256=$DF_Q1_STANDARD_VALIDATION_SHA256
   echo df_q1_recovery_acceptance_sha256=$DF_Q1_RECOVERY_ACCEPTANCE_SHA256
+  echo df_q1_response_signature_sha256=$DF_Q1_RESPONSE_SIGNATURE_SHA256
+  echo dfdcu_q1_response_signature_sha256=$DFDCU_Q1_RESPONSE_SIGNATURE_SHA256
+  echo q1_cross_host_response_comparison_sha256=$Q1_CROSS_HOST_RESPONSE_COMPARISON_SHA256
   echo qstar_scheme=fd8_discrete_13
   echo q_index=$iq
   echo q_multiplicity=$multiplicity

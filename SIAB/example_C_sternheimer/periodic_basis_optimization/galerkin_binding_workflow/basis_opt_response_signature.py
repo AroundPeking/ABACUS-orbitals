@@ -239,6 +239,8 @@ def main(argv=None):
         with open(args.reference, encoding="ascii") as handle:
             reference = json.load(handle)
         payload = compare_signatures(actual, reference, args.relative_tolerance)
+        payload["actual_signature_sha256"] = _sha256(args.actual)
+        payload["reference_signature_sha256"] = _sha256(args.reference)
     print(json.dumps(payload, sort_keys=True, allow_nan=False))
     return payload
 
