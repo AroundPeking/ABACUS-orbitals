@@ -16,6 +16,7 @@ trap 'status=$?; echo "C_SOLID_FD8_DFDCU_FAILED line=$LINENO command=$BASH_COMMA
 : "${RUNNER_SHA256:?missing runner SHA256}"
 : "${CONFIG_SHA256:?missing standard config SHA256}"
 : "${VALIDATOR_SHA256:?missing standard validator SHA256}"
+: "${BASIS_OPT_VALIDATOR_SHA256:?missing streaming basis-opt validator SHA256}"
 : "${ABACUS_SHA256:?missing df_dcu ABACUS SHA256}"
 : "${DF_Q1_FREQUENCY_GRID_SHA256:?missing accepted df q1 frequency-grid SHA256}"
 : "${DF_Q1_STANDARD_VALIDATION_SHA256:?missing accepted df q1 validation SHA256}"
@@ -31,6 +32,8 @@ source_commit=711af860c125b9757c344a1961b63524c550cfe4
 runner=$C_SOLID_DFDCU_STAGE_ROOT/source/run_c_solid_fd8_q13_standard_dfdcu.slurm
 config=$C_SOLID_DFDCU_STAGE_ROOT/source/c_diamond_solid_fd8_q13_standard.json
 validator=$C_SOLID_DFDCU_STAGE_ROOT/source/validate_c_solid_fd8_q_dataset.py
+basis_opt_validator=$C_SOLID_DFDCU_STAGE_ROOT/source/validate_periodic_basis_opt_streaming.py
+validator_python=${C_BASIS_PYTHON:-/public/home/ghj/.conda/envs/ds092/bin/python}
 abacus_root=$C_SOLID_DFDCU_STAGE_ROOT/artifacts/abacus-711af860c-intel2021
 abacus=$abacus_root/abacus_3p
 template=$C_SOLID_DFDCU_STAGE_ROOT/gate-template-product-pca
@@ -55,6 +58,9 @@ test "$SLURM_CPUS_PER_TASK" = 30
 test "$(sha256sum "$runner" | awk '{print $1}')" = "$RUNNER_SHA256"
 test "$(sha256sum "$config" | awk '{print $1}')" = "$CONFIG_SHA256"
 test "$(sha256sum "$validator" | awk '{print $1}')" = "$VALIDATOR_SHA256"
+test "$(sha256sum "$basis_opt_validator" | awk '{print $1}')" = "$BASIS_OPT_VALIDATOR_SHA256"
+test -x "$validator_python"
+"$validator_python" -c 'import numpy'
 test -x "$abacus"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$ABACUS_SHA256"
 grep -Fxq 'status=success' "$abacus_root/BUILD_PROVENANCE.txt"
@@ -154,7 +160,7 @@ fi
   echo response_kpoint_groups=4
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
-  sha256sum "$runner" "$config" "$validator" "$abacus" INPUT STRU KPT \
+  sha256sum "$runner" "$config" "$validator" "$basis_opt_validator" "$abacus" INPUT STRU KPT \
     C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb "$frequency_name"
 } > RUN_PROVENANCE.txt
 
@@ -180,7 +186,7 @@ grep -qx 'q_count 64' "$dataset/manifest.dat"
 grep -qx "selected_iq $iq" "$dataset/manifest.dat"
 grep -qx 'frequency_count 12' "$dataset/manifest.dat"
 
-python3 "$C_SOLID_DFDCU_STAGE_ROOT/validate_periodic_basis_opt.py" \
+"$validator_python" "$basis_opt_validator" \
   "$dataset" --commit "$source_commit" | tee BASIS_OPT_VALIDATION.json
 
 expected_auxiliary_sha=$(python3 - "$orbital_sha256" <<'PY'
@@ -222,7 +228,7 @@ dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
   echo dataset_bytes=$dataset_bytes
   echo final_energy_headwing_protocol=qavg_deferred_not_applied_to_training_dataset
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$validator" "$frequency_name" FREQUENCY_GRID.tsv \
+  sha256sum "$validator" "$basis_opt_validator" "$frequency_name" FREQUENCY_GRID.tsv \
     STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
 } >> RUN_PROVENANCE.txt
 

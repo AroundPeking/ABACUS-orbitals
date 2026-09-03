@@ -23,6 +23,8 @@ workflow=$SIAB_SOURCE_ROOT/SIAB/example_C_sternheimer/periodic_basis_optimizatio
 runner=$workflow/run_c_solid_fd8_q13_standard_q1_df.slurm
 config=$workflow/c_diamond_solid_fd8_q13_standard.json
 validator=$workflow/validate_c_solid_fd8_q_dataset.py
+basis_opt_validator=$workflow/validate_periodic_basis_opt_streaming.py
+validator_python=${C_BASIS_PYTHON:-/data/home/df_iopcas_ghj/app/miniconda3/bin/python}
 abacus_root=/data/home/df_iopcas_ghj/app/abacus/unified-basis-opt-aux-source-711af860c-20260825
 abacus=$abacus_root/artifacts/job3117942/abacus_3p
 template=$abacus_root/gate-template-product-pca
@@ -59,6 +61,9 @@ test "$(resolve_source_head)" = "$SIAB_SOURCE_COMMIT"
 test "$(sha256sum "$runner" | awk '{print $1}')" = "$SIAB_RUNNER_SHA256"
 test "$(sha256sum "$config" | awk '{print $1}')" = "$SIAB_CONFIG_SHA256"
 test -s "$validator"
+test -s "$basis_opt_validator"
+test -x "$validator_python"
+"$validator_python" -c 'import numpy'
 test -x "$abacus"
 test "$(sha256sum "$abacus" | awk '{print $1}')" = "$expected_abacus_sha"
 grep -Fq "$abacus_commit" "$abacus_root/artifacts/job3117942/commit_metadata.txt"
@@ -143,7 +148,7 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
   echo response_kpoint_groups=4
   echo mpi_ranks=$SLURM_NTASKS
   echo omp_threads=$OMP_NUM_THREADS
-  sha256sum "$runner" "$config" "$validator" "$abacus" INPUT STRU KPT \
+  sha256sum "$runner" "$config" "$validator" "$basis_opt_validator" "$abacus" INPUT STRU KPT \
     C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb
 } > RUN_PROVENANCE.txt
 
@@ -169,7 +174,7 @@ grep -qx 'q_count 64' "$dataset/manifest.dat"
 grep -qx 'selected_iq 1' "$dataset/manifest.dat"
 grep -qx 'frequency_count 12' "$dataset/manifest.dat"
 
-python3 "$abacus_root/validate_periodic_basis_opt.py" \
+"$validator_python" "$basis_opt_validator" \
   "$dataset" --commit "$abacus_commit" | tee BASIS_OPT_VALIDATION.json
 
 expected_auxiliary_sha=$(python3 - "$orbital_sha256" <<'PY'
@@ -209,7 +214,8 @@ dataset_bytes=$(du -sb "$dataset" | awk '{print $1}')
   echo dataset_bytes=$dataset_bytes
   echo final_energy_headwing_protocol=qavg_deferred_not_applied_to_training_dataset
   sed -n 's/^[[:space:]]*Elapsed (wall clock) time (h:mm:ss or m:ss):[[:space:]]*/wall_clock=/p; s/^[[:space:]]*Maximum resident set size (kbytes):[[:space:]]*/max_rss_kb=/p' abacus.time
-  sha256sum "$validator" FREQUENCY_GRID.tsv STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
+  sha256sum "$validator" "$basis_opt_validator" FREQUENCY_GRID.tsv \
+    STANDARD_PROTOCOL_VALIDATION.json "$dataset/manifest.dat" "$dataset/status.dat"
 } >> RUN_PROVENANCE.txt
 
 echo "C_SOLID_FD8_Q1_STANDARD_OK work=$work"
