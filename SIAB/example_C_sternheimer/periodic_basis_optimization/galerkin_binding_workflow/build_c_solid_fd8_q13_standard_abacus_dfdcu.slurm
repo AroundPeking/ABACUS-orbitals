@@ -15,6 +15,8 @@ trap 'status=$?; echo "C_SOLID_FD8_DFDCU_BUILD_FAILED line=$LINENO command=$BASH
 
 DFDCU_ENV=${DFDCU_ENV:-/public/home/ghj/app/src/env_60_245_intel2021.sh}
 DFDCU_ELPA_ROOT=${DFDCU_ELPA_ROOT:-/public/home/ghj/app/deps/elpa-2021.11.002-intelmpi2021}
+export LANG=C
+export LC_ALL=C
 source "$DFDCU_ENV"
 
 source_commit=711af860c125b9757c344a1961b63524c550cfe4
