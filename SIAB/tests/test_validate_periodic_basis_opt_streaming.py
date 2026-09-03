@@ -23,6 +23,19 @@ SPEC = importlib.util.spec_from_file_location("validate_periodic_basis_opt_strea
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
 
+ACCEPTOR_PATH = (
+    ROOT
+    / "example_C_sternheimer"
+    / "periodic_basis_optimization"
+    / "galerkin_binding_workflow"
+    / "accept_periodic_basis_opt_streaming_validation.py"
+)
+ACCEPTOR_SPEC = importlib.util.spec_from_file_location(
+    "accept_periodic_basis_opt_streaming_validation", ACCEPTOR_PATH
+)
+ACCEPTOR = importlib.util.module_from_spec(ACCEPTOR_SPEC)
+ACCEPTOR_SPEC.loader.exec_module(ACCEPTOR)
+
 
 HEADER = struct.Struct("<16sIIiiiQQ")
 MAGIC = b"ABACUS_STBOPT_V1"
@@ -165,6 +178,92 @@ class RunnerContractTest(unittest.TestCase):
         self.assertIn("MAX_VALIDATOR_RSS_KB", runner)
         self.assertNotIn("mpirun", runner)
         self.assertNotIn('"$abacus"', runner)
+
+    def test_completed_scan_acceptor_runner_does_not_rescan_or_run_physics(self):
+        runner = (
+            VALIDATOR_PATH.parent
+            / "accept_c_solid_fd8_q_streaming_validation_recovery.slurm"
+        ).read_text(encoding="ascii")
+        self.assertIn("accept_periodic_basis_opt_streaming_validation.py", runner)
+        self.assertIn("BASIS_OPT_VALIDATION_JSON", runner)
+        self.assertIn("VALIDATOR_TIME_FILE", runner)
+        self.assertIn("EXPECTED_MANIFEST_SHA256", runner)
+        self.assertIn("EXPECTED_STATUS_SHA256", runner)
+        self.assertNotIn("validate_periodic_basis_opt_streaming.py\" \"$DATASET_ROOT", runner)
+        self.assertNotIn("mpirun", runner)
+        self.assertNotIn('"$abacus"', runner)
+
+
+class CompletedStreamingValidationAcceptanceTest(unittest.TestCase):
+    def _validation(self):
+        return {
+            "status": "success",
+            "entries": 1038,
+            "kpoints": 64,
+            "frequencies": 12,
+            "raw_auxiliary_dimension": 320,
+            "whitened_auxiliary_rank": 301,
+            "primitive_count": 1550,
+            "metric_hermitian_relative_error": 9.0e-15,
+            "declared_whitening_max_error": 6.2e-9,
+            "sampled_whitening_max_error": 4.2e-8,
+            "sampled_whitening_limit": 1.9e-6,
+            "reference_response_hermitian_relative_error": 0.0,
+            "overlap_hermitian_relative_error": 0.0,
+            "hamiltonian_hermitian_relative_error": 1.8e-14,
+        }
+
+    def test_independent_host_roundoff_is_not_exact_parity_failure(self):
+        reference = self._validation()
+        actual = self._validation()
+        actual.update(
+            {
+                "metric_hermitian_relative_error": 1.01e-14,
+                "declared_whitening_max_error": 5.03e-9,
+                "sampled_whitening_max_error": 4.05e-8,
+                "sampled_whitening_limit": 1.51e-6,
+                "overlap_hermitian_relative_error": 1.86e-16,
+                "hamiltonian_hermitian_relative_error": 1.77e-14,
+            }
+        )
+
+        result = ACCEPTOR.accept_validation(
+            actual,
+            reference,
+            max_rss_kb=32488,
+            max_rss_limit_kb=4194304,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "success_recovered_from_completed_streaming_validation",
+        )
+        self.assertEqual(result["dimension_parity"], "pass")
+        self.assertEqual(result["numerical_gate"], "pass")
+        self.assertEqual(result["memory_gate"], "pass")
+        self.assertNotEqual(
+            result["cross_host_diagnostic_differences"][
+                "declared_whitening_max_error"
+            ],
+            0.0,
+        )
+
+    def test_acceptor_rejects_dimension_mismatch(self):
+        reference = self._validation()
+        actual = self._validation()
+        actual["primitive_count"] += 1
+        with self.assertRaisesRegex(RuntimeError, "dimension mismatch"):
+            ACCEPTOR.accept_validation(actual, reference, 1000, 4194304)
+
+    def test_acceptor_rejects_failed_numerical_or_memory_gate(self):
+        reference = self._validation()
+        actual = self._validation()
+        actual["sampled_whitening_max_error"] = 2.0e-6
+        with self.assertRaisesRegex(RuntimeError, "numerical gate"):
+            ACCEPTOR.accept_validation(actual, reference, 1000, 4194304)
+        actual = self._validation()
+        with self.assertRaisesRegex(RuntimeError, "memory gate"):
+            ACCEPTOR.accept_validation(actual, reference, 5000, 4096)
 
 
 if __name__ == "__main__":
