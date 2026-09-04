@@ -190,6 +190,11 @@ class RunnerContractTest(unittest.TestCase):
                 text,
                 name,
             )
+            self.assertIn(
+                'expected_auxiliary_sha=$("$validator_python" -', text, name
+            )
+            self.assertIn('\n"$validator_python" "$validator"', text, name)
+            self.assertNotIn("python3", text, name)
         dfdcu = (workflow / runners[-1]).read_text(encoding="ascii")
         self.assertIn("BASIS_OPT_VALIDATOR_SHA256", dfdcu)
         self.assertIn('sha256sum "$basis_opt_validator"', dfdcu)
@@ -238,6 +243,23 @@ class RunnerContractTest(unittest.TestCase):
         self.assertNotIn("validate_periodic_basis_opt_streaming.py\" \"$DATASET_ROOT", runner)
         self.assertNotIn("mpirun", runner)
         self.assertNotIn('"$abacus"', runner)
+
+    def test_standard_protocol_recovery_is_read_only_and_uses_frozen_python(self):
+        runner = (
+            VALIDATOR_PATH.parent
+            / "recover_c_solid_fd8_q_standard_validation_dfdcu.slurm"
+        ).read_text(encoding="ascii")
+        self.assertIn("validate_c_solid_fd8_q_dataset.py", runner)
+        self.assertIn("STANDARD_PROTOCOL_VALIDATION.json", runner)
+        self.assertIn("STANDARD_PROTOCOL_RECOVERY_ACCEPTANCE.json", runner)
+        self.assertIn('expected_auxiliary_sha=$("$validator_python" -', runner)
+        self.assertIn('\n"$validator_python" "$validator"', runner)
+        self.assertIn("SOURCE_SCHEDULER_STATE", runner)
+        self.assertIn("SOURCE_SCHEDULER_EXIT_CODE", runner)
+        self.assertIn("BASIS_OPT_VALIDATION_JSON", runner)
+        self.assertNotIn("mpirun", runner)
+        self.assertNotIn('"$abacus"', runner)
+        self.assertNotIn("python3", runner)
 
 
 class CompletedStreamingValidationAcceptanceTest(unittest.TestCase):

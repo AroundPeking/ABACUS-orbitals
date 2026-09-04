@@ -91,7 +91,7 @@ test -s "$Q1_ROOT/Q1_RECOVERY_ACCEPTANCE.json"
 test "$(sha256sum "$Q1_ROOT/FREQUENCY_GRID.tsv" | awk '{print $1}')" = "$Q1_FREQUENCY_GRID_SHA256"
 test "$(sha256sum "$Q1_ROOT/STANDARD_PROTOCOL_VALIDATION.json" | awk '{print $1}')" = "$Q1_STANDARD_VALIDATION_SHA256"
 test "$(sha256sum "$Q1_ROOT/Q1_RECOVERY_ACCEPTANCE.json" | awk '{print $1}')" = "$Q1_RECOVERY_ACCEPTANCE_SHA256"
-python3 - "$Q1_ROOT/STANDARD_PROTOCOL_VALIDATION.json" "$Q1_ROOT/Q1_RECOVERY_ACCEPTANCE.json" <<'PY'
+"$validator_python" - "$Q1_ROOT/STANDARD_PROTOCOL_VALIDATION.json" "$Q1_ROOT/Q1_RECOVERY_ACCEPTANCE.json" <<'PY'
 import json
 import pathlib
 import sys
@@ -215,7 +215,7 @@ grep -qx 'frequency_count 12' "$dataset/manifest.dat"
 "$validator_python" "$basis_opt_validator" \
   "$dataset" --commit "$abacus_commit" | tee BASIS_OPT_VALIDATION.json
 
-expected_auxiliary_sha=$(python3 - "$orbital_sha256" <<'PY'
+expected_auxiliary_sha=$("$validator_python" - "$orbital_sha256" <<'PY'
 import hashlib
 import struct
 import sys
@@ -230,7 +230,7 @@ print(digest.hexdigest())
 PY
 )
 
-python3 "$validator" \
+"$validator_python" "$validator" \
   --manifest "$dataset/manifest.dat" \
   --status "$dataset/status.dat" \
   --input INPUT \

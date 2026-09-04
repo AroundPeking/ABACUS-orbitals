@@ -177,7 +177,7 @@ grep -qx 'frequency_count 12' "$dataset/manifest.dat"
 "$validator_python" "$basis_opt_validator" \
   "$dataset" --commit "$abacus_commit" | tee BASIS_OPT_VALIDATION.json
 
-expected_auxiliary_sha=$(python3 - "$orbital_sha256" <<'PY'
+expected_auxiliary_sha=$("$validator_python" - "$orbital_sha256" <<'PY'
 import hashlib
 import struct
 import sys
@@ -192,7 +192,7 @@ print(digest.hexdigest())
 PY
 )
 
-python3 "$validator" \
+"$validator_python" "$validator" \
   --manifest "$dataset/manifest.dat" \
   --status "$dataset/status.dat" \
   --input INPUT \
