@@ -58,7 +58,13 @@ expected_q_weight=$(awk -v multiplicity="$multiplicity" 'BEGIN {printf "%.17g", 
 work=$OUTPUT_ROOT/q${q_label}
 suffix=C_DIAMOND_FD8_Q${q_label}_NFREQ12_PCA1E6_BASIS_OPT_DFDCU
 
-test "$SLURM_JOB_PARTITION" = normal
+case "$SLURM_JOB_PARTITION" in
+  normal|long) ;;
+  *)
+    echo "unsupported df_dcu partition: $SLURM_JOB_PARTITION" >&2
+    exit 1
+    ;;
+esac
 test "$SLURM_NTASKS" = 48
 test "$SLURM_NTASKS_PER_NODE" = 1
 test "$SLURM_CPUS_PER_TASK" = 30
@@ -158,6 +164,7 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
 {
   echo status=running
   echo purpose=c_solid_fd8_q13_standard_df_dcu
+  echo scheduler_partition=$SLURM_JOB_PARTITION
   echo source_commit=$source_commit
   echo abacus_sha256=$ABACUS_SHA256
   echo cross_host_anchor=reused_accepted_q1
