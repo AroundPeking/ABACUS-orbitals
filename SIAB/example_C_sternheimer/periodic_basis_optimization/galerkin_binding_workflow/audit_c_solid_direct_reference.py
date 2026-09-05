@@ -66,11 +66,11 @@ def _audit_candidate_root(root):
     status_paths = tuple(root.rglob(STATUS_NAME))
     fields = tuple(_parse_status(path) for path in status_paths)
     status_values = Counter(record.get("status", "missing") for record in fields)
-    datasets = tuple(
-        dataset
-        for status_path, record in zip(status_paths, fields)
-        if (dataset := _response_dataset(status_path, record)) is not None
-    )
+    datasets = []
+    for status_path, record in zip(status_paths, fields):
+        dataset = _response_dataset(status_path, record)
+        if dataset is not None:
+            datasets.append(dataset)
     coulomb_files = sum(1 for _ in root.rglob("v1_coulomb_full_iq_*_rank0.dat"))
     if status_paths and not datasets and set(status_values) == {"abfs_diag_only"}:
         classification = "coulomb_only_diagnostic"
