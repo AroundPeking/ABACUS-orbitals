@@ -273,7 +273,7 @@ PY
   --status "$dataset/status.dat" \
   --input INPUT \
   --frequency-grid-output FREQUENCY_GRID.tsv \
-  --frequency-grid-source frozen_df_q1_greenx_minimax \
+  --frequency-grid-source frozen_q1_greenx_minimax \
   --expected-frequency-grid "$frequency_name" \
   --expected-abacus-commit "$source_commit" \
   --expected-executable-sha256 "$ABACUS_SHA256" \

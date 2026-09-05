@@ -40,7 +40,18 @@ abacus_time=$WORK_ROOT/abacus.time
 source_provenance=$WORK_ROOT/RUN_PROVENANCE.txt
 
 test "$SOURCE_SCHEDULER_STATE" = FAILED
-test "$SOURCE_SCHEDULER_EXIT_CODE" = 1:0
+recovery_reason=post_physics_validator_interpreter_mismatch
+argument_failure_evidence=
+if [[ "$SOURCE_SCHEDULER_EXIT_CODE" = 2:0 ]]; then
+  : "${SOURCE_SCHEDULER_ACCOUNTING:?missing complete sacct evidence}"
+  : "${SOURCE_STDERR:?missing source stderr evidence}"
+  argument_failure_evidence=$("$validator_python" "$workflow/validate_c_postphysics_argument_failure.py" \
+    --job-id "$SOURCE_JOB_ID" --accounting "$SOURCE_SCHEDULER_ACCOUNTING" \
+    --stderr "$SOURCE_STDERR" --abacus-output "$abacus_output" --abacus-time "$abacus_time")
+  recovery_reason=post_physics_validator_frequency_source_argument_mismatch
+else
+  test "$SOURCE_SCHEDULER_EXIT_CODE" = 1:0
+fi
 test -d "$WORK_ROOT"
 test -d "$DATASET_ROOT"
 test -s "$DATASET_ROOT/manifest.dat"
@@ -57,6 +68,9 @@ test "$(sha256sum "$EXPECTED_FREQUENCY_GRID" | awk '{print $1}')" = "$EXPECTED_F
 test -x "$validator_python"
 test ! -e "$OUTPUT_ROOT"
 mkdir -p "$OUTPUT_ROOT"
+if [[ -n "$argument_failure_evidence" ]]; then
+  printf '%s\n' "$argument_failure_evidence" > "$OUTPUT_ROOT/POSTPHYSICS_FAILURE_VALIDATION.json"
+fi
 
 grep -q '^ FINISH Time  :' "$abacus_output"
 grep -q '^ TOTAL  Time  :' "$abacus_output"
@@ -136,7 +150,7 @@ test "$(sha256sum "$abacus_output" | awk '{print $1}')" = "$abacus_output_sha_be
   "$SOURCE_SCHEDULER_STATE" "$SOURCE_SCHEDULER_EXIT_CODE" \
   "$SIAB_SOURCE_COMMIT" "$STANDARD_VALIDATOR_SHA256" \
   "$DATASET_ROOT" "$manifest_sha_before" "$status_sha_before" \
-  "$streaming_validation_sha_before" "$abacus_output_sha_before" <<'PY'
+  "$streaming_validation_sha_before" "$abacus_output_sha_before" "$recovery_reason" <<'PY'
 import hashlib
 import json
 import sys
@@ -156,6 +170,7 @@ import sys
     status_sha256,
     streaming_validation_sha256,
     abacus_output_sha256,
+    recovery_reason,
 ) = sys.argv[1:]
 with open(standard_path, encoding="ascii") as handle:
     standard = json.load(handle)
@@ -167,7 +182,7 @@ with open(standard_path, "rb") as handle:
     standard_sha256 = hashlib.sha256(handle.read()).hexdigest()
 payload = {
     "status": "success_recovered_without_physics_rerun",
-    "recovery_reason": "post_physics_validator_interpreter_mismatch",
+    "recovery_reason": recovery_reason,
     "physical_abacus_completion": "pass",
     "source_job_id": source_job_id,
     "source_array_job_id": source_array_job_id,
@@ -195,6 +210,11 @@ PY
   echo source_array_job_id=$SOURCE_ARRAY_JOB_ID
   echo source_scheduler_state=$SOURCE_SCHEDULER_STATE
   echo source_scheduler_exit_code=$SOURCE_SCHEDULER_EXIT_CODE
+  echo recovery_reason=$recovery_reason
+  if [[ -n "$argument_failure_evidence" ]]; then
+    sha256sum "$workflow/validate_c_postphysics_argument_failure.py" \
+      "$OUTPUT_ROOT/POSTPHYSICS_FAILURE_VALIDATION.json"
+  fi
   echo siab_source_commit=$SIAB_SOURCE_COMMIT
   echo dataset_root=$DATASET_ROOT
   echo manifest_sha256=$manifest_sha_before
