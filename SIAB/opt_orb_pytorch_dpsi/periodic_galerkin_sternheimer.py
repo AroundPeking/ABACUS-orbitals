@@ -269,7 +269,7 @@ def _evaluate_periodic_galerkin_response(
                 relative_rank_tolerance,
             )
         else:
-            overlap_eigenvalue, overlap_eigenvector = torch.linalg.eigh(overlap)
+            overlap_eigenvalue = torch.linalg.eigvalsh(overlap)
             maximum = torch.max(overlap_eigenvalue)
             if float(maximum.detach()) <= 0.0:
                 raise RuntimeError("candidate overlap has no positive direction")
@@ -278,12 +278,13 @@ def _evaluate_periodic_galerkin_response(
             if bool(torch.any(~retained)):
                 raise RuntimeError("candidate overlap is rank deficient")
             retained_eigenvalue = overlap_eigenvalue[retained]
-            retained_eigenvector = overlap_eigenvector[:, retained]
             effective_count = int(retained_eigenvalue.shape[0])
             condition = float((maximum / torch.min(retained_eigenvalue)).detach())
-            lowdin = (
-                retained_eigenvector
-                @ torch.diag(retained_eigenvalue.rsqrt()).to(torch.complex128)
+            # Eigenvector gradients are singular at repeated overlap eigenvalues.
+            cholesky = torch.linalg.cholesky(overlap)
+            lowdin = torch.linalg.solve(
+                _adjoint(cholesky),
+                torch.eye(effective_count, dtype=torch.complex128),
             )
         minimum_candidate_rank = min(minimum_candidate_rank, effective_count)
         if condition > condition_limit:
