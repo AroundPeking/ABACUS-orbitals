@@ -4,6 +4,7 @@ import copy
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 import math
+import time
 
 import torch
 
@@ -16,6 +17,7 @@ from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
 )
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
+from periodic_galerkin_rpa import periodic_rpa_objective
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ class PeriodicGalerkinFitResult:
     reference_minimum_occupied_capture: float
     initial_minimum_occupied_capture: float
     occupied_capture_floor: float
+    objective: str = "pi"
+    objective_weights: dict = None
 
 
 def _finite_positive(name, value):
@@ -238,6 +242,40 @@ def _clone_coefficients(coefficients):
     }
 
 
+def _global_rpa_loss(datasets, coefficients, *, occupied_capture_tolerance, weights):
+    start = time.perf_counter()
+    responses = []
+    minimum_capture, maximum_condition = math.inf, 1.0
+    for dataset in datasets:
+        result = evaluate_periodic_galerkin_coefficient_response(
+            dataset, coefficients, contraction_backend="block",
+            occupied_capture_tolerance=occupied_capture_tolerance,
+        )
+        responses.append(result.response)
+        minimum_capture = min(minimum_capture, result.minimum_occupied_capture)
+        maximum_condition = max(maximum_condition, result.maximum_overlap_condition)
+    objective = periodic_rpa_objective(datasets, tuple(responses), **weights)
+    diagnostics = {
+        key: float(getattr(objective, key).detach())
+        for key in ("pi_relative_squared_error", "trace_log_relative_squared_error",
+                    "energy_relative_squared_error", "candidate_energy_ha", "reference_energy_ha")
+    }
+    diagnostics.update(
+        q_weight_coverage=objective.q_weight_coverage,
+        complete_q_weight=objective.complete_q_weight,
+        evaluation_seconds=time.perf_counter() - start,
+        per_q=[{
+            "selected_iq": record.selected_iq,
+            "q_weight": record.q_weight,
+            "frequency_ha": record.frequency_ha.tolist(),
+            "candidate_contributions_ha": record.candidate_contributions_ha.detach().tolist(),
+            "reference_contributions_ha": record.reference_contributions_ha.detach().tolist(),
+        } for record in objective.q_records],
+    )
+    return (objective.loss, minimum_capture, maximum_condition,
+            {"periodic": objective.loss}, diagnostics)
+
+
 def _adjoint(value):
     return value.transpose(-2, -1).conj()
 
@@ -355,8 +393,33 @@ def optimize_periodic_galerkin_basis(
     additional_family_evaluators=None,
     progress_callback=None,
     best_callback=None,
+    objective="pi",
+    rpa_weights=None,
 ):
-    """Optimize only the nonfixed radial columns and retain the best subspace."""
+    """Fit nonfixed radial columns to Pi (default) or frozen-space body RPA.
+
+    Partial-q RPA trials are allowed but retain their physical weights. They
+    are workflow diagnostics, not complete-solid energy or basis acceptance.
+    """
+    if objective not in ("pi", "rpa"):
+        raise ValueError("objective must be pi or rpa")
+    weights = None
+    if objective == "pi":
+        if rpa_weights is not None:
+            raise ValueError("rpa_weights require objective=rpa")
+    else:
+        if dataset_families is not None or additional_family_evaluators:
+            raise ValueError("RPA fitting requires a single periodic response family")
+        weights = {"pi_weight": 1.0, "trace_log_weight": 1.0, "energy_weight": 1.0}
+        if rpa_weights is not None:
+            if not isinstance(rpa_weights, dict) or set(rpa_weights) - set(weights):
+                raise ValueError("unknown RPA objective weight")
+            weights.update(rpa_weights)
+        for key, value in weights.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0.0
+                    or (key != "energy_weight" and value == 0.0)):
+                raise ValueError("invalid RPA objective weight")
     learning_rate = _finite_positive("learning_rate", learning_rate)
     plateau_relative_improvement = _finite_positive(
         "plateau_relative_improvement", plateau_relative_improvement
@@ -422,12 +485,18 @@ def optimize_periodic_galerkin_basis(
         )
 
     def evaluate_loss(coefficients, occupied_capture_tolerance):
+        if objective == "rpa":
+            return _global_rpa_loss(
+                datasets, coefficients,
+                occupied_capture_tolerance=occupied_capture_tolerance,
+                weights=weights,
+            )
         return _global_pi_loss(
             datasets,
             coefficients,
             occupied_capture_tolerance=occupied_capture_tolerance,
             **loss_options,
-        )
+        ) + (None,)
 
     history = []
     initial_loss = None
@@ -445,11 +514,12 @@ def optimize_periodic_galerkin_basis(
     initial_minimum_occupied_capture = None
     occupied_capture_floor = None
     occupied_capture_tolerance = None
+    previous_step_gradient_norm = None
 
     for step in range(max_steps + 1):
         coefficients = _assemble(fixed, variable)
         if pending_evaluation is None:
-            loss, minimum_capture, maximum_condition, family_losses = evaluate_loss(
+            loss, minimum_capture, maximum_condition, family_losses, diagnostics = evaluate_loss(
                 coefficients,
                 (
                     1.0 - 1.0e-12
@@ -458,7 +528,7 @@ def optimize_periodic_galerkin_basis(
                 ),
             )
         else:
-            loss, minimum_capture, maximum_condition, family_losses = pending_evaluation
+            loss, minimum_capture, maximum_condition, family_losses, diagnostics = pending_evaluation
             pending_evaluation = None
         family_loss_values = {
             name: float(value.detach()) for name, value in family_losses.items()
@@ -514,6 +584,14 @@ def optimize_periodic_galerkin_basis(
                 "backtracks_from_previous_step": backtracks_from_previous_step,
             }
         )
+        if objective == "rpa":
+            relative_pi_error = math.sqrt(diagnostics["pi_relative_squared_error"])
+            history[-1].update(
+                objective="rpa", rpa=diagnostics,
+                relative_pi_error=relative_pi_error,
+                family_relative_pi_errors={"periodic": relative_pi_error},
+                previous_step_gradient_norm=previous_step_gradient_norm,
+            )
         backtracks_from_previous_step = 0
         if progress_callback is not None:
             progress_callback(history[-1])
@@ -531,6 +609,10 @@ def optimize_periodic_galerkin_basis(
         for parameter in parameters:
             if parameter.grad is None or not bool(torch.isfinite(parameter.grad).all()):
                 raise RuntimeError("periodic Pi gradient is missing or non-finite")
+        if objective == "rpa":
+            previous_step_gradient_norm = math.sqrt(sum(
+                float(parameter.grad.detach().square().sum()) for parameter in parameters
+            ))
         parameter_snapshot = [parameter.detach().clone() for parameter in parameters]
         optimizer_snapshot = copy.deepcopy(optimizer.state_dict())
         base_learning_rates = [
@@ -591,4 +673,6 @@ def optimize_periodic_galerkin_basis(
         reference_minimum_occupied_capture=reference_minimum_occupied_capture,
         initial_minimum_occupied_capture=initial_minimum_occupied_capture,
         occupied_capture_floor=occupied_capture_floor,
+        objective=objective,
+        objective_weights=weights,
     )
