@@ -195,9 +195,42 @@ unset ABACUS_STERNHEIMER_FD_ST_SOLVER_TOL
     C_ONCV_PBE-1.0.upf C_gga_10au_100Ry_3s3p2d.orb "$frequency_name"
 } > RUN_PROVENANCE.txt
 
+if [[ -n "${C_SOLID_CHARGE_RESTART_CONTRACT:-}" ]]; then
+  : "${CHARGE_RESTART_CONTRACT_SHA256:?missing charge restart contract hash}"
+  : "${CHARGE_RESTART_HELPER_SHA256:?missing charge restart helper hash}"
+  : "${MPI_PREFLIGHT_SOURCE_SHA256:?missing communication probe source hash}"
+  restart_helper=$C_SOLID_DFDCU_STAGE_ROOT/source/c_solid_charge_restart.py
+  preflight_source=$C_SOLID_DFDCU_STAGE_ROOT/source/c_mpi_communication_preflight.c
+  test "$q_label" = 8
+  test "$(sha256sum "$C_SOLID_CHARGE_RESTART_CONTRACT" | awk '{print $1}')" = "$CHARGE_RESTART_CONTRACT_SHA256"
+  test "$(sha256sum "$restart_helper" | awk '{print $1}')" = "$CHARGE_RESTART_HELPER_SHA256"
+  test "$(sha256sum "$preflight_source" | awk '{print $1}')" = "$MPI_PREFLIGHT_SOURCE_SHA256"
+  "$validator_python" "$restart_helper" prepare --contract "$C_SOLID_CHARGE_RESTART_CONTRACT" --work "$work"
+  mpiicc -O2 -std=c99 "$preflight_source" -o mpi_communication_preflight
+  timeout 180 mpirun -np "$SLURM_NTASKS" -ppn "$SLURM_NTASKS_PER_NODE" \
+    ./mpi_communication_preflight > MPI_PREFLIGHT.log 2>&1
+  grep -q '^MPI_COMM_PREFLIGHT_OK ranks=48 ' MPI_PREFLIGHT.log
+  (
+    cd restart-pbe
+    /usr/bin/time -v -o pbe.time \
+      mpirun -np "$SLURM_NTASKS" -ppn "$SLURM_NTASKS_PER_NODE" "$abacus" > abacus.out 2>&1
+  )
+  "$validator_python" "$restart_helper" validate-pbe --contract "$C_SOLID_CHARGE_RESTART_CONTRACT" --work "$work"
+  {
+    echo charge_restart_pbe_gate=success
+    echo parent_job=21862974_4
+    sha256sum "$C_SOLID_CHARGE_RESTART_CONTRACT" "$restart_helper" "$preflight_source" \
+      mpi_communication_preflight MPI_PREFLIGHT.log INPUT restart-pbe/CHARGE_RESTART_VALIDATION.json
+  } >> RUN_PROVENANCE.txt
+fi
+
 /usr/bin/time -v -o abacus.time \
   mpirun -np "$SLURM_NTASKS" -ppn "$SLURM_NTASKS_PER_NODE" \
   "$abacus" > abacus.out 2>&1
+
+if [[ -n "${C_SOLID_CHARGE_RESTART_CONTRACT:-}" ]]; then
+  "$validator_python" "$restart_helper" validate-response --contract "$C_SOLID_CHARGE_RESTART_CONTRACT" --work "$work"
+fi
 
 status=OUT.${suffix}/STERNHEIMER_SIAB_STATUS.dat
 dataset=OUT.${suffix}/STERNHEIMER_BASIS_OPT_V1
