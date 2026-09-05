@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optimize a compact C basis against one or more exact periodic Pi datasets."""
+"""Optimize a compact C basis against frozen periodic Pi or body-RPA data."""
 
 from __future__ import annotations
 
@@ -9,7 +9,9 @@ import json
 import math
 from pathlib import Path
 import re
+import resource
 import sys
+import time
 
 
 HERE = Path(__file__).resolve().parent
@@ -76,6 +78,11 @@ def parse_args(argv=None):
     parser.add_argument("--atomic-response", type=Path)
     parser.add_argument("--atomic-source", type=Path)
     parser.add_argument("--atomic-family", default="C_atom")
+    parser.add_argument("--objective", choices=("pi", "rpa"), default="pi")
+    parser.add_argument("--allow-partial-q", action="store_true")
+    parser.add_argument("--rpa-pi-weight", type=float)
+    parser.add_argument("--rpa-trace-log-weight", type=float)
+    parser.add_argument("--rpa-energy-weight", type=float)
     parser.add_argument("--initial", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--siab-commit", required=True)
@@ -109,6 +116,26 @@ def parse_args(argv=None):
         default=1.0e-8,
     )
     return parser.parse_args(argv)
+
+
+def validate_objective_options(args):
+    supplied = {
+        "pi_weight": args.rpa_pi_weight,
+        "trace_log_weight": args.rpa_trace_log_weight,
+        "energy_weight": args.rpa_energy_weight,
+    }
+    if args.objective == "pi":
+        if args.allow_partial_q or any(value is not None for value in supplied.values()):
+            raise ValueError("RPA weights and partial-q flag require objective=rpa")
+        return None
+    if (args.dataset_family is not None or args.atomic_response is not None
+            or args.atomic_source is not None):
+        raise ValueError("RPA objective requires one periodic family, without atomic inputs")
+    weights = {key: 1.0 if value is None else value for key, value in supplied.items()}
+    for key, value in weights.items():
+        if not math.isfinite(value) or value < 0 or (key != "energy_weight" and value == 0):
+            raise ValueError("invalid RPA objective weight: " + key)
+    return weights
 
 
 def normalize_dataset_families(values, count):
@@ -173,7 +200,7 @@ def _write_json(path, payload):
     )
 
 
-def write_best_checkpoint(output, step, loss, coefficients):
+def write_best_checkpoint(output, step, loss, coefficients, *, objective="pi"):
     output = Path(output)
     orbital_path = output / "BEST_ORBITAL_CHECKPOINT.txt"
     metadata_path = output / "BEST_CHECKPOINT.json"
@@ -184,23 +211,26 @@ def write_best_checkpoint(output, step, loss, coefficients):
             temporary.unlink()
     write_periodic_optimizer_coefficients(orbital_temporary, coefficients)
     orbital_hash = sha256(orbital_temporary)
-    _write_json(
-        metadata_temporary,
-        {
-            "format_version": 1,
-            "step": int(step),
-            "loss": float(loss),
-            "relative_pi_error": math.sqrt(float(loss)),
-            "orbital_file": orbital_path.name,
-            "orbital_sha256": orbital_hash,
-        },
-    )
+    metadata = {
+        "format_version": 1,
+        "step": int(step),
+        "loss": float(loss),
+        "orbital_file": orbital_path.name,
+        "orbital_sha256": orbital_hash,
+    }
+    if objective == "pi":
+        metadata["relative_pi_error"] = math.sqrt(float(loss))
+    else:
+        metadata["objective"] = objective
+    _write_json(metadata_temporary, metadata)
     orbital_temporary.replace(orbital_path)
     metadata_temporary.replace(metadata_path)
 
 
 def main(argv=None):
+    start = time.perf_counter()
     args = parse_args(argv)
+    rpa_weights = validate_objective_options(args)
     siab_commit = validate_commit(args.siab_commit)
     nu = parse_nu(args.nu, max_l=args.max_l)
     fixed_nu = parse_channel_counts(args.fixed_nu, nu)
@@ -239,6 +269,11 @@ def main(argv=None):
         for path in dataset_paths
     )
     validate_dataset_contract(datasets)
+    if args.objective == "rpa":
+        coverage = math.fsum(dataset.q_weight for dataset in datasets)
+        complete_q_weight = math.isclose(coverage, 1.0, rel_tol=0.0, abs_tol=1.0e-12)
+        if not complete_q_weight and not args.allow_partial_q:
+            raise ValueError("partial-q RPA requires explicit --allow-partial-q")
     additional_family_evaluators = {}
     atomic_pair = None
     atomic_paths = None
@@ -284,6 +319,7 @@ def main(argv=None):
         status_path,
         {
             "status": "running",
+            "objective": args.objective,
             "siab_commit": siab_commit,
             "dataset_physics_hashes": [dataset.physics_hash for dataset in datasets],
             "dataset_families": list(dataset_families),
@@ -307,7 +343,7 @@ def main(argv=None):
                 )
 
             def record_best(step, loss, coefficients):
-                write_best_checkpoint(output, step, loss, coefficients)
+                write_best_checkpoint(output, step, loss, coefficients, objective=args.objective)
 
             fit = optimize_periodic_galerkin_basis(
                 datasets,
@@ -324,8 +360,10 @@ def main(argv=None):
                 ),
                 occupied_capture_reference=args.occupied_capture_reference,
                 block_cache_workers=args.block_cache_workers,
-                dataset_families=dataset_families,
+                dataset_families=(None if args.objective == "rpa" else dataset_families),
                 additional_family_evaluators=additional_family_evaluators,
+                objective=args.objective,
+                rpa_weights=rpa_weights,
                 progress_callback=record_progress,
                 best_callback=record_best,
             )
@@ -366,6 +404,7 @@ def main(argv=None):
         payload = {
             "format_version": 1,
             "scope": "Galerkin exact-Pi optimization; independent SOS validation required",
+            "objective": args.objective,
             "siab_commit": siab_commit,
             "abacus_commit": datasets[0].abacus_commit,
             "dataset_paths": [str(path) for path in dataset_paths],
@@ -430,7 +469,27 @@ def main(argv=None):
             "occupied_capture_floor": fit.occupied_capture_floor,
             "total_backtracks": fit.total_backtracks,
             "final_learning_rate": fit.final_learning_rate,
+            "elapsed_seconds": time.perf_counter() - start,
+            "max_rss_bytes": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            * (1 if sys.platform == "darwin" else 1024),
         }
+        if args.objective == "rpa":
+            initial_record = fit.history[0]
+            best_record = next(record for record in fit.history if record["step"] == fit.best_step)
+            details = best_record["rpa"]
+            payload.update(
+                scope=("full-q frozen-space body RPA optimization" if details["complete_q_weight"]
+                       else "partial-q frozen-space body RPA engineering trial"),
+                physical_release_gate="hold",
+                objective_weights=fit.objective_weights,
+                q_weight_coverage=details["q_weight_coverage"],
+                complete_q_weight=details["complete_q_weight"],
+                q_weight_normalization="physical_unrenormalized",
+                initial_relative_pi_error=initial_record["relative_pi_error"],
+                best_relative_pi_error=best_record["relative_pi_error"],
+                initial_rpa=initial_record["rpa"],
+                best_rpa=details,
+            )
         _write_json(result_path, payload)
         _write_json(
             status_path,
