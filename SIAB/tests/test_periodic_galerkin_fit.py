@@ -277,9 +277,9 @@ class PeriodicGalerkinFitTest(unittest.TestCase):
         self.assertEqual(capture, 0.95)
         self.assertEqual(condition, 3.0)
         self.assertEqual(float(family_losses["periodic"]), 0.0)
-        self.assertEqual(evaluator.call_args.kwargs["contraction_backend"], "block")
+        self.assertEqual(evaluator.call_args[1]["contraction_backend"], "block")
         self.assertEqual(
-            evaluator.call_args.kwargs["occupied_capture_tolerance"], 0.2
+            evaluator.call_args[1]["occupied_capture_tolerance"], 0.2
         )
 
     def test_global_loss_normalizes_atom_and_solid_families_separately(self):
