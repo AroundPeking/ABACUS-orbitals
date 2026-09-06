@@ -77,8 +77,20 @@ def interpolate_direction(initial, best, alpha):
     return retract_coefficients(mixed)
 
 
-def evaluate_pair(datasets, initial, candidate, *, guard, frequency_batch_size, weights):
-    """Exactly two full response evaluations, with the same frozen reference."""
+def evaluate_pair(datasets, initial, candidate, *, guard, frequency_batch_size, weights,
+                  occupied_capture_floor=None, initial_validator=None):
+    """Share reference/floor; an optional center validator must return before the candidate."""
+    if initial_validator is not None and not callable(initial_validator):
+        raise ValueError('initial_validator must be callable or None')
+    tolerance = None
+    if occupied_capture_floor is not None:
+        if (isinstance(occupied_capture_floor, bool)
+                or not isinstance(occupied_capture_floor, (float, int))
+                or not 0 <= occupied_capture_floor < 1
+                or not math.isfinite(occupied_capture_floor)):
+            raise ValueError('occupied_capture_floor must be finite and inside [0,1)')
+        # The response API requires tolerance < 1; do not relax near-unit floors.
+        tolerance = min(1 - 1e-15, 1 - occupied_capture_floor)
     with torch.no_grad():
         datasets = tuple(prepare_periodic_occupied_reference(dataset) for dataset in datasets)
         datasets = _prepare_block_contraction_caches(datasets, initial, 1)
@@ -100,9 +112,12 @@ def evaluate_pair(datasets, initial, candidate, *, guard, frequency_batch_size, 
                 reference_rpa_correlation_energy_ev_per_cell=reference_energy * HARTREE_TO_EV,
                 reference_rpa_correlation_energy_ev_per_c=reference_energy * HARTREE_TO_EV / 2)
 
-        first = evaluate(initial, 1 - 1e-12)
-        floor = max(0., first['minimum_occupied_capture'] - 1e-4)
-        tolerance = min(1 - 1e-15, max(1e-15, 1 - floor))
+        first = evaluate(initial, 1 - 1e-12 if tolerance is None else tolerance)
+        if initial_validator is not None:
+            initial_validator(first)
+        if tolerance is None:
+            floor = max(0., first['minimum_occupied_capture'] - 1e-4)
+            tolerance = min(1 - 1e-15, max(1e-15, 1 - floor))
         return first, evaluate(candidate, tolerance)
 
 
