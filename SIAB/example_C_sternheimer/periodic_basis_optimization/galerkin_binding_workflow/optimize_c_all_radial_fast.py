@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import resource
 import sys
 import time
@@ -35,18 +36,117 @@ def check(path, expected):
     _require(_sha256(str(path)) == expected, 'SHA256 mismatch: '+str(path))
 
 
-def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False):
+def iteration_settings(max_steps):
+    return dict(max_steps=max_steps, minimum_steps=min(5, max_steps),
+                plateau_patience=2, plateau_relative_improvement=1e-6)
+
+
+def _cache_options(index, digest, persist):
+    _require((index is None) == (digest is None),
+             'active cache index and SHA256 must be supplied together')
+    _require(index is None or not persist, 'cache reuse and persistence are incompatible')
+
+
+def _source_checks(item):
+    root = Path(item['dataset'])
+    return ((root/'manifest.dat', item['manifest_sha256']),
+            (root/'status.dat', item['status_sha256']),
+            (Path(item['acceptance']), item['acceptance_sha256']))
+
+
+def _validate_c_dataset(dataset, item, iq, multiplicity):
+    _require(dataset.selected_iq == iq == item['selected_iq']
+             and dataset.q_count == 64
+             and dataset.q_weight == multiplicity/64. == item['q_weight']
+             and dataset.physics_hash == item['physics_hash'], 'q identity mismatch')
+    _require(len(dataset.kpoints) == 64 and dataset.frequency_ha.numel() == 12
+             and dataset.primitive_count == 558
+             and dataset.active_primitive_reduction.original_primitive_count == 1550,
+             'full-k/frequency/exact-reduction contract mismatch')
+
+
+def _preflight_cache_index(path, digest, frozen, freeze_hash, initial, labels, indices, mult):
+    check(path, digest)
+    index = json.loads(Path(path).read_text())
+    check(path, digest)
+    _require(isinstance(index, dict) and index.get('status') == 'success'
+             and index.get('scope') == 'exact_active_dataset_derivative_not_new_reference',
+             'accepted active cache index required')
+    records = index.get('records')
+    _require(isinstance(records, list) and len(records) == len(labels)
+             and all(isinstance(r, dict) and type(r.get('label')) is int for r in records)
+             and [r['label'] for r in records] == labels, 'canonical complete cache q order required')
+    _require(set(initial) == {'C'} and len(initial['C']) == 5 and all(
+        isinstance(c, torch.Tensor) and tuple(c.shape) == (31, n)
+        for c, n in zip(initial['C'], (3, 3, 2, 0, 0))), 'cache input coefficient nu/profile mismatch')
+    seen = set()
+    for record, item, iq, multiplicity in zip(records, frozen['datasets'], indices, mult):
+        _require(item['selected_iq'] == iq and item['q_weight'] == multiplicity/64.,
+                 'frozen q identity mismatch')
+        cache_path = record.get('path')
+        _require(isinstance(cache_path, str) and Path(cache_path).is_absolute(),
+                 'cache path must be absolute')
+        resolved = str(Path(cache_path).resolve())
+        _require(resolved not in seen, 'duplicate cache path')
+        seen.add(resolved)
+        binding = record.get('binding')
+        _require(isinstance(binding, dict) and set(binding) == {
+            'manifest_sha256', 'status_sha256', 'identifiers'}, 'invalid cache binding')
+        identifiers = binding['identifiers']
+        _require(isinstance(identifiers, dict) and set(identifiers) == {
+            'freeze_sha256', 'acceptance_sha256', 'mapping_sha256'}, 'invalid cache identifiers')
+        _require(binding['manifest_sha256'] == item['manifest_sha256']
+                 and binding['status_sha256'] == item['status_sha256']
+                 and identifiers['freeze_sha256'] == freeze_hash
+                 and identifiers['acceptance_sha256'] == item['acceptance_sha256'],
+                 'cache and frozen input binding mismatch')
+        for value in (record.get('complete_sha256'), identifiers['mapping_sha256']):
+            _require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None,
+                     'invalid cache completion/mapping SHA256')
+    # Verify every q's small source files before reading arrays or screening q1.
+    for item in frozen['datasets']:
+        for source, expected in _source_checks(item):
+            check(source, expected)
+    return records
+
+
+def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False, *,
+                  active_cache_index=None, active_cache_index_sha256=None):
+    _cache_options(active_cache_index, active_cache_index_sha256, persist_active_cache)
     check(freeze, digest)
     frozen = json.loads(Path(freeze).read_text())
     _require(frozen['status'] == 'success', 'accepted input freeze required')
     labels, indices, mult = [1, 2, 3, 6, 7, 8, 11, 28], [1, 22, 43, 6, 27, 23, 11, 55], [1, 8, 4, 6, 24, 12, 3, 6]
     _require([r['label'] for r in frozen['datasets']] == labels, 'canonical eight-q order required')
     datasets, records, cache_records = [], [], []
+    if active_cache_index is not None:
+        cache_records = _preflight_cache_index(active_cache_index, active_cache_index_sha256,
+            frozen, digest, initial, labels, indices, mult)
+        for item, cached, iq, multiplicity in zip(frozen['datasets'], cache_records, indices, mult):
+            save_json(output/'PROGRESS.json', dict(stage='loading_cached_q', label=item['label'], completed=records))
+            started = time.perf_counter()
+            dataset = read_periodic_galerkin_dataset_cache(
+                cached['path'], cache_sha256=cached['complete_sha256'], source_directory=item['dataset'],
+                active_coefficients=initial, **cached['binding'])
+            _validate_c_dataset(dataset, item, iq, multiplicity)
+            _require(dataset.active_primitive_reduction.mapping_sha256
+                     == cached['binding']['identifiers']['mapping_sha256'], 'cache mapping mismatch')
+            datasets.append(dataset)
+            records.append(dict(label=item['label'], seconds=time.perf_counter()-started,
+                mapping_sha256=dataset.active_primitive_reduction.mapping_sha256))
+            print(json.dumps(records[-1]), flush=True)
+        check(freeze, digest)
+        check(active_cache_index, active_cache_index_sha256)
+        for item in frozen['datasets']:
+            for source, expected in _source_checks(item):
+                check(source, expected)
+        # No physical evaluation until all eight cached q datasets have passed.
+        guard = prepare_frozen_band_guard(datasets[0], initial, atoms_per_cell=2)
+        save_json(output/'INITIAL_BAND_SCREEN.json', guard(initial))
+        return tuple(datasets), records, guard
     for item, iq, multiplicity in zip(frozen['datasets'], indices, mult):
         root = Path(item['dataset'])
-        checks = ((root/'manifest.dat', item['manifest_sha256']),
-                  (root/'status.dat', item['status_sha256']),
-                  (Path(item['acceptance']), item['acceptance_sha256']))
+        checks = _source_checks(item)
         for path, expected in checks:
             check(path, expected)
         save_json(output/'PROGRESS.json', dict(stage='loading_q', label=item['label'], completed=records))
@@ -56,13 +156,7 @@ def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False):
             active_coefficients=initial)
         for path, expected in checks:
             check(path, expected)
-        _require(dataset.selected_iq == iq == item['selected_iq']
-                 and dataset.q_weight == multiplicity/64. == item['q_weight']
-                 and dataset.physics_hash == item['physics_hash'], 'q identity mismatch')
-        _require(len(dataset.kpoints) == 64 and dataset.frequency_ha.numel() == 12
-                 and dataset.primitive_count == 558
-                 and dataset.active_primitive_reduction.original_primitive_count == 1550,
-                 'full-k/frequency/exact-reduction contract mismatch')
+        _validate_c_dataset(dataset, item, iq, multiplicity)
         if persist_active_cache:
             cache_path = output/'active-data-cache'/('q'+str(item['label']))
             binding = dict(manifest_sha256=item['manifest_sha256'],
@@ -100,8 +194,12 @@ def main():
         parser.add_argument('--'+name, required=True)
     parser.add_argument('--max-steps', type=int, default=50)
     parser.add_argument('--persist-active-cache', action='store_true')
+    parser.add_argument('--active-cache-index')
+    parser.add_argument('--active-cache-index-sha256')
     args = parser.parse_args()
     _require(1 <= args.max_steps <= 50, 'bounded calibration permits 1..50 steps')
+    _cache_options(args.active_cache_index, args.active_cache_index_sha256, args.persist_active_cache)
+    stopping = iteration_settings(args.max_steps)
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
@@ -119,7 +217,9 @@ def main():
         initial = read_periodic_optimizer_coefficients(
             args.coefficients, element='C', radial_rows=31, expected_nu=(3, 3, 2, 0, 0))
         datasets, load_records, guard = load_frozen_c(
-            args.freeze, args.freeze_sha256, initial, output, args.persist_active_cache)
+            args.freeze, args.freeze_sha256, initial, output, args.persist_active_cache,
+            active_cache_index=args.active_cache_index,
+            active_cache_index_sha256=args.active_cache_index_sha256)
         load_seconds = time.perf_counter()-started
         initial_guard = guard(initial)
         save_json(output/'INITIAL_BAND_SCREEN.json', initial_guard)
@@ -140,8 +240,7 @@ def main():
         fit = optimize_periodic_galerkin_basis(
             datasets, initial, fixed_nu={'C': (0, 0, 0, 0, 0)},
             objective='rpa', rpa_weights={'pi_weight': 1., 'trace_log_weight': 1., 'energy_weight': 1.},
-            learning_rate=0.001, max_steps=args.max_steps, minimum_steps=min(20, args.max_steps),
-            plateau_patience=10, occupied_capture_reference='initial_candidate',
+            learning_rate=0.001, **stopping, occupied_capture_reference='initial_candidate',
             occupied_capture_degradation_tolerance=1e-4, maximum_backtracks=12,
             frequency_batch_size=fastest['frequency_batch_size'], cache_rpa_reference=True,
             coefficient_guard=guard, progress_callback=progress,
@@ -157,6 +256,7 @@ def main():
                             rcut_bohr=10., dr_bohr=0.01, smoothing_sigma_bohr=0.1)
         first, best = fit.history[0], fit.history[fit.best_step]
         result = dict(status='success', scope='optimized_full_q_frozen_body_rpa_calibration',
+                      iteration_settings=stopping,
                       fixed_nu=[0, 0, 0, 0, 0], nu=[3, 3, 2, 0, 0], ao_per_C=22,
                       initial=first, best=best, steps_completed=fit.steps_completed,
                       best_step=fit.best_step, stop_reason=fit.stop_reason,
@@ -172,13 +272,23 @@ def main():
                       load_records=load_records, load_seconds=load_seconds,
                       optimization_seconds=time.perf_counter()-fit_start,
                       total_seconds=time.perf_counter()-started,
-                      active_cache_index_sha256=(_sha256(str(output/'ACTIVE_DATA_CACHE.json'))
+                      active_cache_mode=('reuse' if args.active_cache_index is not None else
+                                         'persist' if args.persist_active_cache else 'disabled'),
+                      active_cache_index_path=(str(Path(args.active_cache_index).resolve())
+                                              if args.active_cache_index is not None else
+                                              str((output/'ACTIVE_DATA_CACHE.json').resolve())
+                                              if args.persist_active_cache else None),
+                      active_cache_index_sha256=(args.active_cache_index_sha256
+                                                 if args.active_cache_index is not None else
+                                                 _sha256(str(output/'ACTIVE_DATA_CACHE.json'))
                                                  if args.persist_active_cache else None),
                       peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         for path, expected in ((args.freeze, args.freeze_sha256),
                                (args.coefficients, args.coefficients_sha256),
                                (args.benchmark, args.benchmark_sha256)):
             check(path, expected)
+        if args.active_cache_index is not None:
+            check(args.active_cache_index, args.active_cache_index_sha256)
         save_json(output/'RESULT.json', result)
         (output/'STATUS').write_text('success\n')
     except Exception:
