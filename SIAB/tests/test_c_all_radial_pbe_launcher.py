@@ -7,10 +7,12 @@ WORKFLOW = ROOT / "example_C_sternheimer/periodic_basis_optimization/galerkin_bi
 
 
 class PbeLauncherContractTests(unittest.TestCase):
-    def test_single_node_fork_launcher_is_shared_with_preflight(self):
+    def test_single_node_pmi2_launcher_is_shared_with_preflight(self):
         script = (WORKFLOW / "run_c_all_radial_pbe_endpoint.slurm").read_text()
         self.assertIn('test "${SLURM_JOB_NUM_NODES:?}" = 1', script)
-        self.assertIn('launcher=(mpirun -launcher fork -np 4 -ppn 4)', script)
+        self.assertIn('launcher=(srun --mpi=pmi2 --cpu-bind=none -n 4)', script)
+        self.assertIn('export I_MPI_PMI_LIBRARY=/opt/gridview/slurm/lib/libpmi2.so', script)
+        self.assertNotIn('launcher=(mpirun', script)
         probe = '"${launcher[@]}" "$stage/mpi_preflight"'
         physics = '"${launcher[@]}" "$abacus"'
         self.assertIn(probe, script)

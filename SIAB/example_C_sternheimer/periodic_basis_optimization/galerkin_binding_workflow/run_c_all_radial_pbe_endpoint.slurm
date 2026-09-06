@@ -37,7 +37,9 @@ import hashlib, pathlib, sys
 args = sys.argv[1:]
 for path, expected in ((args[0], args[1]),
                        (args[2], 'ab8f1192ad7f7246218422c80218c869d8053fa0d44f6ad728b9323eb4ee5ab3'),
-                       (args[3], args[4]), (args[5], args[6])):
+                       (args[3], args[4]), (args[5], args[6]),
+                       ('/opt/gridview/slurm/lib/libpmi2.so',
+                        '094c1179452217a4d4a5985cb4642440c824d227784167d0017e7a953d87e5cf')):
     assert hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() == expected, path
 PY
 "$py" "$checker" prepare --optimizer-result "$result" \
@@ -59,7 +61,8 @@ with (stage/'EXECUTION_PROVENANCE.json').open('x') as stream:
         optimizer_result_sha256=os.environ['C_OPTIMIZER_RESULT_SHA256'],
         reader_contract='not-used-pure-PBE', sternheimer='disabled', librpa='not-used',
         physical_release_gate='hold', scheduler_gate='pending_external_validation',
-        mpi_ranks=4, omp_threads=7, mpi_launcher='fork_single_node_allocation',
+        mpi_ranks=4, omp_threads=7, mpi_launcher='direct_slurm_pmi2_single_node',
+        pmi2_library_sha256='094c1179452217a4d4a5985cb4642440c824d227784167d0017e7a953d87e5cf',
         mpi_preflight_source_sha256=os.environ['C_MPI_PREFLIGHT_SHA256'],
         runner_sha256=hashlib.sha256((stage/'run.slurm').read_bytes()).hexdigest()), stream, indent=2)
 PY
@@ -69,8 +72,9 @@ export OMP_NUM_THREADS=7 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export OMP_DYNAMIC=FALSE OMP_PROC_BIND=spread OMP_PLACES=cores
 export OMP_MAX_ACTIVE_LEVELS=1 OMP_WAIT_POLICY=PASSIVE OMP_STACKSIZE=2G
 export I_MPI_PIN=1 I_MPI_PIN_DOMAIN=omp I_MPI_FABRICS=shm:ofi
-# This endpoint is single-node; launch within the existing Slurm allocation.
-launcher=(mpirun -launcher fork -np 4 -ppn 4)
+# The matched probe isolated a Hydra omp-domain startup failure; PMI2 passed.
+export I_MPI_PMI_LIBRARY=/opt/gridview/slurm/lib/libpmi2.so
+launcher=(srun --mpi=pmi2 --cpu-bind=none -n 4)
 mpiicc "$stage/c_single_node_mpi_preflight.c" -o "$stage/mpi_preflight"
 sha256sum "$stage/c_single_node_mpi_preflight.c" "$stage/mpi_preflight" > "$stage/MPI_PREFLIGHT_SHA256"
 timeout 60 "${launcher[@]}" "$stage/mpi_preflight" > "$stage/MPI_PREFLIGHT.log" 2>&1
