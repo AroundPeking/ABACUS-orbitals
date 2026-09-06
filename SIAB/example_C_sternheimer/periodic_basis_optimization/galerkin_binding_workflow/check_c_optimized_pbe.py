@@ -11,6 +11,9 @@ import re
 PREPARATION = "PBE_ENDPOINT_PREPARED.json"
 COLLECTION = "PBE_ENDPOINT_COLLECTION.json"
 SCOPE = "c_solid_only_pbe_endpoint"
+BACKOFF_SCOPE = "interpolated_retracted_optimized_direction"
+BACKOFF_RETRACTION = "signed_qr((1-alpha)*signed_qr(original)+alpha*parent_best)"
+HARTREE_TO_EV = 27.211386245988
 TOLERANCE_EV_PER_C = 0.010
 FROZEN_NUMERICS = {
     "nspin": 1, "ecutwfc": 45, "lcao_ecut": 100, "nx": 24, "ny": 24,
@@ -184,6 +187,8 @@ def _scf_log(content):
 def _optimizer_artifacts(path, expected):
     content = _read_hashed(path, expected)
     result = json.loads(content)
+    if result.get("scope") == BACKOFF_SCOPE:
+        return _backoff_artifacts(path, content, result)
     if (result.get("status") != "success"
             or result.get("scope") != "optimized_full_q_frozen_body_rpa_calibration"):
         raise ValueError("completed solid optimizer result required")
@@ -220,6 +225,107 @@ def _optimizer_artifacts(path, expected):
     if not orbital or not artifacts["ORBITAL_RESULTS.txt"]:
         raise ValueError("empty candidate artifact")
     return result, orbital, artifacts
+
+
+def _match_parent_initial(initial, parent):
+    pairs = [(initial.get("loss"), parent.get("loss"), "loss")]
+    for key in ("candidate_energy_ha", "reference_energy_ha"):
+        pairs.append((initial.get("rpa", {}).get(key), parent.get("rpa", {}).get(key), key))
+    for actual, expected, name in pairs:
+        if not math.isclose(_finite(actual, "initial " + name),
+                            _finite(expected, "parent initial " + name), rel_tol=1e-10, abs_tol=1e-12):
+            raise ValueError("same-input initial " + name + " does not reproduce parent")
+
+
+def _require_backoff_improvement(initial, candidate):
+    if not 0 <= _finite(candidate.get("loss"), "candidate loss") < _finite(initial.get("loss"), "initial loss"):
+        raise ValueError("backoff loss must improve initial loss")
+    initial_rpa, candidate_rpa = initial.get("rpa", {}), candidate.get("rpa", {})
+    reference = _finite(initial_rpa.get("reference_energy_ha"), "initial reference energy")
+    candidate_reference = _finite(candidate_rpa.get("reference_energy_ha"), "candidate reference energy")
+    if not math.isclose(reference, candidate_reference, rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError("backoff reference energy mismatch")
+    initial_error = abs(_finite(initial_rpa.get("candidate_energy_ha"), "initial energy") - reference)
+    candidate_error = abs(_finite(candidate_rpa.get("candidate_energy_ha"), "candidate energy") - reference)
+    if not candidate_error < initial_error:
+        raise ValueError("backoff RPA energy must improve toward the same frozen reference")
+
+
+def _backoff_artifacts(path, content, result):
+    """Validate derivative evidence without treating interpolation as optimization."""
+    if (result.get("status") != "success" or {"steps_completed", "best_step", "best"} & set(result)
+            or result.get("retraction") != BACKOFF_RETRACTION
+            or result.get("actual_scf_pbe_gate") != "pending"
+            or result.get("physical_release_gate") != "hold"):
+        raise ValueError("invalid interpolated direction result")
+    alpha = _finite(result.get("alpha"), "alpha")
+    if not 0 < alpha < 1:
+        raise ValueError("backoff alpha must be inside (0,1)")
+    for key, expected in (("nu", [3, 3, 2, 0, 0]), ("fixed_nu", [0, 0, 0, 0, 0])):
+        value = result.get(key)
+        if value != expected or any(type(item) is not int for item in value):
+            raise ValueError("invalid all-radial backoff " + key)
+    if type(result.get("ao_per_C")) is not int or result["ao_per_C"] != 22:
+        raise ValueError("backoff requires ao_per_C=22")
+    for name in ("initial", "candidate"):
+        record = result.get(name, {})
+        guard, rpa = record.get("coefficient_guard", {}), record.get("rpa", {})
+        per_q = rpa.get("per_q", [])
+        if ("step" in record or guard.get("gate") is not True or guard.get("scf_pbe_gate") != "pending"
+                or rpa.get("complete_q_weight") is not True
+                or not math.isclose(_finite(rpa.get("q_weight_coverage"), "q coverage"), 1., abs_tol=1e-12)
+                or [q.get("selected_iq") for q in per_q] != [1, 22, 43, 6, 27, 23, 11, 55]
+                or any(len(q.get("frequency_ha", [])) != 12 for q in per_q)
+                or record.get("energy_quantity") != "frozen_body_RPA_correlation_not_PBE_total"):
+            raise ValueError("backoff requires guarded full-eight-q twelve-frequency RPA evidence")
+        for prefix, key in (("rpa", "candidate_energy_ha"), ("reference_rpa", "reference_energy_ha")):
+            energy = _finite(rpa.get(key), name + " " + key) * HARTREE_TO_EV
+            for suffix, divisor in (("cell", 1), ("c", 2)):
+                actual = _finite(record.get(prefix + "_correlation_energy_ev_per_" + suffix), "RPA energy eV")
+                if not math.isclose(actual, energy / divisor, rel_tol=1e-12, abs_tol=1e-12):
+                    raise ValueError("backoff RPA energy unit mismatch")
+    _require_backoff_improvement(result["initial"], result["candidate"])
+    root = Path(path).parent
+    provenance_content = _read_hashed(root / "BACKOFF_PROVENANCE.json", result.get("provenance_sha256"))
+    provenance = json.loads(provenance_content)
+    for key in ("scope", "alpha", "retraction", "parent_result_sha256", "parent_best_metadata_sha256",
+                "initial_sha256", "freeze_sha256", "active_cache_index_sha256", "coefficient_sha256",
+                "orbital_sha256", "initial_retracted_coefficient_sha256", "initial_retracted_orbital_sha256"):
+        if key not in result or provenance.get(key) != result[key]:
+            raise ValueError("backoff provenance mismatch: " + key)
+    evidence_keys = {
+        "ORIGINAL_COEFFICIENTS.txt": "initial_sha256", "INPUT_FREEZE.json": "freeze_sha256",
+        "ACTIVE_DATA_CACHE.json": "active_cache_index_sha256", "parent/RESULT.json": "parent_result_sha256",
+        "parent/BEST_CHECKPOINT.json": "parent_best_metadata_sha256",
+        "parent/ORBITAL_RESULTS.txt": None, "parent/BEST_ORBITAL_CHECKPOINT.txt": None,
+        "parent/C_3s3p2d_optimized.orb": None,
+    }
+    hashes = provenance.get("evidence_sha256", {})
+    if set(hashes) != set(evidence_keys):
+        raise ValueError("incomplete backoff parent evidence")
+    artifacts = {"backoff_RESULT.json": content, "BACKOFF_PROVENANCE.json": provenance_content}
+    for name, key in evidence_keys.items():
+        if key is not None and hashes[name] != result[key]:
+            raise ValueError("backoff evidence binding mismatch: " + name)
+        artifacts["backoff_" + name.replace("/", "_")] = _read_hashed(root / name, hashes[name])
+    parent_content = artifacts["backoff_parent_RESULT.json"]
+    if json.loads(parent_content).get("scope") != "optimized_full_q_frozen_body_rpa_calibration":
+        raise ValueError("backoff parent must be an original optimizer result")
+    parent, _, _ = _optimizer_artifacts(root / "parent/RESULT.json", result["parent_result_sha256"])
+    for key in ("initial_sha256", "freeze_sha256", "active_cache_index_sha256", "configuration", "training_weights"):
+        if key not in result or parent.get(key) != result[key]:
+            raise ValueError("backoff parent mismatch: " + key)
+    if provenance.get("parent_best_coefficient_sha256") != parent["coefficient_sha256"]:
+        raise ValueError("backoff parent best coefficient mismatch")
+    _match_parent_initial(result["initial"], parent["initial"])
+    for name, key in (("INTERPOLATED_COEFFICIENTS.txt", "coefficient_sha256"),
+                      ("C_3s3p2d_interpolated.orb", "orbital_sha256"),
+                      ("INITIAL_RETRACTED_COEFFICIENTS.txt", "initial_retracted_coefficient_sha256"),
+                      ("C_3s3p2d_initial_retracted.orb", "initial_retracted_orbital_sha256")):
+        artifacts[name] = _read_hashed(root / name, result[key])
+        if not artifacts[name]:
+            raise ValueError("empty backoff artifact")
+    return result, artifacts["C_3s3p2d_interpolated.orb"], artifacts
 
 
 def _write_json(path, result):
@@ -267,13 +373,19 @@ def prepare_pbe_endpoint(*, optimizer_result, optimizer_result_sha256, original_
         "evidence_sha256": {".provenance/" + name: _sha256(data) for name, data in evidence.items()},
         "candidate_orbital_filename": orbital_name, "candidate_orbital_sha256": result["orbital_sha256"],
         "candidate_coefficient_sha256": result["coefficient_sha256"],
-        "optimizer_result_path": str(Path(optimizer_result).resolve()),
-        "optimizer_result_sha256": optimizer_result_sha256,
-        "optimizer_steps_completed": result["steps_completed"], "optimizer_best_step": result["best_step"],
         "baseline": baseline, "candidate_log_relative_path": "OUT." + suffix + "/running_scf.log",
         "energy_quantity": "PBE_total_energy_not_RPA_E0", "tolerance_ev_per_c": TOLERANCE_EV_PER_C,
         "scheduler_gate": "pending_external_validation", "physical_release_gate": "hold",
     }
+    if result["scope"] == BACKOFF_SCOPE:
+        manifest.update(candidate_scope=BACKOFF_SCOPE, candidate_alpha=result["alpha"],
+                        candidate_result_path=str(Path(optimizer_result).resolve()),
+                        candidate_result_sha256=optimizer_result_sha256,
+                        parent_optimizer_result_sha256=result["parent_result_sha256"])
+    else:
+        manifest.update(optimizer_result_path=str(Path(optimizer_result).resolve()),
+                        optimizer_result_sha256=optimizer_result_sha256,
+                        optimizer_steps_completed=result["steps_completed"], optimizer_best_step=result["best_step"])
     output.mkdir(parents=True)
     (output / ".provenance").mkdir()
     for name, content in prepared.items():
@@ -324,10 +436,14 @@ def collect_pbe_endpoint(*, prepared_dir, preparation_sha256):
         "band_count_check": "pass" if all(value is not None for value in counts.values()) else "unavailable",
         "candidate_log_path": str(candidate_path), "candidate_log_sha256": candidate["log_sha256"],
         "baseline_log_sha256": baseline["log_sha256"], "preparation_sha256": preparation_sha256,
-        "optimizer_result_sha256": manifest["optimizer_result_sha256"],
         "candidate_orbital_sha256": manifest["candidate_orbital_sha256"],
         "scheduler_gate": "pending_external_validation", "physical_release_gate": "hold",
     }
+    if manifest.get("candidate_scope") == BACKOFF_SCOPE:
+        for key in ("candidate_scope", "candidate_alpha", "candidate_result_sha256", "parent_optimizer_result_sha256"):
+            result[key] = manifest[key]
+    else:
+        result["optimizer_result_sha256"] = manifest["optimizer_result_sha256"]
     _write_json(root / COLLECTION, result)
     return result
 
