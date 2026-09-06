@@ -11,6 +11,7 @@ from periodic_galerkin_basis import (
     contract_periodic_candidate_operators,
 )
 from periodic_galerkin_data import PeriodicGalerkinDataset
+from periodic_galerkin_reduction import validate_active_primitive_profile
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ def evaluate_periodic_galerkin_coefficient_response(
     """
     if not isinstance(dataset, PeriodicGalerkinDataset):
         raise ValueError("dataset must be a PeriodicGalerkinDataset")
+    validate_active_primitive_profile(dataset, coefficients)
     if contraction_backend not in ("dense", "block"):
         raise ValueError("contraction_backend must be dense or block")
     relative_rank_tolerance = _positive(

@@ -50,6 +50,15 @@ class PeriodicGalerkinKPoint:
 
 
 @dataclass(frozen=True)
+class PeriodicGalerkinActivePrimitiveReduction:
+    original_primitive_count: int
+    original_primitive_blocks_sha256: str
+    source_indices: Tuple[int, ...]
+    coefficient_profile: tuple
+    mapping_sha256: str
+
+
+@dataclass(frozen=True)
 class PeriodicGalerkinDataset:
     abacus_commit: str
     executable_sha256: str
@@ -72,6 +81,7 @@ class PeriodicGalerkinDataset:
     reference_response: torch.Tensor
     primitive_blocks: Tuple[PeriodicGalerkinPrimitiveBlock, ...]
     kpoints: Tuple[PeriodicGalerkinKPoint, ...]
+    active_primitive_reduction: PeriodicGalerkinActivePrimitiveReduction = None
 
 
 @dataclass(frozen=True)

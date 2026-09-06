@@ -95,6 +95,8 @@ def evaluate_periodic_galerkin_response(
     candidate space.
     """
     _validate_dataset(dataset)
+    if dataset.active_primitive_reduction is not None:
+        raise ValueError("projected-response diagnostics require unreduced data")
     if not isinstance(primitive_to_candidate, torch.Tensor):
         raise ValueError("primitive_to_candidate must be a torch.Tensor")
     if primitive_to_candidate.device.type != "cpu" or primitive_to_candidate.ndim != 2:
@@ -139,6 +141,8 @@ def evaluate_periodic_galerkin_mother_response(
     not silently remove dependent candidate AOs.
     """
     _validate_dataset(dataset)
+    if dataset.active_primitive_reduction is not None:
+        raise ValueError("mother response requires unreduced data")
     relative_rank_tolerance, condition_limit, occupied_capture_tolerance = (
         _validate_tolerances(
             relative_rank_tolerance,
@@ -180,6 +184,8 @@ def prepare_periodic_occupied_reference(
     )
     if all(prepared):
         return dataset
+    if dataset.active_primitive_reduction is not None:
+        raise ValueError("occupied normalization requires unreduced mother data")
     if any(prepared):
         raise ValueError("periodic dataset has partially prepared occupied references")
 
