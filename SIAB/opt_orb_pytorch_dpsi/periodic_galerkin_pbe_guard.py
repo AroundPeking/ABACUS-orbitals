@@ -31,9 +31,10 @@ def prepare_frozen_band_guard(
         if (isinstance(value, bool) or not isinstance(value, (int, float))
                 or not math.isfinite(value) or value <= 0):
             raise ValueError('band screening limits must be finite and positive')
-    if not dataset.kpoints or not math.isclose(
-            math.fsum(r.k_weight for r in dataset.kpoints), 1., abs_tol=1e-12):
-        raise ValueError('band guard requires complete normalized k weights')
+    weight_sum = math.fsum(r.k_weight for r in dataset.kpoints)
+    # The production reader includes spin degeneracy in ABACUS k weights.
+    if not dataset.kpoints or not math.isclose(weight_sum, 2., rel_tol=0., abs_tol=1e-10):
+        raise ValueError('ABACUS spin-included k weights must sum to 2')
 
     def spectra(coefficients):
         result = []
@@ -74,7 +75,9 @@ def prepare_frozen_band_guard(
                       occupied_band_sum_change_ev_per_atom=band_sum,
                       maximum_target_band_change_ev=maximum, minimum_gap_ev=minimum_gap,
                       occupied_band_sum_limit_ev_per_atom=occupied_band_sum_limit_ev_per_atom,
-                      target_band_change_limit_ev=maximum_target_band_change_ev)
+                      target_band_change_limit_ev=maximum_target_band_change_ev,
+                      k_weight_sum=weight_sum,
+                      k_weight_convention='ABACUS_spin_included_no_renormalization')
         if not result['gate']:
             raise CandidateGuardError('frozen occupied/target-band screen rejected candidate')
         return result

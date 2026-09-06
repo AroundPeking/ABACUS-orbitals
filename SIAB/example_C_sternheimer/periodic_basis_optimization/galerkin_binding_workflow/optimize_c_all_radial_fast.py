@@ -60,11 +60,14 @@ def load_frozen_c(freeze, digest, initial, output):
                  and dataset.primitive_count == 558
                  and dataset.active_primitive_reduction.original_primitive_count == 1550,
                  'full-k/frequency/exact-reduction contract mismatch')
+        if not datasets:
+            guard = prepare_frozen_band_guard(dataset, initial, atoms_per_cell=2)
+            save_json(output/'INITIAL_BAND_SCREEN.json', guard(initial))
         datasets.append(dataset)
         records.append(dict(label=item['label'], seconds=time.perf_counter()-started,
                             mapping_sha256=dataset.active_primitive_reduction.mapping_sha256))
         print(json.dumps(records[-1]), flush=True)
-    return tuple(datasets), records
+    return tuple(datasets), records, guard
 
 
 def main():
@@ -91,9 +94,8 @@ def main():
         check(args.coefficients, args.coefficients_sha256)
         initial = read_periodic_optimizer_coefficients(
             args.coefficients, element='C', radial_rows=31, expected_nu=(3, 3, 2, 0, 0))
-        datasets, load_records = load_frozen_c(args.freeze, args.freeze_sha256, initial, output)
+        datasets, load_records, guard = load_frozen_c(args.freeze, args.freeze_sha256, initial, output)
         load_seconds = time.perf_counter()-started
-        guard = prepare_frozen_band_guard(datasets[0], initial, atoms_per_cell=2)
         initial_guard = guard(initial)
         save_json(output/'INITIAL_BAND_SCREEN.json', initial_guard)
         last = [time.perf_counter()]

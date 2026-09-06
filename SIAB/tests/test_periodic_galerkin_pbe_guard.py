@@ -11,7 +11,7 @@ from periodic_galerkin_pbe_guard import prepare_frozen_band_guard
 class FrozenBandGuardTest(unittest.TestCase):
     def fixture(self):
         dataset = fixtures.PeriodicGalerkinFitTest().three_level_dataset()
-        dataset = replace(dataset, kpoints=tuple(replace(r, k_weight=1./len(dataset.kpoints))
+        dataset = replace(dataset, kpoints=tuple(replace(r, k_weight=2./len(dataset.kpoints))
                                                 for r in dataset.kpoints))
         initial = {'C': [torch.eye(3, dtype=torch.float64)[:, :2].clone()]}
         return dataset, initial
@@ -24,6 +24,24 @@ class FrozenBandGuardTest(unittest.TestCase):
         self.assertEqual(result['scf_pbe_gate'], 'pending')
         self.assertEqual(result['occupied_band_sum_change_ev_per_atom'], 0.)
         self.assertEqual(result['maximum_target_band_change_ev'], 0.)
+
+    def test_spin_weighted_band_sum_is_not_renormalized(self):
+        dataset, initial = self.fixture()
+        guard = prepare_frozen_band_guard(dataset, initial, atoms_per_cell=2)
+        changed = initial['C'][0].clone()
+        changed[2, 0] = 0.001
+        result = guard({'C': [changed]})
+        expected = 1.9*0.001**2/(1+0.001**2)*27.211386245988
+        self.assertAlmostEqual(result['occupied_band_sum_change_ev_per_atom'], expected, places=11)
+        self.assertEqual(result['k_weight_sum'], 2.)
+        self.assertEqual(result['k_weight_convention'], 'ABACUS_spin_included_no_renormalization')
+
+    def test_half_weight_coverage_is_rejected(self):
+        dataset, initial = self.fixture()
+        dataset = replace(dataset, kpoints=tuple(replace(r, k_weight=r.k_weight/2)
+                                                for r in dataset.kpoints))
+        with self.assertRaisesRegex(ValueError, 'sum to 2'):
+            prepare_frozen_band_guard(dataset, initial)
 
     def test_all_radial_rotation_is_allowed_when_span_is_preserved(self):
         dataset, initial = self.fixture()
@@ -58,7 +76,7 @@ class FrozenBandGuardTest(unittest.TestCase):
 
     def test_indirect_overlap_is_rejected_even_with_positive_direct_gaps(self):
         dataset, initial = self.fixture()
-        first = replace(dataset.kpoints[0], k_weight=0.5)
+        first = replace(dataset.kpoints[0], k_weight=1.)
         second = replace(first, source_ik=2, target_ik=2,
                          hamiltonian_ha=first.hamiltonian_ha+2*first.overlap)
         dataset = replace(dataset, kpoints=(first, second))
