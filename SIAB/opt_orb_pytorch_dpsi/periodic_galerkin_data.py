@@ -532,7 +532,10 @@ def read_periodic_galerkin_dataset(
             }
             # Validate omitted projections one at a time, including finiteness.
             for iw in range(nfrequency):
-                _read_chunk(directory, entry_map[(3, ik, iw)])
+                entry = entry_map[(3, ik, iw)]
+                _require((entry.rows, entry.columns) == (noccupied * white_aux, primitive_count),
+                         "periodic Galerkin reference projection has inconsistent dimensions")
+                _read_chunk(directory, entry)
         else:
             record_chunks = chunks
         overlap = record_chunks[(1, ik, -1)]

@@ -160,6 +160,24 @@ class StreamingReductionTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'profile'):
                 evaluate_periodic_galerkin_coefficient_response(actual, c)
 
+    def test_hash_valid_omitted_projection_with_wrong_dimensions_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            c = write_multik_fixture(directory)
+            root = Path(directory)
+            payload = reader._HEADER.pack(reader._CHUNK_MAGIC, 1, 3, 1, 2, 1, 1, 1)+bytes(16)
+            (root/'3_2_1.bin').write_bytes(payload)
+            lines = []
+            for line in (root/'manifest.dat').read_text().splitlines():
+                fields = line.split('\t')
+                if len(fields) == 12 and fields[10] == '3_2_1.bin':
+                    fields[5:7] = ['1', '1']
+                    fields[11] = hashlib.sha256(payload).hexdigest()
+                    line = '\t'.join(fields)
+                lines.append(line)
+            (root/'manifest.dat').write_text('\n'.join(lines)+'\n')
+            with self.assertRaisesRegex(RuntimeError, 'reference projection.*dimensions'):
+                self.read_compact(directory, c)
+
 
 if __name__ == '__main__':
     unittest.main()
