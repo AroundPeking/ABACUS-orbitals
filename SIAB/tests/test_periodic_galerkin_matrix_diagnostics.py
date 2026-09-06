@@ -258,7 +258,8 @@ class PeriodicGalerkinMatrixDiagnosticsTest(unittest.TestCase):
         self.assertEqual(float(parameter.grad), 7.0)
         self.assertIsNone(reference.grad)
         self.assertEqual(
-            defaults, {"pi_weight": 1.0, "trace_log_weight": 1.0, "energy_weight": 1.0}
+            defaults, {"pi_weight": 1.0, "trace_log_weight": 1.0, "energy_weight": 1.0,
+                       "reference_cache": None}
         )
         self.assertEqual(rpa.periodic_rpa_objective.__kwdefaults__, defaults)
         for value, saved, version, requires_grad, grad_fn in snapshots:

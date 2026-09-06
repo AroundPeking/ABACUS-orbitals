@@ -56,6 +56,7 @@ def evaluate_periodic_galerkin_coefficient_response(
     relative_rank_tolerance=1.0e-12,
     condition_limit=1.0e12,
     occupied_capture_tolerance=1.0e-6,
+    frequency_batch_size=None,
 ):
     """Evaluate exact-Pi loss using radial block contractions.
 
@@ -68,6 +69,12 @@ def evaluate_periodic_galerkin_coefficient_response(
     validate_active_primitive_profile(dataset, coefficients)
     if contraction_backend not in ("dense", "block"):
         raise ValueError("contraction_backend must be dense or block")
+    if frequency_batch_size is not None and (
+        not isinstance(frequency_batch_size, int)
+        or isinstance(frequency_batch_size, bool)
+        or frequency_batch_size < 1
+    ):
+        raise ValueError("frequency_batch_size must be a positive integer or None")
     relative_rank_tolerance = _positive(
         "relative_rank_tolerance", relative_rank_tolerance
     )
@@ -170,6 +177,37 @@ def evaluate_periodic_galerkin_coefficient_response(
         )
         identity = torch.eye(effective_count, dtype=torch.complex128)
         virtual_projector = identity - occupied_projector
+
+        if frequency_batch_size is not None:
+            # Batch only the independent frequency/occupied solves; Q and the
+            # frozen source energies retain the scalar route's exact definition.
+            right_hand_side = -virtual_projector.matmul(_adjoint(source))
+            for start in range(0, nfrequency, frequency_batch_size):
+                stop = min(start + frequency_batch_size, nfrequency)
+                shifts = (
+                    -record.source_eigenvalue_ha[None, :]
+                    + 1.0j * dataset.frequency_ha[start:stop, None]
+                )
+                shifted = hamiltonian + shifts[:, :, None, None] * identity
+                system = (
+                    virtual_projector.matmul(shifted).matmul(virtual_projector)
+                    + occupied_projector
+                )
+                batch_response = torch.linalg.solve(
+                    system, right_hand_side.unsqueeze(0).expand(
+                        stop - start, -1, -1, -1
+                    )
+                )
+                batch_response = lowdin.matmul(
+                    virtual_projector.matmul(batch_response)
+                )
+                weighted_response = operators.source.matmul(batch_response) * (
+                    record.k_weight * record.occupation[None, :, None, None]
+                )
+                response_half[start:stop] = response_half[start:stop] + (
+                    weighted_response.sum(dim=1)
+                )
+            continue
 
         for ifrequency, frequency in enumerate(dataset.frequency_ha):
             for ib in range(noccupied):
