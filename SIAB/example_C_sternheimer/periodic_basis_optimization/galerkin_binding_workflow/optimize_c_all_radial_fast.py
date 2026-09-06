@@ -18,6 +18,9 @@ from periodic_galerkin_basis import (
 from periodic_galerkin_data import read_periodic_galerkin_dataset, _require, _sha256
 from periodic_galerkin_fit import optimize_periodic_galerkin_basis
 from periodic_galerkin_pbe_guard import prepare_frozen_band_guard
+from periodic_galerkin_dataset_cache import (
+    write_periodic_galerkin_dataset_cache, read_periodic_galerkin_dataset_cache,
+)
 from optimize_periodic_basis import write_best_checkpoint
 from export_periodic_orbitals import write_abacus_orbital
 
@@ -32,13 +35,13 @@ def check(path, expected):
     _require(_sha256(str(path)) == expected, 'SHA256 mismatch: '+str(path))
 
 
-def load_frozen_c(freeze, digest, initial, output):
+def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False):
     check(freeze, digest)
     frozen = json.loads(Path(freeze).read_text())
     _require(frozen['status'] == 'success', 'accepted input freeze required')
     labels, indices, mult = [1, 2, 3, 6, 7, 8, 11, 28], [1, 22, 43, 6, 27, 23, 11, 55], [1, 8, 4, 6, 24, 12, 3, 6]
     _require([r['label'] for r in frozen['datasets']] == labels, 'canonical eight-q order required')
-    datasets, records = [], []
+    datasets, records, cache_records = [], [], []
     for item, iq, multiplicity in zip(frozen['datasets'], indices, mult):
         root = Path(item['dataset'])
         checks = ((root/'manifest.dat', item['manifest_sha256']),
@@ -60,6 +63,26 @@ def load_frozen_c(freeze, digest, initial, output):
                  and dataset.primitive_count == 558
                  and dataset.active_primitive_reduction.original_primitive_count == 1550,
                  'full-k/frequency/exact-reduction contract mismatch')
+        if persist_active_cache:
+            cache_path = output/'active-data-cache'/('q'+str(item['label']))
+            binding = dict(manifest_sha256=item['manifest_sha256'],
+                           status_sha256=item['status_sha256'],
+                           identifiers=dict(freeze_sha256=digest,
+                               acceptance_sha256=item['acceptance_sha256'],
+                               mapping_sha256=dataset.active_primitive_reduction.mapping_sha256))
+            cache_started = time.perf_counter()
+            cache_hash = write_periodic_galerkin_dataset_cache(
+                cache_path, dataset, source_directory=root, **binding)
+            del dataset
+            dataset = read_periodic_galerkin_dataset_cache(
+                cache_path, cache_sha256=cache_hash, source_directory=root,
+                active_coefficients=initial, **binding)
+            cache_records.append(dict(label=item['label'], path=str(cache_path.resolve()),
+                                      complete_sha256=cache_hash, binding=binding,
+                                      save_and_reload_seconds=time.perf_counter()-cache_started))
+            save_json(output/'ACTIVE_DATA_CACHE.json', dict(
+                status='success' if len(cache_records) == 8 else 'building',
+                scope='exact_active_dataset_derivative_not_new_reference', records=cache_records))
         if not datasets:
             guard = prepare_frozen_band_guard(dataset, initial, atoms_per_cell=2)
             save_json(output/'INITIAL_BAND_SCREEN.json', guard(initial))
@@ -76,6 +99,7 @@ def main():
                  'benchmark', 'benchmark-sha256', 'output'):
         parser.add_argument('--'+name, required=True)
     parser.add_argument('--max-steps', type=int, default=50)
+    parser.add_argument('--persist-active-cache', action='store_true')
     args = parser.parse_args()
     _require(1 <= args.max_steps <= 50, 'bounded calibration permits 1..50 steps')
     output = Path(args.output)
@@ -94,7 +118,8 @@ def main():
         check(args.coefficients, args.coefficients_sha256)
         initial = read_periodic_optimizer_coefficients(
             args.coefficients, element='C', radial_rows=31, expected_nu=(3, 3, 2, 0, 0))
-        datasets, load_records, guard = load_frozen_c(args.freeze, args.freeze_sha256, initial, output)
+        datasets, load_records, guard = load_frozen_c(
+            args.freeze, args.freeze_sha256, initial, output, args.persist_active_cache)
         load_seconds = time.perf_counter()-started
         initial_guard = guard(initial)
         save_json(output/'INITIAL_BAND_SCREEN.json', initial_guard)
@@ -147,6 +172,8 @@ def main():
                       load_records=load_records, load_seconds=load_seconds,
                       optimization_seconds=time.perf_counter()-fit_start,
                       total_seconds=time.perf_counter()-started,
+                      active_cache_index_sha256=(_sha256(str(output/'ACTIVE_DATA_CACHE.json'))
+                                                 if args.persist_active_cache else None),
                       peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         for path, expected in ((args.freeze, args.freeze_sha256),
                                (args.coefficients, args.coefficients_sha256),

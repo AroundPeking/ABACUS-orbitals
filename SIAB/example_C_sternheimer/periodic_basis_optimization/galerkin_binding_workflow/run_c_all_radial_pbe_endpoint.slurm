@@ -13,6 +13,7 @@ source ~/.bashrc >/dev/null 2>&1 || true
 set -euo pipefail
 export LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1
 : "${C_ENDPOINT_STAGE:?}"
+: "${C_OPTIMIZER_RESULT:?}"
 : "${C_OPTIMIZER_RESULT_SHA256:?}"
 : "${C_PBE_CHECKER_SHA256:?}"
 : "${C_PBE_CHECKER_COMMIT:?}"
@@ -21,7 +22,7 @@ stage=$C_ENDPOINT_STAGE
 py=$root/optimizer-env-torch1121cpu/bin/python
 abacus=$root/artifacts/abacus-711af860c-intel2021/abacus_3p
 checker=$stage/check_c_optimized_pbe.py
-result=$root/runs/c-all-radial-20step-3e3169e5/RESULT.json
+result=$C_OPTIMIZER_RESULT
 original=$root/runs/c-solid-fd8-q13-standard-711af860c-ab8f1192/q1
 mkdir "$stage/EXECUTION_LOCK"
 cd "$stage"
