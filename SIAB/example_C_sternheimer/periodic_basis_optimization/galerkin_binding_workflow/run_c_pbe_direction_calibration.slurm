@@ -5,7 +5,7 @@
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=7
-#SBATCH --mem=110000M
+#SBATCH --mem=102400M
 #SBATCH --time=01:00:00
 #SBATCH --no-requeue
 

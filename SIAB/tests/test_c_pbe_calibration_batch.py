@@ -116,6 +116,16 @@ class PbeCalibrationBatchTest(unittest.TestCase):
                 self.m.run_prepared_probes(**self.options)
         run.assert_not_called()
 
+    def test_frozen_batch_fits_long_cpu_memory_contract(self):
+        lines = (WORKFLOW/"run_c_pbe_direction_calibration.slurm").read_text().splitlines()
+        directives = dict(line[len("#SBATCH --"):].split("=", 1)
+                          for line in lines if line.startswith("#SBATCH --") and "=" in line)
+        self.assertEqual(directives["partition"], "long")
+        self.assertEqual(directives["ntasks"], "4")
+        self.assertEqual(directives["cpus-per-task"], "7")
+        # Live long partition: MaxMemPerCPU=3755 MiB, 30 usable CPUs/node.
+        self.assertLessEqual(int(directives["mem"].rstrip("M")), 4*7*3755)
+
     def test_directions_hash_and_probe_identity_are_checked_before_staging(self):
         path = self.root/"probes/DIRECTIONS.json"
         original = path.read_bytes()
