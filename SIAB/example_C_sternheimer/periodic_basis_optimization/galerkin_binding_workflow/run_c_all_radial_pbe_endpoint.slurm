@@ -17,6 +17,8 @@ export LANG=C LC_ALL=C PYTHONDONTWRITEBYTECODE=1
 : "${C_OPTIMIZER_RESULT_SHA256:?}"
 : "${C_PBE_CHECKER_SHA256:?}"
 : "${C_PBE_CHECKER_COMMIT:?}"
+: "${C_MPI_PREFLIGHT_SHA256:?}"
+test "${SLURM_JOB_NUM_NODES:?}" = 1
 root=/work1/ghj/c-solid-fd8-q13-standard-20260903
 stage=$C_ENDPOINT_STAGE
 py=$root/optimizer-env-torch1121cpu/bin/python
@@ -30,12 +32,12 @@ status=failed
 trap 'exit 143' TERM
 trap 'exit 130' INT
 trap 'rc=$?; printf "%s\n" "$status" > "$stage/STATUS"; exit "$rc"' EXIT
-"$py" - "$checker" "$C_PBE_CHECKER_SHA256" "$abacus" "$result" "$C_OPTIMIZER_RESULT_SHA256" <<'PY'
+"$py" - "$checker" "$C_PBE_CHECKER_SHA256" "$abacus" "$result" "$C_OPTIMIZER_RESULT_SHA256" "$stage/c_single_node_mpi_preflight.c" "$C_MPI_PREFLIGHT_SHA256" <<'PY'
 import hashlib, pathlib, sys
 args = sys.argv[1:]
 for path, expected in ((args[0], args[1]),
                        (args[2], 'ab8f1192ad7f7246218422c80218c869d8053fa0d44f6ad728b9323eb4ee5ab3'),
-                       (args[3], args[4])):
+                       (args[3], args[4]), (args[5], args[6])):
     assert hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() == expected, path
 PY
 "$py" "$checker" prepare --optimizer-result "$result" \
@@ -57,7 +59,8 @@ with (stage/'EXECUTION_PROVENANCE.json').open('x') as stream:
         optimizer_result_sha256=os.environ['C_OPTIMIZER_RESULT_SHA256'],
         reader_contract='not-used-pure-PBE', sternheimer='disabled', librpa='not-used',
         physical_release_gate='hold', scheduler_gate='pending_external_validation',
-        mpi_ranks=4, omp_threads=7,
+        mpi_ranks=4, omp_threads=7, mpi_launcher='fork_single_node_allocation',
+        mpi_preflight_source_sha256=os.environ['C_MPI_PREFLIGHT_SHA256'],
         runner_sha256=hashlib.sha256((stage/'run.slurm').read_bytes()).hexdigest()), stream, indent=2)
 PY
 source /public/home/ghj/app/src/env_60_245_intel2021.sh
@@ -66,9 +69,15 @@ export OMP_NUM_THREADS=7 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 export OMP_DYNAMIC=FALSE OMP_PROC_BIND=spread OMP_PLACES=cores
 export OMP_MAX_ACTIVE_LEVELS=1 OMP_WAIT_POLICY=PASSIVE OMP_STACKSIZE=2G
 export I_MPI_PIN=1 I_MPI_PIN_DOMAIN=omp I_MPI_FABRICS=shm:ofi
+# This endpoint is single-node; launch within the existing Slurm allocation.
+launcher=(mpirun -launcher fork -np 4 -ppn 4)
+mpiicc "$stage/c_single_node_mpi_preflight.c" -o "$stage/mpi_preflight"
+sha256sum "$stage/c_single_node_mpi_preflight.c" "$stage/mpi_preflight" > "$stage/MPI_PREFLIGHT_SHA256"
+timeout 60 "${launcher[@]}" "$stage/mpi_preflight" > "$stage/MPI_PREFLIGHT.log" 2>&1
+grep -qx 'MPI_PREFLIGHT_OK ranks=4' "$stage/MPI_PREFLIGHT.log"
 cd "$stage/pbe"
 /usr/bin/time -v -o "$stage/abacus.time" \
- mpirun -np 4 -ppn 4 "$abacus" > abacus.out 2>&1
+ "${launcher[@]}" "$abacus" > abacus.out 2>&1
 "$py" "$checker" collect --prepared-dir "$stage/pbe" \
  --preparation-sha256 "$preparation_sha" > "$stage/collection.log"
 status=success
