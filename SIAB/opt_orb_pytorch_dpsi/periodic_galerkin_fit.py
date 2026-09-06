@@ -3,6 +3,7 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+import json
 import math
 import time
 
@@ -17,7 +18,11 @@ from periodic_galerkin_optimization import (
     evaluate_periodic_galerkin_coefficient_response,
 )
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
-from periodic_galerkin_rpa import periodic_rpa_objective
+from periodic_galerkin_rpa import periodic_rpa_objective, prepare_periodic_rpa_reference
+
+
+class CandidateGuardError(RuntimeError):
+    """A candidate failed an optional coefficient guard and may be backtracked."""
 
 
 @dataclass(frozen=True)
@@ -242,19 +247,43 @@ def _clone_coefficients(coefficients):
     }
 
 
-def _global_rpa_loss(datasets, coefficients, *, occupied_capture_tolerance, weights):
+def _evaluate_coefficient_guard(guard, coefficients):
+    with torch.no_grad():
+        diagnostics = guard(coefficients)
+    if not isinstance(diagnostics, dict) or type(diagnostics.get("gate")) is not bool:
+        raise ValueError("coefficient_guard must return a dictionary with a boolean gate")
+    try:
+        json.dumps(diagnostics, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError("coefficient_guard diagnostics must be finite and JSON serializable") from error
+    if not diagnostics["gate"]:
+        raise CandidateGuardError("candidate coefficient guard rejected basis")
+    return copy.deepcopy(diagnostics)
+
+
+def _global_rpa_loss(
+    datasets, coefficients, *, occupied_capture_tolerance, weights,
+    frequency_batch_size=None, reference_cache=None,
+):
     start = time.perf_counter()
     responses = []
     minimum_capture, maximum_condition = math.inf, 1.0
+    response_options = {}
+    if frequency_batch_size is not None:
+        response_options["frequency_batch_size"] = frequency_batch_size
     for dataset in datasets:
         result = evaluate_periodic_galerkin_coefficient_response(
             dataset, coefficients, contraction_backend="block",
             occupied_capture_tolerance=occupied_capture_tolerance,
+            **response_options,
         )
         responses.append(result.response)
         minimum_capture = min(minimum_capture, result.minimum_occupied_capture)
         maximum_condition = max(maximum_condition, result.maximum_overlap_condition)
-    objective = periodic_rpa_objective(datasets, tuple(responses), **weights)
+    objective_options = dict(weights)
+    if reference_cache is not None:
+        objective_options["reference_cache"] = reference_cache
+    objective = periodic_rpa_objective(datasets, tuple(responses), **objective_options)
     diagnostics = {
         key: float(getattr(objective, key).detach())
         for key in ("pi_relative_squared_error", "trace_log_relative_squared_error",
@@ -395,18 +424,38 @@ def optimize_periodic_galerkin_basis(
     best_callback=None,
     objective="pi",
     rpa_weights=None,
+    frequency_batch_size=None,
+    cache_rpa_reference=False,
+    coefficient_guard=None,
 ):
     """Fit nonfixed radial columns to Pi (default) or frozen-space body RPA.
 
     Partial-q RPA trials are allowed but retain their physical weights. They
     are workflow diagnostics, not complete-solid energy or basis acceptance.
+    Batching and prepared-reference reuse are opt-in RPA-only accelerations.
+    An optional coefficient_guard(coefficients) runs without autograd before
+    every loss evaluation. It returns JSON diagnostics including boolean gate,
+    or raises CandidateGuardError to reject a candidate. An initial rejection
+    is fatal; rejected trials backtrack without evaluating their response.
     """
     if objective not in ("pi", "rpa"):
         raise ValueError("objective must be pi or rpa")
+    if coefficient_guard is not None and not callable(coefficient_guard):
+        raise ValueError("coefficient_guard must be callable")
+    if frequency_batch_size is not None and (
+        not isinstance(frequency_batch_size, int)
+        or isinstance(frequency_batch_size, bool)
+        or frequency_batch_size < 1
+    ):
+        raise ValueError("frequency_batch_size must be a positive integer or None")
+    if not isinstance(cache_rpa_reference, bool):
+        raise ValueError("cache_rpa_reference must be a boolean")
     weights = None
     if objective == "pi":
         if rpa_weights is not None:
             raise ValueError("rpa_weights require objective=rpa")
+        if frequency_batch_size is not None or cache_rpa_reference:
+            raise ValueError("frequency_batch_size and cache_rpa_reference require objective=rpa")
     else:
         if dataset_families is not None or additional_family_evaluators:
             raise ValueError("RPA fitting requires a single periodic response family")
@@ -474,6 +523,11 @@ def optimize_periodic_galerkin_basis(
         initial_coefficients,
         block_cache_workers,
     )
+    rpa_options = {}
+    if frequency_batch_size is not None:
+        rpa_options["frequency_batch_size"] = frequency_batch_size
+    if cache_rpa_reference:
+        rpa_options["reference_cache"] = prepare_periodic_rpa_reference(datasets)
     optimizer = torch.optim.Adam(parameters, lr=learning_rate)
 
     loss_options = {}
@@ -485,18 +539,24 @@ def optimize_periodic_galerkin_basis(
         )
 
     def evaluate_loss(coefficients, occupied_capture_tolerance):
+        guard_diagnostics = None
+        if coefficient_guard is not None:
+            guard_diagnostics = _evaluate_coefficient_guard(coefficient_guard, coefficients)
         if objective == "rpa":
-            return _global_rpa_loss(
+            values = _global_rpa_loss(
                 datasets, coefficients,
                 occupied_capture_tolerance=occupied_capture_tolerance,
                 weights=weights,
+                **rpa_options,
             )
-        return _global_pi_loss(
-            datasets,
-            coefficients,
-            occupied_capture_tolerance=occupied_capture_tolerance,
-            **loss_options,
-        ) + (None,)
+        else:
+            values = _global_pi_loss(
+                datasets,
+                coefficients,
+                occupied_capture_tolerance=occupied_capture_tolerance,
+                **loss_options,
+            ) + (None,)
+        return values + (guard_diagnostics,)
 
     history = []
     initial_loss = None
@@ -519,7 +579,7 @@ def optimize_periodic_galerkin_basis(
     for step in range(max_steps + 1):
         coefficients = _assemble(fixed, variable)
         if pending_evaluation is None:
-            loss, minimum_capture, maximum_condition, family_losses, diagnostics = evaluate_loss(
+            loss, minimum_capture, maximum_condition, family_losses, diagnostics, guard_diagnostics = evaluate_loss(
                 coefficients,
                 (
                     1.0 - 1.0e-12
@@ -528,7 +588,7 @@ def optimize_periodic_galerkin_basis(
                 ),
             )
         else:
-            loss, minimum_capture, maximum_condition, family_losses, diagnostics = pending_evaluation
+            loss, minimum_capture, maximum_condition, family_losses, diagnostics, guard_diagnostics = pending_evaluation
             pending_evaluation = None
         family_loss_values = {
             name: float(value.detach()) for name, value in family_losses.items()
@@ -592,6 +652,8 @@ def optimize_periodic_galerkin_basis(
                 family_relative_pi_errors={"periodic": relative_pi_error},
                 previous_step_gradient_norm=previous_step_gradient_norm,
             )
+        if coefficient_guard is not None:
+            history[-1]["coefficient_guard"] = guard_diagnostics
         backtracks_from_previous_step = 0
         if progress_callback is not None:
             progress_callback(history[-1])
@@ -619,6 +681,7 @@ def optimize_periodic_galerkin_basis(
             float(group["lr"]) for group in optimizer.param_groups
         ]
         accepted = False
+        boundary_reason = "occupied_capture_boundary"
         for backtrack in range(maximum_backtracks + 1):
             if backtrack:
                 with torch.no_grad():
@@ -637,11 +700,15 @@ def optimize_periodic_galerkin_basis(
                     trial_coefficients,
                     occupied_capture_tolerance,
                 )
+            except CandidateGuardError:
+                boundary_reason = "candidate_guard_boundary"
+                continue
             except RuntimeError as error:
                 if str(error) != (
                     "candidate basis does not capture the fixed occupied manifold"
                 ):
                     raise
+                boundary_reason = "occupied_capture_boundary"
                 continue
             accepted = True
             backtracks_from_previous_step = backtrack
@@ -652,7 +719,7 @@ def optimize_periodic_galerkin_basis(
                 for parameter, snapshot in zip(parameters, parameter_snapshot):
                     parameter.copy_(snapshot)
             optimizer.load_state_dict(optimizer_snapshot)
-            stop_reason = "occupied_capture_boundary"
+            stop_reason = boundary_reason
             break
 
     if best_coefficients is None:
