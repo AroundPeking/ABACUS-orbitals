@@ -1,6 +1,6 @@
 """Read the versioned ABACUS periodic Galerkin Sternheimer dataset."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
 import os
@@ -342,12 +342,25 @@ def read_periodic_galerkin_dataset(
     *,
     include_reference_projection=True,
     verify_omitted_chunks=True,
+    active_coefficients=None,
 ):
-    """Read and validate one complete-q periodic Galerkin training dataset."""
+    """Read one complete q, optionally reducing each k before loading the next.
+
+    Active coefficients opt into exact unused-angular-block removal. All chunk
+    validation remains mandatory, and occupied normalization is computed in
+    the full mother space before slicing. The default reader is unchanged.
+    """
     if not isinstance(include_reference_projection, bool):
         raise ValueError("include_reference_projection must be boolean")
     if not isinstance(verify_omitted_chunks, bool):
         raise ValueError("verify_omitted_chunks must be boolean")
+    if active_coefficients is not None:
+        if include_reference_projection:
+            raise ValueError("active reduction requires omitted reference projection")
+        if not verify_omitted_chunks:
+            raise ValueError("active reduction requires omitted chunk hash validation")
+        from periodic_galerkin_basis import build_primitive_to_candidate
+        from periodic_galerkin_reduction import reduce_periodic_active_primitives
     directory = os.path.realpath(os.fspath(directory))
     status = _read_status(directory)
     scalar, frequencies, kpoint_metadata, eigenvalues, entries = _read_manifest(directory)
@@ -384,6 +397,8 @@ def read_periodic_galerkin_dataset(
     primitive_blocks = _read_primitive_blocks(
         directory, provenance["primitive_blocks_sha256"], primitive_count
     )
+    if active_coefficients is not None:
+        build_primitive_to_candidate(primitive_blocks, primitive_count, active_coefficients)
     _require(int(_one(scalar, "entry_count")) == len(entries),
              "periodic Galerkin manifest entry count mismatch")
     _require(set(frequencies) == set(range(nfrequency)),
@@ -437,6 +452,8 @@ def read_periodic_galerkin_dataset(
 
     chunks = {}
     for key, entry in entry_map.items():
+        if active_coefficients is not None and entry.kind not in _GLOBAL_KINDS:
+            continue
         if (
             not include_reference_projection
             and entry.kind == 3
@@ -474,6 +491,25 @@ def read_periodic_galerkin_dataset(
     for iw in range(nfrequency):
         _hermitian(reference_response[iw], "periodic Galerkin exact response")
 
+    dataset = PeriodicGalerkinDataset(
+        **provenance,
+        physics_hash=physics_hash,
+        selected_iq=selected_iq,
+        q_count=q_count,
+        qpoint=qpoint,
+        q_weight=q_weight,
+        primitive_count=primitive_count,
+        raw_auxiliary_dimension=raw_aux,
+        whitened_auxiliary_rank=white_aux,
+        frequency_ha=frequency_ha,
+        frequency_weights_ha=frequency_weights_ha,
+        coulomb_metric=metric,
+        coulomb_whitening=whitening,
+        reference_response=reference_response,
+        primitive_blocks=primitive_blocks,
+        kpoints=(),
+    )
+    result_template = dataset
     records = []
     for ik in range(1, k_count + 1):
         metadata = kpoint_metadata[ik]
@@ -489,10 +525,20 @@ def read_periodic_galerkin_dataset(
         noccupied = occupation.numel()
         _require(source_eigenvalue_ha.numel() == noccupied,
                  "periodic Galerkin occupations and eigenvalues have inconsistent dimensions")
-        overlap = chunks[(1, ik, -1)]
-        hamiltonian_ha = chunks[(6, ik, -1)] * _RY_TO_HA
-        occupied_projection = chunks[(7, ik, -1)]
-        source_flat = chunks[(2, ik, -1)]
+        if active_coefficients is not None:
+            record_chunks = {
+                (kind, ik, -1): _read_chunk(directory, entry_map[(kind, ik, -1)])
+                for kind in (1, 2, 6, 7)
+            }
+            # Validate omitted projections one at a time, including finiteness.
+            for iw in range(nfrequency):
+                _read_chunk(directory, entry_map[(3, ik, iw)])
+        else:
+            record_chunks = chunks
+        overlap = record_chunks[(1, ik, -1)]
+        hamiltonian_ha = record_chunks[(6, ik, -1)] * _RY_TO_HA
+        occupied_projection = record_chunks[(7, ik, -1)]
+        source_flat = record_chunks[(2, ik, -1)]
         reference_flat = (
             torch.stack([chunks[(3, ik, iw)] for iw in range(nfrequency)])
             if include_reference_projection
@@ -510,7 +556,7 @@ def read_periodic_galerkin_dataset(
                      "periodic Galerkin reference projection has inconsistent dimensions")
         _hermitian(overlap, "periodic Galerkin primitive overlap")
         _hermitian(hamiltonian_ha, "periodic Galerkin primitive Hamiltonian")
-        records.append(PeriodicGalerkinKPoint(
+        record = PeriodicGalerkinKPoint(
             source_ik=ik,
             target_ik=metadata["target_ik"],
             source_kpoint=metadata["source_kpoint"],
@@ -528,32 +574,21 @@ def read_periodic_galerkin_dataset(
                 if include_reference_projection
                 else reference_flat
             ),
-        ))
+        )
+        if active_coefficients is not None:
+            compact = reduce_periodic_active_primitives(
+                replace(dataset, kpoints=(record,)), active_coefficients
+            )
+            records.append(compact.kpoints[0])
+            result_template = replace(compact, kpoints=())
+            # No full-size k arrays may survive into the next record's read.
+            del compact, record, record_chunks, overlap, hamiltonian_ha
+            del occupied_projection, source_flat, reference_flat
+        else:
+            records.append(record)
 
     weight_sum = sum(record.k_weight for record in records)
     _require(abs(weight_sum - 2.0) <= 1.0e-10,
              "periodic Galerkin ABACUS k-point weights must sum to 2")
 
-    return PeriodicGalerkinDataset(
-        abacus_commit=provenance["abacus_commit"],
-        executable_sha256=provenance["executable_sha256"],
-        orbital_sha256=provenance["orbital_sha256"],
-        pseudopotential_sha256=provenance["pseudopotential_sha256"],
-        auxiliary_basis_sha256=provenance["auxiliary_basis_sha256"],
-        primitive_blocks_sha256=provenance["primitive_blocks_sha256"],
-        physics_hash=physics_hash,
-        selected_iq=selected_iq,
-        q_count=q_count,
-        qpoint=qpoint,
-        q_weight=q_weight,
-        primitive_count=primitive_count,
-        raw_auxiliary_dimension=raw_aux,
-        whitened_auxiliary_rank=white_aux,
-        frequency_ha=frequency_ha,
-        frequency_weights_ha=frequency_weights_ha,
-        coulomb_metric=metric,
-        coulomb_whitening=whitening,
-        reference_response=reference_response,
-        primitive_blocks=primitive_blocks,
-        kpoints=tuple(records),
-    )
+    return replace(result_template, kpoints=tuple(records))
