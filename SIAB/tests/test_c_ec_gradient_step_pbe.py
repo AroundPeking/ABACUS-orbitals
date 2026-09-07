@@ -147,6 +147,20 @@ class EcGradientStepPbeTest(unittest.TestCase):
         self.assertEqual(result['pbe_gate'], 'pass')
         self.assertAlmostEqual(result['energy_delta_ev_per_c'], .008)
 
+    def test_system_runtime_directory_alias_is_resolved_and_hash_pinned(self):
+        system = self.root/'system'
+        system.mkdir()
+        library = system/'libpmi.so.0.0.0'
+        library.write_bytes(self.mpi.read_bytes())
+        (system/'libpmi.so').symlink_to(library.name)
+        alias = self.root/'runtime-alias'
+        alias.symlink_to(system, target_is_directory=True)
+        prepared = self.prepare(mpi_library=alias/'libpmi.so')
+        self.assertEqual(prepared['mpi_library'], str(library))
+        library.write_bytes(b'changed library')
+        with self.assertRaises(ValueError):
+            self.collect()
+
     def test_collection_uses_original_baseline_and_reports_center_shift(self):
         self.prepare()
         self.admit.reset_mock()

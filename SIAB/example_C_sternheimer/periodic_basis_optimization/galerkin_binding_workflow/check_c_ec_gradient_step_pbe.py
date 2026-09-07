@@ -42,7 +42,9 @@ def validate_gradient_step_candidate(candidate_root):
 
 def _runtime_file(path, expected):
     expected = _digest(expected)
-    path = Path(path)
+    # System MPI installs use directory and SONAME aliases. Pin the real file;
+    # the stricter no-symlink rule still applies to scientific evidence/inputs.
+    path = Path(path).resolve(strict=True)
     root = _root(path.parent)
     _regular(root, path.name)
     path = root / path.name
