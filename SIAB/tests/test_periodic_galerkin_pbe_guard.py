@@ -9,6 +9,23 @@ from periodic_galerkin_pbe_guard import prepare_frozen_band_guard
 
 
 class FrozenBandGuardTest(unittest.TestCase):
+    def test_opt_in_details_share_the_same_guard_and_list_target_bands(self):
+        dataset,initial=self.fixture()
+        guard=prepare_frozen_band_guard(dataset,initial)
+        changed=initial['C'][0].clone()
+        changed[2,0]=.001
+        plain=guard({'C':[changed]})
+        detail=guard({'C':[changed]},diagnostics=True)
+        self.assertEqual({k:detail[k] for k in plain},plain)
+        self.assertNotIn('target_band_details',plain)
+        rows=detail['target_band_details']
+        self.assertEqual(len(rows),len(dataset.kpoints))
+        self.assertEqual(rows[0]['source_ik'],dataset.kpoints[0].source_ik)
+        self.assertEqual(rows[0]['band_indices'],[1,2])
+        maximum=max(abs(x) for r in rows for x in r['signed_changes_ev'])
+        self.assertEqual(maximum,plain['maximum_target_band_change_ev'])
+        with self.assertRaises(ValueError): guard(initial,diagnostics='yes')
+
     def fixture(self):
         dataset = fixtures.PeriodicGalerkinFitTest().three_level_dataset()
         dataset = replace(dataset, kpoints=tuple(replace(r, k_weight=2./len(dataset.kpoints))

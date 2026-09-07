@@ -54,9 +54,12 @@ def prepare_frozen_band_guard(
 
     reference = spectra(initial)
 
-    def guard(coefficients):
+    def guard(coefficients, *, diagnostics=False):
+        if type(diagnostics) is not bool:
+            raise ValueError('diagnostics must be a boolean')
         values = spectra(coefficients)
         changes, maximum = [], 0.
+        details = []
         vbm, cbm = -math.inf, math.inf
         for record, before, after in zip(dataset.kpoints, reference, values):
             nocc = record.occupation.numel()
@@ -65,6 +68,11 @@ def prepare_frozen_band_guard(
             change = (after-before)*HARTREE_TO_EV
             changes.append(record.k_weight*float(torch.dot(change[:nocc], record.occupation)))
             maximum = max(maximum, float(change[:nocc+extra_virtual_bands].abs().max()))
+            if diagnostics:
+                count = min(after.numel(), nocc+extra_virtual_bands)
+                details.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
+                    band_indices=list(range(1, count+1)),
+                    signed_changes_ev=change[:count].tolist()))
             vbm = max(vbm, float(after[nocc-1])*HARTREE_TO_EV)
             cbm = min(cbm, float(after[nocc])*HARTREE_TO_EV)
         band_sum = math.fsum(changes)/atoms_per_cell
@@ -80,6 +88,9 @@ def prepare_frozen_band_guard(
                       k_weight_convention='ABACUS_spin_included_no_renormalization')
         if not result['gate']:
             raise CandidateGuardError('frozen occupied/target-band screen rejected candidate')
+        if diagnostics:
+            result.update(target_band_details=details,
+                target_band_identity='sorted_eigenvalue_index_not_eigenvector_tracking')
         return result
 
     return guard
