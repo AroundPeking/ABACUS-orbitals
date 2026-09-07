@@ -296,15 +296,15 @@ class EcGradientAdmissionTest(unittest.TestCase):
                 self.load(result_sha256=digest(path))
         self.runtime_call.assert_not_called()
 
-    def candidate_fixture(self):
+    def candidate_fixture(self, radius=.02):
         self.candidate_root = self.root / "candidate"
         self.candidate_root.mkdir()
         self.proposed = copy.deepcopy(self.coefficients)
-        self.proposed["C"][0][3][0] = -.02
+        self.proposed["C"][0][3][0] = -radius
         self.direction = {"C": [Array([[-float(l == 0 and i == 3 and z == 0) for z in range(n)]
                                        for i in range(31)]) for l, n in enumerate(NU)]}
         self.proposal = dict(scope="accepted_ec_gradient_step_candidate", direction_name="negative_horizontal_ec_gradient",
-            radius=.02, coefficients=self.proposed, direction=self.direction, predicted_ec_delta_ha_per_cell=-.02,
+            radius=radius, coefficients=self.proposed, direction=self.direction, predicted_ec_delta_ha_per_cell=-radius,
             actual_pbe_direction_derivative="unmeasured", finite_step_safety="unmeasured", physical_release_gate="hold",
             actual_pbe_gate="pending", galerkin_energy="unmeasured")
         self.step = {key:copy.deepcopy(value) for key,value in self.proposal.items() if key != "coefficients"}
@@ -350,6 +350,27 @@ class EcGradientAdmissionTest(unittest.TestCase):
         self.runtime.propose_ec_gradient_step.assert_called_once_with(self.coefficients, self.report, radius=.02)
         self.runtime.write_abacus_orbital.assert_called_once()
         self.assertEqual(before, {p:p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+
+    def test_reduced_candidate_reconstructs_its_own_explicit_radius(self):
+        self.candidate_fixture(radius=.018)
+        evidence = dict(gradient_result_sha256=self.result_sha)
+        self.patch(self.module, 'validate_reduction_evidence', return_value=evidence)
+        self.candidate['reduction_evidence'] = evidence
+        self.repin_candidate()
+        self.assertEqual(self.verify_candidate(), self.candidate)
+        self.runtime.propose_ec_gradient_step.assert_called_once_with(self.coefficients, self.report, radius=.018)
+
+    def test_reduced_candidate_requires_same_gradient_and_rejection_evidence(self):
+        self.candidate_fixture(radius=.018)
+        evidence = dict(gradient_result_sha256=self.result_sha)
+        self.patch(self.module, 'validate_reduction_evidence', return_value=evidence)
+        with self.assertRaises(ValueError):
+            self.verify_candidate()
+        evidence['gradient_result_sha256'] = '0'*64
+        self.candidate['reduction_evidence'] = evidence
+        self.repin_candidate()
+        with self.assertRaises(ValueError):
+            self.verify_candidate()
 
     def test_candidate_cannot_claim_old_scope_other_radius_or_measured_physics(self):
         self.candidate_fixture()

@@ -25,6 +25,12 @@ import refresh_c_combined_step_gradient as refresh
 
 SCOPE = "accepted_ec_gradient_step_candidate"
 RADIUS = .02
+RUN_RADIUS = .018
+GRADIENT_RESULT = 'b3e46a26e07a76a0931e8418c185e613bdef346fa31e52d6fb33ed8ba2bd02b5'
+REJECTED_STAGE = Path('/work1/ghj/c-solid-fd8-q13-standard-20260903/stage-c-ec-gradient-step-5fbe11ee')
+REJECTED_RESULT = '0a62febb9ffefef941a9671179d34567b361f30fc3b9b5ccdb8040a6dcfd230d'
+REJECTED_ACCEPTANCE = 'c83ca3d3f165722b9815c71727e6ed36f01dddfea6514ffaf3c9049376c1dfe9'
+REJECTED_DIAGNOSTIC = 'f9e86af1db7d7a466d4e7cb4a5a953fe338f567454069e7d813f9ab212c42378'
 NU = [3, 3, 2, 0, 0]
 GRADIENT_FILE = "result/EC_GRADIENT_REFRESH.json"
 ACCEPTANCE_FILE = "GRADIENT_ACCEPTANCE.json"
@@ -36,6 +42,30 @@ _PROVENANCE = (
     "cache_loads", "rpa_evaluations", "gradient_mode", "backward_passes", "actual_scf_count",
     "optimizer_steps", "candidate_count", "coefficient_update", "exported_candidate",
     "physical_release_gate", "ordinary_sos_qavg", "gw")
+
+
+def validate_reduction_evidence():
+    failed, accepted_rejection, diagnostic = [json.loads(endpoint._read_hashed(REJECTED_STAGE/name, sha))
+        for name, sha in (('result/RESULT.json', REJECTED_RESULT),
+                          ('STEP_MEASUREMENT_ACCEPTANCE.json', REJECTED_ACCEPTANCE),
+                          ('GUARD_REJECTION_DIAGNOSTIC.json', REJECTED_DIAGNOSTIC))]
+    if (failed['status'] != accepted_rejection['status'] or failed['status'] != 'success'
+            or failed['candidate_gate'] != accepted_rejection['candidate_gate'] or failed['candidate_gate'] != 'rejected_cheap_guard'
+            or failed['actual_scf_count'] != 0 or failed['rpa_evaluations'] != 0
+            or failed['radius'] != .02 or failed['gradient_result_sha256'] != GRADIENT_RESULT
+            or accepted_rejection['result_sha256'] != REJECTED_RESULT
+            or diagnostic['status'] != 'success' or diagnostic['rejected_result_sha256'] != REJECTED_RESULT
+            or diagnostic['actual_scf_count'] != 0 or diagnostic['response_evaluations'] != 0):
+        raise ValueError('accepted no-SCF/no-response rejection evidence required')
+    band = diagnostic['rejected_band_screen']
+    if (band['gate'] is not False or not .050 < band['maximum_target_band_change_ev'] < .051
+            or abs(band['occupied_band_sum_change_ev_per_atom']) > .010 or band['minimum_gap_ev'] <= 0
+            or band['target_band_change_limit_ev'] != .050):
+        raise ValueError('only the measured small target-band overshoot supports this reduction')
+    return dict(rejected_stage=str(REJECTED_STAGE), rejected_result_sha256=REJECTED_RESULT,
+        rejected_acceptance_sha256=REJECTED_ACCEPTANCE, rejected_diagnostic_sha256=REJECTED_DIAGNOSTIC,
+        gradient_result_sha256=GRADIENT_RESULT,
+        prior_radius=.02, next_radius=RUN_RADIUS, reduction_factor=.9, automatic_radius_scan=False)
 
 
 def _commit(value):
@@ -247,7 +277,14 @@ def validate_gradient_step_candidate(candidate_root):
         orbital_filename="C_3s3p2d_ec_step.orb", actual_pbe_direction_derivative="unmeasured",
         finite_step_safety="unmeasured", actual_pbe_gate="pending", galerkin_energy="unmeasured",
         physical_release_gate="hold"), "Ec step candidate")
-    _equal(_number(candidate.get("radius"), "radius"), RADIUS, "fixed Ec step radius")
+    radius = _number(candidate.get("radius"), "radius")
+    if radius not in (.02, .018):
+        raise ValueError("only the original radius or explicit ten-percent reduction is eligible")
+    if radius == .018:
+        reduction = validate_reduction_evidence()
+        _same_json(candidate.get('reduction_evidence'), reduction, 'pinned radius reduction evidence')
+        _equal(candidate.get('gradient_result_sha256'), reduction['gradient_result_sha256'],
+               'reduction and candidate gradient')
     _profile(candidate)
     _commit(candidate.get("source_commit"))
     artifacts = {}
@@ -278,7 +315,7 @@ def validate_gradient_step_candidate(candidate_root):
     coefficients = refresh._read_coefficients(runtime, center["coefficient_path"])
     saved = refresh._read_coefficients(runtime, root / "COEFFICIENTS.txt")
     with runtime.torch.no_grad():
-        proposal = runtime.propose_ec_gradient_step(coefficients, gradient["energy_gradient"], radius=RADIUS)
+        proposal = runtime.propose_ec_gradient_step(coefficients, gradient["energy_gradient"], radius=radius)
         serialized = {key:value for key,value in proposal.items() if key not in ("coefficients", "direction")}
         serialized["direction"] = {e:[d.tolist() for d in channels] for e,channels in proposal["direction"].items()}
         _same_json(step, serialized, "exact serialized Ec step proposal")

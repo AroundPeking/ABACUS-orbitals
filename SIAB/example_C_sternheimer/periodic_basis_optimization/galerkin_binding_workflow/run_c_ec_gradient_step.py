@@ -10,10 +10,11 @@ import subprocess
 import time
 
 import check_c_optimized_pbe as endpoint
+from check_c_ec_gradient_step import (RUN_RADIUS, GRADIENT_RESULT, REJECTED_RESULT,
+    REJECTED_ACCEPTANCE, REJECTED_DIAGNOSTIC, validate_reduction_evidence)
 
 ROOT = Path('/work1/ghj/c-solid-fd8-q13-standard-20260903')
 GRADIENT_STAGE = ROOT/'stage-c-ec-gradient-refresh-9ee3747e'
-GRADIENT_RESULT = 'b3e46a26e07a76a0931e8418c185e613bdef346fa31e52d6fb33ed8ba2bd02b5'
 GRADIENT_ACCEPTANCE = '3991384900936811cfb9f5708446e2c344698bb5e455078c7a792d31e40f4c3e'
 SCOPE = 'one_accepted_ec_gradient_step'
 
@@ -68,6 +69,7 @@ def run_step(stage, source):
     from export_periodic_orbitals import write_abacus_orbital
 
     started = time.perf_counter()
+    reduction = validate_reduction_evidence()
     evidence = load_accepted_ec_gradient(GRADIENT_STAGE, GRADIENT_RESULT, GRADIENT_ACCEPTANCE)
     gradient, loaded = evidence['gradient'], evidence['center']
     rt = refresh._runtime()
@@ -75,7 +77,7 @@ def run_step(stage, source):
     coefficients = refresh._read_coefficients(rt, loaded['coefficient_path'])
     original = refresh._read_coefficients(rt, loaded['original_coefficient_path'])
     with rt.torch.no_grad():
-        trial = propose_ec_gradient_step(coefficients, gradient['energy_gradient'])
+        trial = propose_ec_gradient_step(coefficients, gradient['energy_gradient'], radius=RUN_RADIUS)
     output = stage/'result'
     output.mkdir()
     load_started = time.perf_counter()
@@ -95,7 +97,7 @@ def run_step(stage, source):
         active_cache_index_sha256=gradient['active_cache_index_sha256'],
         freeze_sha256=gradient['freeze_sha256'], occupied_capture_floor=floor,
         cache_loads=1, cache_load_seconds=cache_seconds, load_records=records,
-        radius=trial['radius'], actual_pbe_direction_derivative='unmeasured',
+        radius=trial['radius'], reduction_evidence=reduction, actual_pbe_direction_derivative='unmeasured',
         predicted_ec_delta_ev_per_c=trial['predicted_ec_delta_ha_per_cell']*endpoint.HARTREE_TO_EV/2,
         nu=[3,3,2,0,0], fixed_nu=[0]*5, ao_per_C=22, physical_release_gate='hold',
         ordinary_sos_qavg='pending', gw='pending', backward_passes=0, optimizer_steps=0)
@@ -117,7 +119,7 @@ def run_step(stage, source):
     proposal = {k:v for k,v in step.items() if k != 'direction'}
     for k in ('center_stage','center_result_sha256','center_acceptance_sha256',
               'gradient_stage','gradient_result_sha256','gradient_acceptance_sha256',
-              'nu','fixed_nu','ao_per_C','source_commit'):
+              'nu','fixed_nu','ao_per_C','source_commit','reduction_evidence'):
         proposal[k] = common[k]
     proposal.update(status='prepared', center_coefficient_sha256=gradient['coefficient_sha256'],
         center_orbital_sha256=gradient['orbital_sha256'],

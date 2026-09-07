@@ -9,6 +9,7 @@ from periodic_galerkin_radial_diagnostics import (
 
 SCOPE = 'accepted_ec_gradient_step_candidate'
 RADIUS = .02
+APPROVED_RADII = (.02, .018)
 
 
 def _same_report(actual, expected):
@@ -26,8 +27,8 @@ def _same_report(actual, expected):
 
 def propose_ec_gradient_step(coefficients, gradient_report, radius=RADIUS):
     if (isinstance(radius, bool) or not isinstance(radius, (int, float))
-            or not math.isfinite(radius) or radius != RADIUS):
-        raise ValueError('only the approved radius 0.02 is eligible')
+            or not math.isfinite(radius) or radius not in APPROVED_RADII):
+        raise ValueError('only the original 0.02 or one explicit 0.018 reduction is eligible')
     _validate_report(coefficients, gradient_report)
     raw = {e: [torch.tensor(row['raw_gradient'], dtype=torch.float64)
                for row in gradient_report['channels'] if row['element'] == e]
@@ -44,8 +45,8 @@ def propose_ec_gradient_step(coefficients, gradient_report, radius=RADIUS):
     unit = sum(float((d*d).sum()) for channels in direction.values() for d in channels)
     if not math.isclose(unit, 1., rel_tol=0, abs_tol=1e-12):
         raise ValueError('full Ec descent must have unit norm')
-    return dict(scope=SCOPE, direction_name='negative_horizontal_ec_gradient', radius=RADIUS,
-        coefficients=retract_displacement(coefficients, direction, RADIUS), direction=direction,
-        predicted_ec_delta_ha_per_cell=-RADIUS*norm,
+    return dict(scope=SCOPE, direction_name='negative_horizontal_ec_gradient', radius=radius,
+        coefficients=retract_displacement(coefficients, direction, radius), direction=direction,
+        predicted_ec_delta_ha_per_cell=-radius*norm,
         actual_pbe_direction_derivative='unmeasured', finite_step_safety='unmeasured',
         actual_pbe_gate='pending', galerkin_energy='unmeasured', physical_release_gate='hold')

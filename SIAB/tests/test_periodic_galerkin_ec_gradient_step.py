@@ -47,6 +47,15 @@ class EcGradientStepTest(unittest.TestCase):
             with self.subTest(radius=radius), self.assertRaises(ValueError):
                 self.m.propose_ec_gradient_step(self.c, self.report, radius)
 
+    def test_one_explicit_ten_percent_reduction_not_an_automatic_search(self):
+        step = self.m.propose_ec_gradient_step(self.c, self.report, radius=.018)
+        self.assertEqual(step['radius'], .018)
+        self.assertEqual(step['predicted_ec_delta_ha_per_cell'], -.018*self.report['horizontal_gradient_norm'])
+        self.assertEqual(step['actual_pbe_gate'], 'pending')
+        for radius in (.019, .017, .021):
+            with self.subTest(radius=radius), self.assertRaises(ValueError):
+                self.m.propose_ec_gradient_step(self.c, self.report, radius=radius)
+
     def test_changed_gradient_or_summary_is_rejected(self):
         mutations = [lambda r: r.update(horizontal_gradient_norm=1.),
             lambda r: r['channels'][0]['raw_gradient'][0].__setitem__(0, 12.),

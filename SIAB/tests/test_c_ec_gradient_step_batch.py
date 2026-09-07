@@ -1,5 +1,6 @@
 """One real SCF is a prerequisite, never a proxy for the full-q step."""
 import importlib
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -27,6 +28,44 @@ class EcStepBatchTest(unittest.TestCase):
         self.assertEqual(digest, 'a'*64)
         self.events.append('collect')
         return dict(pbe_gate='pass')
+
+    def reduction_documents(self):
+        failed = dict(status='success', candidate_gate='rejected_cheap_guard',
+            actual_scf_count=0, rpa_evaluations=0, radius=.02,
+            gradient_result_sha256=self.m.GRADIENT_RESULT)
+        accepted = dict(status='success', candidate_gate='rejected_cheap_guard',
+            result_sha256=self.m.REJECTED_RESULT)
+        diagnostic = dict(status='success', rejected_result_sha256=self.m.REJECTED_RESULT,
+            actual_scf_count=0, response_evaluations=0,
+            rejected_band_screen=dict(gate=False, maximum_target_band_change_ev=.05051384152283772,
+                occupied_band_sum_change_ev_per_atom=.0005779057539109669,
+                minimum_gap_ev=4.384521905876017, target_band_change_limit_ev=.050))
+        return [failed, accepted, diagnostic]
+
+    def test_one_reduction_requires_hash_locked_no_physics_rejection(self):
+        with patch.object(self.m.endpoint, '_read_hashed',
+                          side_effect=[json.dumps(d) for d in self.reduction_documents()]) as read:
+            result = self.m.validate_reduction_evidence()
+        self.assertEqual(read.call_count, 3)
+        self.assertEqual([c[0][1] for c in read.call_args_list],
+            [self.m.REJECTED_RESULT, self.m.REJECTED_ACCEPTANCE, self.m.REJECTED_DIAGNOSTIC])
+        self.assertEqual(result['next_radius'], .018)
+        self.assertFalse(result['automatic_radius_scan'])
+
+    def test_reduction_rejects_wrong_gradient_or_large_band_failure(self):
+        for i in range(4):
+            docs = self.reduction_documents()
+            if i == 0:
+                docs[0]['gradient_result_sha256'] = 'wrong'
+            elif i == 1:
+                docs[2]['rejected_band_screen']['maximum_target_band_change_ev'] = .06
+            elif i == 2:
+                docs[2]['rejected_band_screen']['target_band_change_limit_ev'] = .06
+            else:
+                docs[0]['actual_scf_count'] = 1
+            with patch.object(self.m.endpoint, '_read_hashed', side_effect=[json.dumps(d) for d in docs]):
+                with self.assertRaises(ValueError):
+                    self.m.validate_reduction_evidence()
 
     def test_real_pbe_precedes_full_forward_and_gate(self):
         center = dict(loss=2., rpa=dict(candidate_energy_ha=-.4, reference_energy_ha=-.5))

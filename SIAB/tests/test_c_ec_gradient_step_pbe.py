@@ -139,6 +139,14 @@ class EcGradientStepPbeTest(unittest.TestCase):
         self.admit.assert_called_with(self.center, self.center_sha, self.acceptance_sha)
         self.verify_candidate.assert_called_with(self.candidate_root)
 
+    def test_reduced_radius_preserves_original_pbe_admission(self):
+        self.write_candidate(radius=.018)
+        prepared = self.prepare()
+        self.assertEqual(prepared['radius'], .018)
+        result = self.collect(fixture.log_text(BASELINE+.016))
+        self.assertEqual(result['pbe_gate'], 'pass')
+        self.assertAlmostEqual(result['energy_delta_ev_per_c'], .008)
+
     def test_collection_uses_original_baseline_and_reports_center_shift(self):
         self.prepare()
         self.admit.reset_mock()

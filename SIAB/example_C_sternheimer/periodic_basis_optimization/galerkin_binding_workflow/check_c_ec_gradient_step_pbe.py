@@ -61,7 +61,8 @@ def _candidate(root, center, center_sha, acceptance_sha, result):
     candidate = _json(content)
     _expect(candidate, dict(status="prepared", scope=SCOPE, physical_release_gate="hold",
                            direction_name="negative_horizontal_ec_gradient"), "Ec candidate")
-    _equal(_number(candidate.get("radius"), "radius"), .02, "fixed Ec-step radius")
+    if _number(candidate.get("radius"), "radius") not in (.02, .018):
+        raise ValueError("only the original radius or explicit ten-percent reduction is eligible")
     if not isinstance(candidate.get("center_stage"), str) or _root(candidate["center_stage"]) != center:
         raise ValueError("candidate must bind the accepted combined center stage")
     for key, value in (("center_result_sha256", center_sha), ("center_acceptance_sha256", acceptance_sha),
