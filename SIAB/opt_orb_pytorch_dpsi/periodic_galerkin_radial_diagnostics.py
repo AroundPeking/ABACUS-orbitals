@@ -166,9 +166,59 @@ def radial_guard_sensitivity(coefficients, report, guard, *, radii=(1e-4, 5e-5))
                 actual_pbe_sensitivity="unmeasured", physical_release_gate="hold")
 
 
+def transported_descent_report(coefficients, gradient_report, previous_direction):
+    """Project the old saved-frame direction, not its old PBE derivative."""
+    _validate(coefficients, previous_direction)
+    _validate_report(coefficients, gradient_report)
+    raw = {e: [torch.tensor(r["raw_gradient"], dtype=torch.float64)
+               for r in gradient_report["channels"] if r["element"] == e]
+           for e in coefficients}
+    if radial_gradient_report(coefficients, raw) != gradient_report:
+        raise ValueError("inconsistent gradient report")
+    transported = radial_gradient_report(coefficients, previous_direction)
+    norm = transported["horizontal_gradient_norm"]
+    gradient_norm = gradient_report["horizontal_gradient_norm"]
+
+    def alignment(inner, a, b):
+        if a <= 1e-14 or b <= 1e-14:
+            return None, None
+        cosine = max(-1., min(1., -inner/a/b))
+        return cosine, math.degrees(math.acos(cosine))
+
+    rows, total_inner = [], 0.
+    for gradient, direction in zip(gradient_report["channels"], transported["channels"]):
+        g = torch.tensor(gradient["horizontal_gradient"], dtype=torch.float64)
+        d = torch.tensor(direction["horizontal_gradient"], dtype=torch.float64)
+        for z in range(g.shape[1]):
+            inner = float((g[:, z]*d[:, z]).sum())
+            if not math.isfinite(inner):
+                raise ValueError("nonfinite transported directional derivative")
+            total_inner += inner
+            gn, dn = _finite_norm(g[:, z]), _finite_norm(d[:, z])
+            cosine, angle = alignment(inner, gn, dn)
+            rows.append(dict(element=gradient["element"], l=gradient["l"], zeta=z+1,
+                gradient_norm=gn, projected_direction_norm=dn,
+                descent_cosine=cosine, angle_degrees=angle,
+                energy_derivative_ha_per_cell=inner/norm if norm > 1e-14 else 0.))
+    if not math.isfinite(total_inner):
+        raise ValueError("nonfinite combined directional derivative")
+    cosine, angle = alignment(total_inner, gradient_norm, norm)
+    return dict(transport="horizontal_projection_at_current_signed_QR_frame",
+        coordinate_metric="Euclidean_coefficient_signed_QR_frame",
+        previous_direction_norm=transported["raw_gradient_norm"],
+        projected_direction_norm=norm, gradient_norm=gradient_norm,
+        derivative_normalization="unit_global_projected_direction",
+        descent_cosine=cosine, angle_degrees=angle,
+        energy_derivative_ha_per_cell=total_inner/norm if norm > 1e-14 else 0.,
+        radials=rows, actual_pbe_direction_derivative="unmeasured",
+        physical_release_gate="hold")
+
+
 def evaluate_radial_gradients(datasets, coefficients, *, occupied_capture_tolerance,
-                              frequency_batch_size, weights):
-    """One full response graph, two backward passes, and no optimizer update."""
+                              frequency_batch_size, weights, energy_only=False):
+    """One full response graph, one or two backwards, and no optimizer update."""
+    if type(energy_only) is not bool:
+        raise ValueError("energy_only must be an explicit boolean")
     _validate(coefficients)
     started = time.perf_counter()
     datasets = tuple(prepare_periodic_occupied_reference(d) for d in datasets)
@@ -186,7 +236,7 @@ def evaluate_radial_gradients(datasets, coefficients, *, occupied_capture_tolera
         condition = max(condition, result.maximum_overlap_condition)
     objective = periodic_rpa_objective(datasets, tuple(responses), reference_cache=reference, **weights)
     forward_seconds = time.perf_counter()-started
-    loss_gradients = torch.autograd.grad(objective.loss, parameters, retain_graph=True)
+    loss_gradients = None if energy_only else torch.autograd.grad(objective.loss, parameters, retain_graph=True)
     energy_gradients = torch.autograd.grad(objective.candidate_energy_ha, parameters)
 
     def assemble(gradients):
@@ -205,10 +255,14 @@ def evaluate_radial_gradients(datasets, coefficients, *, occupied_capture_tolera
                     candidate_contributions_ha=r.candidate_contributions_ha.detach().tolist(),
                     reference_contributions_ha=r.reference_contributions_ha.detach().tolist())
                for r in objective.q_records])
-    return dict(scope="radial_gradients_at_fixed_candidate_no_optimization",
+    result = dict(scope="radial_gradients_at_fixed_candidate_no_optimization",
         loss=float(objective.loss.detach()), rpa=rpa,
         minimum_occupied_capture=capture, maximum_overlap_condition=condition,
-        loss_gradient=radial_gradient_report(coefficients, assemble(loss_gradients)),
         energy_gradient=radial_gradient_report(coefficients, assemble(energy_gradients)),
         energy_gradient_units="Ha_per_cell_per_unit_coefficient", forward_seconds=forward_seconds,
         forward_and_backward_seconds=time.perf_counter()-started, physical_release_gate="hold")
+    if energy_only:
+        result.update(gradient_mode="energy_only", backward_passes=1)
+    else:
+        result["loss_gradient"] = radial_gradient_report(coefficients, assemble(loss_gradients))
+    return result
