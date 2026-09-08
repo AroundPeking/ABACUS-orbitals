@@ -20,6 +20,34 @@ def validate_active_primitive_profile(dataset, coefficients):
         raise ValueError("active primitive coefficient profile changed; reload unreduced data")
 
 
+def reprofile_active_primitives(dataset, coefficients):
+    """Explicitly rebind radial counts without changing retained angular blocks.
+
+    The original cache and its metadata stay immutable. This exact in-memory
+    view shares operators, retains the full-mother occupied normalization and
+    discards coefficient-profile-specific contraction caches.
+    """
+    meta = dataset.active_primitive_reduction
+    if meta is None:
+        raise ValueError('validated active primitive reduction required')
+    profile = _coefficient_profile(coefficients)
+    before = {(e,l):(r,c) for e,l,r,c in meta.coefficient_profile}
+    after = {(e,l):(r,c) for e,l,r,c in profile}
+    if (set(before) != set(after) or any(before[k][0] != after[k][0]
+            or bool(before[k][1]) != bool(after[k][1]) for k in before)):
+        raise ValueError('same radial rows and angular support required; reload full data')
+    build_primitive_to_candidate(dataset.primitive_blocks,dataset.primitive_count,coefficients)
+    if profile == meta.coefficient_profile:
+        return dataset
+    signature = dict(format_version=1, original_primitive_count=meta.original_primitive_count,
+        original_primitive_blocks_sha256=meta.original_primitive_blocks_sha256,
+        source_indices=meta.source_indices,coefficient_profile=profile)
+    digest = hashlib.sha256(json.dumps(signature,sort_keys=True,separators=(',',':')).encode('ascii')).hexdigest()
+    return replace(dataset,active_primitive_reduction=replace(meta,
+        coefficient_profile=profile,mapping_sha256=digest),kpoints=tuple(
+        replace(r,block_contraction_cache=None) for r in dataset.kpoints))
+
+
 def reduce_periodic_active_primitives(dataset, coefficients):
     """Drop only identically unused angular blocks with an explicit index map.
 

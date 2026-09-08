@@ -15,6 +15,7 @@ def prepare_frozen_band_guard(
     occupied_band_sum_limit_ev_per_atom=0.010,
     maximum_target_band_change_ev=0.050,
     extra_virtual_bands=4,
+    allow_basis_expansion=False,
 ):
     """Freeze a full-k initial spectrum and protect occupied/near-edge bands.
 
@@ -27,6 +28,8 @@ def prepare_frozen_band_guard(
         raise ValueError('atoms_per_cell must be a positive integer')
     if type(extra_virtual_bands) is not int or extra_virtual_bands < 0:
         raise ValueError('extra_virtual_bands must be a nonnegative integer')
+    if type(allow_basis_expansion) is not bool:
+        raise ValueError('allow_basis_expansion must be a boolean')
     for value in (occupied_band_sum_limit_ev_per_atom, maximum_target_band_change_ev):
         if (isinstance(value, bool) or not isinstance(value, (int, float))
                 or not math.isfinite(value) or value <= 0):
@@ -63,23 +66,29 @@ def prepare_frozen_band_guard(
         changes, maximum = [], 0.
         details = []
         unprotected = []
+        added = []
         vbm, cbm = -math.inf, math.inf
         for record, before, after in zip(dataset.kpoints, reference, values):
             nocc = record.occupation.numel()
-            if before.shape != after.shape or after.numel() <= nocc:
+            if (after.numel() <= nocc or after.numel() < before.numel()
+                    or (before.shape != after.shape and not allow_basis_expansion)):
                 raise CandidateGuardError('frozen spectrum band count changed')
-            change = (after-before)*HARTREE_TO_EV
+            change = (after[:before.numel()]-before)*HARTREE_TO_EV
             changes.append(record.k_weight*float(torch.dot(change[:nocc], record.occupation)))
             maximum = max(maximum, float(change[:nocc+extra_virtual_bands].abs().max()))
             if diagnostics:
-                count = min(after.numel(), nocc+extra_virtual_bands)
+                count = min(before.numel(), nocc+extra_virtual_bands)
                 details.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
                     band_indices=list(range(1, count+1)),
                     signed_changes_ev=change[:count].tolist()))
                 if include_unprotected_bands:
                     unprotected.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
-                        band_indices=list(range(count+1, after.numel()+1)),
+                        band_indices=list(range(count+1, before.numel()+1)),
                         signed_changes_ev=change[count:].tolist()))
+                    if allow_basis_expansion:
+                        added.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
+                            band_indices=list(range(before.numel()+1,after.numel()+1)),
+                            energies_ev=(after[before.numel():]*HARTREE_TO_EV).tolist()))
             vbm = max(vbm, float(after[nocc-1])*HARTREE_TO_EV)
             cbm = min(cbm, float(after[nocc])*HARTREE_TO_EV)
         band_sum = math.fsum(changes)/atoms_per_cell
@@ -103,6 +112,9 @@ def prepare_frozen_band_guard(
                     maximum_unprotected_band_change_ev=max(
                         (abs(x) for row in unprotected for x in row['signed_changes_ev']), default=0.),
                     unprotected_band_scope='diagnostic_not_rejection_threshold')
+                if allow_basis_expansion:
+                    result.update(added_band_details=added,
+                        added_band_scope='no_original_counterpart_not_a_band_error')
         return result
 
     return guard
