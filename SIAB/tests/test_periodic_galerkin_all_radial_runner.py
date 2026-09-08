@@ -175,6 +175,21 @@ class AllRadialRunnerTest(unittest.TestCase):
             self.assertIs(actual.kpoints[0].occupied_projection_normalization,
                           expected.kpoints[0].occupied_projection_normalization)
 
+    def test_explicit_two_virtual_policy_reaches_cached_guard_without_legacy_gate(self):
+        with mock.patch.object(runner, "read_periodic_galerkin_dataset_cache", side_effect=self.cache_read), \
+                mock.patch.object(runner, "prepare_c_band_guard", return_value=self.guard) as factory:
+            self.load(band_guard_policy="occupied_plus_two_virtual_v1")
+        factory.assert_called_once_with(self.datasets[0], self.initial, policy="occupied_plus_two_virtual_v1")
+        self.prepare_guard.assert_not_called()
+
+    def test_explicit_two_virtual_policy_reaches_raw_guard(self):
+        with mock.patch.object(runner, "read_periodic_galerkin_dataset", side_effect=self.datasets), \
+                mock.patch.object(runner, "prepare_c_band_guard", return_value=self.guard) as factory:
+            runner.load_frozen_c(self.freeze, self.freeze_hash, self.initial, self.output,
+                                 band_guard_policy="occupied_plus_two_virtual_v1")
+        factory.assert_called_once_with(self.datasets[0], self.initial, policy="occupied_plus_two_virtual_v1")
+        self.prepare_guard.assert_not_called()
+
     def test_bad_cached_q_k_frequency_or_mother_counts_reject_before_guard(self):
         original = self.datasets[-1]
         for changed in (replace(original, selected_iq=1), replace(original, q_count=8),

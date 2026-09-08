@@ -18,6 +18,7 @@ from periodic_galerkin_basis import (
 )
 from periodic_galerkin_data import read_periodic_galerkin_dataset, _require, _sha256
 from periodic_galerkin_fit import optimize_periodic_galerkin_basis
+from c_response_band_policy import prepare_c_band_guard, validate_band_policy
 from periodic_galerkin_pbe_guard import prepare_frozen_band_guard
 from periodic_galerkin_dataset_cache import (
     write_periodic_galerkin_dataset_cache, read_periodic_galerkin_dataset_cache,
@@ -111,7 +112,11 @@ def _preflight_cache_index(path, digest, frozen, freeze_hash, initial, labels, i
 
 
 def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False, *,
-                  active_cache_index=None, active_cache_index_sha256=None):
+                  active_cache_index=None, active_cache_index_sha256=None,
+                  band_guard_policy='legacy_four_virtual'):
+    validate_band_policy(band_guard_policy)
+    guard_factory = prepare_frozen_band_guard if band_guard_policy == 'legacy_four_virtual' else prepare_c_band_guard
+    guard_options = {'atoms_per_cell': 2} if band_guard_policy == 'legacy_four_virtual' else {'policy': band_guard_policy}
     _cache_options(active_cache_index, active_cache_index_sha256, persist_active_cache)
     check(freeze, digest)
     frozen = json.loads(Path(freeze).read_text())
@@ -141,7 +146,7 @@ def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False, *
             for source, expected in _source_checks(item):
                 check(source, expected)
         # No physical evaluation until all eight cached q datasets have passed.
-        guard = prepare_frozen_band_guard(datasets[0], initial, atoms_per_cell=2)
+        guard = guard_factory(datasets[0], initial, **guard_options)
         save_json(output/'INITIAL_BAND_SCREEN.json', guard(initial))
         return tuple(datasets), records, guard
     for item, iq, multiplicity in zip(frozen['datasets'], indices, mult):
@@ -178,7 +183,7 @@ def load_frozen_c(freeze, digest, initial, output, persist_active_cache=False, *
                 status='success' if len(cache_records) == 8 else 'building',
                 scope='exact_active_dataset_derivative_not_new_reference', records=cache_records))
         if not datasets:
-            guard = prepare_frozen_band_guard(dataset, initial, atoms_per_cell=2)
+            guard = guard_factory(dataset, initial, **guard_options)
             save_json(output/'INITIAL_BAND_SCREEN.json', guard(initial))
         datasets.append(dataset)
         records.append(dict(label=item['label'], seconds=time.perf_counter()-started,

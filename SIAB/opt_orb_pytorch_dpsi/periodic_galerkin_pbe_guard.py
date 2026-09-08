@@ -54,12 +54,15 @@ def prepare_frozen_band_guard(
 
     reference = spectra(initial)
 
-    def guard(coefficients, *, diagnostics=False):
+    def guard(coefficients, *, diagnostics=False, include_unprotected_bands=False):
         if type(diagnostics) is not bool:
             raise ValueError('diagnostics must be a boolean')
+        if type(include_unprotected_bands) is not bool or (include_unprotected_bands and not diagnostics):
+            raise ValueError('unprotected-band output requires explicit diagnostics')
         values = spectra(coefficients)
         changes, maximum = [], 0.
         details = []
+        unprotected = []
         vbm, cbm = -math.inf, math.inf
         for record, before, after in zip(dataset.kpoints, reference, values):
             nocc = record.occupation.numel()
@@ -73,6 +76,10 @@ def prepare_frozen_band_guard(
                 details.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
                     band_indices=list(range(1, count+1)),
                     signed_changes_ev=change[:count].tolist()))
+                if include_unprotected_bands:
+                    unprotected.append(dict(source_ik=record.source_ik, target_ik=record.target_ik,
+                        band_indices=list(range(count+1, after.numel()+1)),
+                        signed_changes_ev=change[count:].tolist()))
             vbm = max(vbm, float(after[nocc-1])*HARTREE_TO_EV)
             cbm = min(cbm, float(after[nocc])*HARTREE_TO_EV)
         band_sum = math.fsum(changes)/atoms_per_cell
@@ -91,6 +98,11 @@ def prepare_frozen_band_guard(
         if diagnostics:
             result.update(target_band_details=details,
                 target_band_identity='sorted_eigenvalue_index_not_eigenvector_tracking')
+            if include_unprotected_bands:
+                result.update(unprotected_band_details=unprotected,
+                    maximum_unprotected_band_change_ev=max(
+                        (abs(x) for row in unprotected for x in row['signed_changes_ev']), default=0.),
+                    unprotected_band_scope='diagnostic_not_rejection_threshold')
         return result
 
     return guard
