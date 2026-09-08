@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import resource
+import subprocess
 import time
 
 import run_c_response_short_cycle as cycle
@@ -15,6 +16,24 @@ PARENT=ROOT/'stage-c-response-short-cycle-18af5697'
 RESULT_SHA='eec7d67694c61fe66eb60813c1119dc909b6ab7d0b9d657dfcf60aeffc4dd0e6'
 VERIFY_SHA='6b9b2928271e91ad8b659a26ab6a3795b731e849fa01b38da5c21af37d871cb7'
 SCOPE='three_single_radial_seed_frozen_body_screen'
+
+
+def admit_failed_cache_attempt():
+    failed=ROOT/'stage-c-radial-expansion-31623bc4'
+    screen_error=failed/'slurm-21911787.err'
+    cycle.admission.common._check_file(screen_error,
+        'e5a37fe02141b1d3af3467eb4ccb363f9f48875c1d6d275e3e3fc183f0dd9c49')
+    if ((failed/'STATUS').read_text()!='failed\n' or (failed/'result/RESULT.json').exists()
+            or any((failed/'result').glob('*/SCREEN.json'))):
+        raise ValueError('only the exact pre-candidate cache failure may recover')
+    rows=subprocess.check_output(['sacct','-n','-P','-j','21911787','--format=JobID,State,ExitCode'],
+        universal_newlines=True)
+    states={r.split('|')[0]:r.split('|')[1:3] for r in rows.splitlines() if r.strip()}
+    if states!={'21911787':['FAILED','1:0'],'21911787.batch':['FAILED','1:0'],
+                '21911787.extern':['COMPLETED','0:0']}:
+        raise ValueError('previous cache attempt must be terminal, never duplicate a live job')
+    return dict(job_id='21911787',stage=str(failed),failure='reference_cache_dataset_identity',
+        physical_candidates=0,scheduler=rows)
 
 
 def admit_parent():
@@ -46,12 +65,11 @@ def admit_parent():
 def run(stage,source):
     import torch
     import numpy as np
-    from periodic_galerkin_expansion import append_smooth_complement
+    from periodic_galerkin_expansion import append_smooth_complement,prepare_expansion_evaluation
     from periodic_galerkin_reduction import reprofile_active_primitives
     from periodic_galerkin_basis import write_periodic_optimizer_coefficients
     from periodic_galerkin_pbe_guard import prepare_frozen_band_guard
-    from periodic_galerkin_fit import CandidateGuardError,_prepare_block_contraction_caches,_global_rpa_loss
-    from periodic_galerkin_rpa import prepare_periodic_rpa_reference
+    from periodic_galerkin_fit import CandidateGuardError,_global_rpa_loss
     from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
     from run_c_combined_step import screen_candidate
     from export_periodic_orbitals import write_abacus_orbital,build_radial_orbitals
@@ -66,13 +84,12 @@ def run(stage,source):
     cycle.admission.common.validate_dataset_extent(datasets,old)
     load_seconds=time.perf_counter()-started
     datasets=tuple(prepare_periodic_occupied_reference(d) for d in datasets)
-    ref=prepare_periodic_rpa_reference(datasets)
     guard=prepare_frozen_band_guard(datasets[0],original,extra_virtual_bands=2,allow_basis_expansion=True)
     floor=parent['occupied_capture_floor']; weights=old['quarter']['training_weights']
     checker=cycle.admission.refresh.accepted
     def evaluate(coefficients,views):
         beginning=time.perf_counter()
-        views=_prepare_block_contraction_caches(views,coefficients,1)
+        views,ref=prepare_expansion_evaluation(views,coefficients)
         with torch.no_grad():
             band,capture=screen_candidate(views,coefficients,guard,floor)
             loss,capture,condition,_,rpa=_global_rpa_loss(views,coefficients,
@@ -147,12 +164,14 @@ def main():
     for n in ('screen_c_radial_expansion.py','run_c_radial_expansion.slurm'):
         if cycle.admission.refresh._WORKFLOW+n not in source['files']: raise ValueError('runner pin missing')
     admit_parent()
+    recovery=admit_failed_cache_attempt()
     if args.preflight_only: return
-    reservation=ROOT/('radial-expansion-'+RESULT_SHA[:16]+'-low-index-spd-v1')
+    reservation=ROOT/('radial-expansion-'+RESULT_SHA[:16]+'-low-index-spd-cachefix-v2')
     reservation.mkdir()
     cycle.endpoint._write_json(reservation/'RESERVATION.json',dict(stage=str(stage),parent_result_sha256=RESULT_SHA,
         job_id=os.environ['SLURM_JOB_ID'],scope=SCOPE,physics_runs=0))
     result=run(stage,source)
+    result['technical_recovery']=recovery
     cycle.admission.common.verify_source(stage,args.deployment_sha256,args.source_commit)
     admit_parent()
     result['deployment_sha256']=args.deployment_sha256

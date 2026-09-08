@@ -55,5 +55,27 @@ class ExpansionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'resolved complement'):
             append_smooth_complement(c,'C',0,max_index=2)
 
+    def test_reference_cache_binds_after_contraction_dataset_replacement(self):
+        from periodic_galerkin_expansion import prepare_expansion_evaluation
+        from periodic_galerkin_fit import _global_rpa_loss
+        from periodic_galerkin_rpa import prepare_periodic_rpa_reference
+        d,c=ActivePrimitiveReductionTest().fixture()
+        d=reduction.reduce_periodic_active_primitives(d,c)
+        old_reference=prepare_periodic_rpa_reference((d,))
+        views,reference=prepare_expansion_evaluation((d,),c)
+        options=dict(occupied_capture_tolerance=.01,
+            weights=dict(pi_weight=1.,trace_log_weight=1.,energy_weight=1.),frequency_batch_size=1)
+        with self.assertRaisesRegex(ValueError,'dataset identity'):
+            _global_rpa_loss(views,c,reference_cache=old_reference,**options)
+        actual=_global_rpa_loss(views,c,reference_cache=reference,**options)
+        direct=_global_rpa_loss(views,c,**options)
+        self.assertAlmostEqual(float(actual[0]),float(direct[0]),places=13)
+        big={'C':[x.clone() for x in c['C']]}; big['C'][0]=torch.eye(3,dtype=torch.float64)
+        profiled=reduction.reprofile_active_primitives(d,big)
+        expanded,new_reference=prepare_expansion_evaluation((profiled,),big)
+        measured=_global_rpa_loss(expanded,big,reference_cache=new_reference,**options)
+        self.assertTrue(torch.isfinite(measured[0]))
+        self.assertAlmostEqual(measured[-1]['reference_energy_ha'],actual[-1]['reference_energy_ha'],places=13)
+
 
 if __name__=='__main__': unittest.main()

@@ -3,6 +3,14 @@
 import torch
 
 
+def prepare_expansion_evaluation(datasets, coefficients):
+    """Bind the reference to the final dataset objects, after contraction setup."""
+    from periodic_galerkin_fit import _prepare_block_contraction_caches
+    from periodic_galerkin_rpa import prepare_periodic_rpa_reference
+    views = _prepare_block_contraction_caches(datasets, coefficients, 1)
+    return views, prepare_periodic_rpa_reference(views)
+
+
 def append_smooth_complement(coefficients, element, l, *, max_index=12):
     block=coefficients[element][l]
     if (block.ndim != 2 or block.dtype != torch.float64 or block.device.type != 'cpu'
