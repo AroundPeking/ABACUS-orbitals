@@ -2,6 +2,7 @@
 
 import copy
 import importlib
+import inspect
 from pathlib import Path
 import sys
 import unittest
@@ -375,6 +376,310 @@ class ConsecutiveTest(unittest.TestCase):
         self.assertEqual(len(result["history"]), 3)
         self.assertTrue(np.all(result["x"] < 1.))
         np.testing.assert_array_equal(problem.initial, np.zeros(12))
+
+
+class JointProblem(EuclideanProblem):
+    def __init__(self, loss_weight=.003):
+        super().__init__(3)
+        self.target = np.array([0., 1., 0.])
+        self.loss_target = np.array([0., -1., 2.])
+        self.loss_weight = loss_weight
+        self.loss_gradients = []
+
+    def record(self, x):
+        result = super().record(x)
+        residual = x - self.loss_target
+        result["loss"] = float(.5 * self.loss_weight * (residual @ residual))
+        return result
+
+    def loss_gradient(self, x):
+        self.loss_gradients.append(x.copy())
+        return self.loss_weight * (x - self.loss_target)
+
+
+class JointConsecutiveTest(unittest.TestCase):
+    def setUp(self):
+        self.run_consecutive = importlib.import_module(
+            "periodic_galerkin_consecutive").run_consecutive
+        self.assertIn("loss_gradient", inspect.signature(self.run_consecutive).parameters,
+                      "the optional exact loss-gradient callback is missing")
+
+    def test_energy_only_stalls_but_common_descent_accepts_multiple_points(self):
+        energy_only = JointProblem()
+        baseline = energy_only.run(self.run_consecutive, max_trials=5)
+        self.assertEqual(baseline["accepted_steps"], 0)
+        self.assertTrue(all(row["reason"] == "loss_increased" for row in baseline["history"]))
+        self.assertTrue(all(row["objective_gain"] > 0. for row in baseline["history"]))
+        problem = JointProblem()
+        result = problem.run(self.run_consecutive, max_steps=5,
+                             loss_gradient=problem.loss_gradient)
+        self.assertEqual(result["accepted_steps"], 5)
+        previous = problem.record(problem.initial)
+        for state in problem.checkpoints:
+            self.assertLess(state["record"]["objective"], previous["objective"])
+            self.assertLess(state["record"]["loss"], previous["loss"])
+            self.assertLessEqual(abs(state["record"]["pbe"]), .010)
+            previous = state["record"]
+        for row in result["history"]:
+            self.assertLess(row["predicted_step_loss_delta"], 0.)
+            self.assertLess(row["predicted_loss_delta"], 0.)
+            self.assertGreater(row["loss_gradient_norm"], 0.)
+
+    def test_analytic_mixture_uses_normalized_gradients_and_is_scale_independent(self):
+        expected_u = np.array([0., -1., 0.])
+        expected_v = np.array([0., 1., -2.]) / np.sqrt(5.)
+        difference = expected_u - expected_v
+        weight = np.clip(-(expected_v @ difference) / (difference @ difference), 0., 1.)
+        combination = weight * expected_u + (1. - weight) * expected_v
+        for loss_weight in (1e-7, .003, 1e4):
+            with self.subTest(loss_weight=loss_weight):
+                problem = JointProblem(loss_weight)
+                result = problem.run(self.run_consecutive, max_steps=1,
+                                     loss_gradient=problem.loss_gradient)
+                np.testing.assert_allclose(result["x"], -.02 * combination / np.linalg.norm(combination))
+                row = result["history"][0]
+                self.assertAlmostEqual(row["joint_mixing_weight"], weight)
+                self.assertAlmostEqual(row["joint_combination_norm"], np.linalg.norm(combination))
+                self.assertAlmostEqual(row["joint_angle_degrees"],
+                                       np.degrees(np.arccos(expected_u @ expected_v)))
+                self.assertAlmostEqual(row["feasible_loss_gradient_norm"], loss_weight * np.sqrt(5.))
+
+    def test_parallel_gradients_do_not_divide_by_zero(self):
+        problem = JointProblem()
+        problem.loss_target = problem.target.copy()
+        result = problem.run(self.run_consecutive, max_steps=3, loss_gradient=problem.loss_gradient)
+        self.assertEqual(result["accepted_steps"], 3)
+        self.assertAlmostEqual(result["history"][0]["joint_angle_degrees"], 0.)
+        self.assertAlmostEqual(result["history"][0]["joint_combination_norm"], 1.)
+
+    def test_antiparallel_or_tiny_combination_is_unresolved_not_convergence(self):
+        for offset in (0., 1e-12):
+            with self.subTest(offset=offset):
+                problem = JointProblem()
+                problem.loss_target = np.array([0., -1., offset])
+                result = problem.run(self.run_consecutive, loss_gradient=problem.loss_gradient)
+                self.assertEqual(result["status"], "unresolved_joint_direction")
+                self.assertEqual(result["stop_reason"], "unresolved_joint_direction")
+                self.assertEqual(result["trials"], 0)
+                self.assertEqual(problem.measured, [])
+                self.assertEqual(problem.checkpoints, [])
+                np.testing.assert_array_equal(result["best"]["x"], problem.initial)
+                self.assertNotIn("converged", result)
+                self.assertNotIn("stationary", result)
+
+    def test_both_gradients_refresh_in_order_only_at_new_centers(self):
+        problem = JointProblem()
+        cached = {}
+        events = []
+
+        def gradient(x):
+            events.append("energy")
+            cached["x"] = x.copy()
+            cached["loss_gradient"] = problem.loss_weight * (x - problem.loss_target)
+            return problem.gradient(x)
+
+        def loss_gradient(x):
+            events.append("loss")
+            np.testing.assert_array_equal(x, cached["x"])
+            problem.loss_gradients.append(x.copy())
+            x[:] = 999.
+            return cached["loss_gradient"]
+
+        def measure(x, trial_id):
+            events.append("measure")
+            return dict(gate="cheap_reject") if trial_id % 2 == 0 else problem.measure(x, trial_id)
+
+        result = problem.run(self.run_consecutive, max_steps=3, gradient=gradient,
+                             loss_gradient=loss_gradient, measure=measure)
+        self.assertEqual(result["accepted_steps"], 3)
+        self.assertEqual(result["trials"], 6)
+        self.assertEqual(events, ["energy", "loss", "measure", "measure"] * 3)
+        self.assertEqual(result["counts"]["gradient_calls"], 3)
+        self.assertEqual(result["counts"]["loss_gradient_calls"], 3)
+        for index, (energy_x, loss_x) in enumerate(zip(problem.gradients, problem.loss_gradients)):
+            center = problem.initial if index == 0 else problem.checkpoints[index - 1]["x"]
+            np.testing.assert_array_equal(energy_x, center)
+            np.testing.assert_array_equal(loss_x, center)
+        np.testing.assert_array_equal(cached["loss_gradient"],
+            problem.loss_weight * (cached["x"] - problem.loss_target))
+
+    def test_unresolved_combination_retains_diagnostic_without_new_trial(self):
+        for offset in (0., 1e-12):
+            with self.subTest(offset=offset):
+                problem = JointProblem()
+                problem.loss_target = np.array([0., -1., offset])
+                result = problem.run(self.run_consecutive, loss_gradient=problem.loss_gradient)
+                self.assertIn("direction_diagnostic", result)
+                diagnostic = result["direction_diagnostic"]
+                self.assertEqual(diagnostic["reason"], "joint_combination_tiny")
+                self.assertAlmostEqual(diagnostic["joint_angle_degrees"], 180.)
+                self.assertAlmostEqual(diagnostic["joint_mixing_weight"], .5)
+                self.assertLessEqual(diagnostic["joint_combination_norm"],
+                                     diagnostic["gradient_tolerance"])
+                for key in ("gradient_norm", "projected_gradient_norm", "feasible_gradient_norm",
+                            "pbe_gradient_norm", "loss_gradient_norm",
+                            "projected_loss_gradient_norm", "feasible_loss_gradient_norm"):
+                    self.assertTrue(np.isfinite(diagnostic[key]))
+                    self.assertGreater(diagnostic[key], 0.)
+                self.assertEqual(result["trials"], 0)
+                self.assertEqual(result["history"], [])
+                self.assertEqual(result["counts"]["gradient_calls"], 1)
+                self.assertEqual(result["counts"]["loss_gradient_calls"], 1)
+                self.assertEqual(problem.measured, [])
+                self.assertEqual(problem.evaluated, [])
+                self.assertEqual(problem.checkpoints, [])
+
+    def test_non_descending_joint_direction_retains_slope_evidence(self):
+        problem = JointProblem()
+        problem.loss_target = np.array([0., -1., 1e-12])
+        result = problem.run(self.run_consecutive, loss_gradient=problem.loss_gradient,
+                             gradient_tolerance=0.)
+        self.assertEqual(result["status"], "unresolved_joint_direction")
+        self.assertIn("direction_diagnostic", result)
+        diagnostic = result["direction_diagnostic"]
+        self.assertEqual(diagnostic["reason"], "non_descending_common_direction")
+        self.assertGreater(diagnostic["joint_combination_norm"], diagnostic["gradient_tolerance"])
+        self.assertEqual(diagnostic["objective_direction_slope"], 0.)
+        self.assertLess(diagnostic["loss_direction_slope"], 0.)
+        self.assertEqual(result["trials"], 0)
+        self.assertEqual(result["history"], [])
+        self.assertEqual(result["counts"]["gradient_calls"], 1)
+        self.assertEqual(result["counts"]["loss_gradient_calls"], 1)
+        self.assertEqual(problem.measured, [])
+
+    def test_default_none_does_not_add_direction_diagnostic(self):
+        for options in (dict(max_steps=1), dict(gradient=lambda x: np.zeros_like(x))):
+            problem = EuclideanProblem()
+            result = problem.run(self.run_consecutive, loss_gradient=None, **options)
+            self.assertNotIn("direction_diagnostic", result)
+            for state in problem.checkpoints:
+                self.assertNotIn("direction_diagnostic", state)
+
+    def test_inward_normal_reserves_half_of_descent_for_both_objectives(self):
+        for energy_normal, loss_normal in ((100., 10000.), (10000., 100.)):
+            for sign in (-1., 1.):
+                with self.subTest(energy_normal=energy_normal, loss_normal=loss_normal, sign=sign):
+                    problem = JointProblem()
+                    problem.target[0] = sign * energy_normal
+                    problem.loss_target[0] = sign * loss_normal
+                    problem.pbe = lambda x: float(sign * .0095 + .01 * x[0])
+                    problem.b = np.array([.01, 0., 0.])
+                    result = problem.run(self.run_consecutive, max_steps=1, max_trials=2,
+                                         loss_gradient=problem.loss_gradient)
+                    self.assertEqual(result["accepted_steps"], 1)
+                    step = result["x"] - problem.initial
+                    self.assertLess(sign * step[0], 0.)
+                    self.assertLess(abs(step[0]), .3 * .02)
+                    tangent_step = step.copy()
+                    tangent_step[0] = 0.
+                    for full_gradient in (-problem.target, -problem.loss_weight * problem.loss_target):
+                        self.assertLess(full_gradient @ tangent_step, 0.)
+                        self.assertLessEqual(full_gradient @ step, .5 * (full_gradient @ tangent_step))
+
+    def test_tiny_tangent_loss_uses_energy_direction_without_harmful_normal(self):
+        for normal, tangent in ((0., 0.), (-100., 0.), (-100., -1e-12), (100., 0.)):
+            with self.subTest(normal=normal, tangent=tangent):
+                problem = EuclideanProblem(3)
+                problem.target = np.array([0., 1., 0.])
+                problem.pbe = lambda x: float(.0095 + .01 * x[0])
+                problem.b = np.array([.01, 0., 0.])
+                full_loss = np.array([normal, tangent, 0.])
+                original_record = problem.record
+
+                def record(x):
+                    result = original_record(x)
+                    result["loss"] = float(10. + full_loss @ x)
+                    return result
+
+                problem.record = record
+                result = problem.run(self.run_consecutive, max_steps=1,
+                                     loss_gradient=lambda x: full_loss.copy())
+                self.assertEqual(result["accepted_steps"], 1)
+                row = result["history"][0]
+                self.assertIsNone(row["joint_angle_degrees"])
+                self.assertEqual(row["joint_mixing_weight"], 1.)
+                self.assertLessEqual(row["predicted_step_loss_delta"], 0.)
+                self.assertGreater(result["x"][1], 0.)
+                self.assertEqual(result["x"][2], 0.)
+                if normal < 0.:
+                    self.assertLessEqual(abs(result["x"][0]), 1e-15)
+
+    def test_actual_pbe_still_blocks_joint_descent_before_evaluate(self):
+        for measurement in (dict(gate="pass", pbe=.011), dict(gate="pass", pbe=-.011),
+                            dict(gate="pass", pbe=np.nan), dict(gate="fail", pbe=0.)):
+            with self.subTest(measurement=measurement):
+                problem = JointProblem()
+                result = problem.run(self.run_consecutive, max_trials=1,
+                    loss_gradient=problem.loss_gradient, measure=lambda x, i: measurement)
+                self.assertEqual(result["accepted_steps"], 0)
+                self.assertEqual(problem.evaluated, [])
+                self.assertEqual(problem.checkpoints, [])
+                self.assertLess(result["history"][0]["predicted_step_loss_delta"], 0.)
+
+    def test_actual_loss_gate_remains_strict_despite_predicted_joint_descent(self):
+        problem = JointProblem()
+        original_record = problem.record
+
+        def record(x):
+            result = original_record(x)
+            result["loss"] += 1000. * float(x @ x)
+            return result
+
+        problem.record = record
+        result = problem.run(self.run_consecutive, max_trials=2,
+            loss_gradient=lambda x: problem.loss_gradient(x) + 2000. * x)
+        self.assertEqual(result["accepted_steps"], 0)
+        self.assertEqual(problem.checkpoints, [])
+        self.assertEqual(len(problem.gradients), 1)
+        self.assertEqual(len(problem.loss_gradients), 1)
+        self.assertTrue(all(row["reason"] == "loss_increased" for row in result["history"]))
+        self.assertTrue(all(row["predicted_step_loss_delta"] < 0. for row in result["history"]))
+
+    def test_joint_gradients_are_projected_on_manifold_and_current_pbe_tangent(self):
+        problem = JointProblem()
+        problem.initial = np.array([1., 0., 0.])
+        problem.pbe = lambda x: 0.
+        problem.b = np.zeros(3)
+        projected = []
+
+        def project(x, v):
+            projected.append((x.copy(), v.copy()))
+            return v - x * (x @ v)
+
+        result = problem.run(self.run_consecutive, max_steps=3,
+            loss_gradient=problem.loss_gradient, project=project,
+            retract=lambda x, s: (x + s) / np.linalg.norm(x + s))
+        self.assertEqual(result["accepted_steps"], 3)
+        self.assertAlmostEqual(np.linalg.norm(result["x"]), 1., places=14)
+        for center in problem.gradients:
+            loss_g = problem.loss_weight * (center - problem.loss_target)
+            self.assertTrue(any(np.array_equal(x, center) and np.array_equal(v, loss_g)
+                                for x, v in projected))
+
+    def test_invalid_loss_gradient_and_projection_raise_before_measurement(self):
+        for bad in (np.zeros((1, 3)), np.zeros(2), np.full(3, np.nan),
+                    np.full(3, np.inf), np.ones(3) * (1. + 1j)):
+            problem = JointProblem()
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                problem.run(self.run_consecutive, loss_gradient=lambda x: bad)
+            self.assertEqual(problem.measured, [])
+        problem = JointProblem()
+        for invalid in (False, np.ones(3)):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                problem.run(self.run_consecutive, loss_gradient=invalid)
+        self.assertEqual(problem.gradients, [])
+
+        def project(x, v):
+            return np.full_like(v, np.nan) if np.array_equal(v, -problem.loss_weight * problem.loss_target) else v
+
+        with self.assertRaises(ValueError):
+            problem.run(self.run_consecutive, loss_gradient=problem.loss_gradient, project=project)
+        self.assertEqual(problem.measured, [])
+
+    def test_explicit_none_preserves_default_results(self):
+        default = EuclideanProblem().run(self.run_consecutive, max_steps=4)
+        explicit = EuclideanProblem().run(self.run_consecutive, max_steps=4, loss_gradient=None)
+        np.testing.assert_equal(default, explicit)
 
 
 if __name__ == "__main__":
