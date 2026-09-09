@@ -28,6 +28,9 @@ workflow=$stage/source/SIAB/example_C_sternheimer/periodic_basis_optimization/ga
 args=(--stage "$stage" --source-commit "$C_CONSECUTIVE_SOURCE_COMMIT" --deployment-sha256 "$C_CONSECUTIVE_DEPLOYMENT_SHA256")
 proposal=${C_PBE_PROPOSAL:-tangent}
 args+=(--pbe-proposal "$proposal")
+if [[ -n ${C_RPA_ABLATION:-} ]]; then
+ args+=(--ablation "$C_RPA_ABLATION")
+fi
 if [[ -n ${C_CONTINUATION_STAGE:-} ]]; then
  args+=(--continuation-stage "$C_CONTINUATION_STAGE")
 fi

@@ -47,7 +47,7 @@ def _dot(left, right):
         return _scalar(np.dot(left, right), "model dot product")
 
 
-def _record(value, pbe_limit, measured_pbe=None):
+def _record(value, pbe_limit, measured_pbe=None, enforce_pbe=True):
     if not isinstance(value, Mapping):
         raise ValueError("record must be a mapping")
     if value.get("gate", "pass") != "pass":
@@ -61,8 +61,9 @@ def _record(value, pbe_limit, measured_pbe=None):
         if "pbe" in result and _scalar(result["pbe"], "pbe") != measured_pbe:
             raise ValueError("evaluation pbe disagrees with actual measurement")
         result["pbe"] = measured_pbe
-    result["pbe"] = _scalar(result.get("pbe"), "pbe")
-    if abs(result["pbe"]) > pbe_limit:
+    result["pbe"] = (None if not enforce_pbe and result.get("pbe") is None
+                     else _scalar(result.get("pbe"), "pbe"))
+    if enforce_pbe and abs(result["pbe"]) > pbe_limit:
         raise ValueError("actual pbe exceeds pbe_limit")
     return result
 
@@ -72,7 +73,8 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                     max_trials=80, initial_radius=.02, max_radius=.04,
                     min_radius=1e-5, pbe_limit=.010, pbe_target=.0085,
                     gradient_tolerance=1e-10, gain_tolerance=1e-8,
-                    loss_gradient=None, pbe_proposal="tangent"):
+                    loss_gradient=None, pbe_proposal="tangent", enforce_pbe=True,
+                    require_nonincreasing_loss=True):
     """Optimize all coefficients with a fresh objective gradient at each center.
 
     ``gradient(x)`` returns the full objective derivative. ``project(x, v)`` is
@@ -131,7 +133,16 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
     repeated evaluation of the same model-capped candidate.
     Positive gains <=gain_tolerance are recorded as small_gain, not convergence
     or grounds to stop refreshing gradients. All callback arguments are copies.
+
+    Diagnostic ablations are opt-in. ``require_nonincreasing_loss=False`` removes
+    the observed mixed-loss veto, not finite-value checks. Use loss_gradient=None
+    as well for an energy-only direction. ``enforce_pbe=False`` disables the PBE
+    model, projection, secant updates and bound; pbe=None then means unmeasured,
+    never zero. A supplied PBE value must still be finite and self-consistent.
+    The adapter must separately record endpoint PBE and forbid physical release.
     """
+    if type(enforce_pbe) is not bool or type(require_nonincreasing_loss) is not bool:
+        raise ValueError("acceptance switches must be booleans")
     if not isinstance(pbe_proposal, str) or pbe_proposal not in ("tangent", "inequality"):
         raise ValueError("pbe_proposal must be tangent or inequality")
     for name, value in (("max_steps", max_steps), ("max_trials", max_trials)):
@@ -157,7 +168,7 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
         raise ValueError("loss_gradient must be callable or None")
     x = _vector(initial, "initial")
     b = _vector(pbe_gradient, "pbe_gradient", x.shape)
-    record = _record(initial_record, pbe_limit)
+    record = _record(initial_record, pbe_limit, enforce_pbe=enforce_pbe)
     counts = dict(accepted_steps=0, trials=0, gradient_calls=0,
                   measurements=0, evaluations=0, secant_updates=0)
     if loss_gradient is not None:
@@ -190,12 +201,14 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                 counts["loss_gradient_calls"] += 1
                 loss_g = _vector(loss_gradient(x.copy()), "loss_gradient", x.shape)
         pg = _vector(project(x.copy(), g.copy()), "projected gradient", x.shape)
-        pb = _vector(project(x.copy(), b.copy()), "projected pbe_gradient", x.shape)
+        pb = (_vector(project(x.copy(), b.copy()), "projected pbe_gradient", x.shape)
+              if enforce_pbe else np.zeros_like(x))
         g_norm, pg_norm, b_norm = _norm(g), _norm(pg), _norm(pb)
         if pg_norm <= gradient_tolerance:
             return snapshot("feasible_direction_unresolved", "projected_gradient_tiny")
         normal_axis = pb / b_norm if b_norm > gradient_tolerance else np.zeros_like(x)
-        modes = (False, True) if pbe_proposal == "inequality" else (True,)
+        modes = ((False,) if not enforce_pbe else
+                 (False, True) if pbe_proposal == "inequality" else (True,))
         for pbe_tangent in modes:
             projection_axis = normal_axis if pbe_tangent else np.zeros_like(x)
             feasible = pg - _dot(pg, projection_axis) * projection_axis
@@ -239,7 +252,7 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
             normal_length = 0.
             if not pbe_tangent:
                 length = radius
-                slope = _dot(b, direction)
+                slope = _dot(b, direction) if enforce_pbe else 0.
                 if slope != 0.:
                     room = pbe_limit - np.sign(slope) * record["pbe"]
                     if abs(slope) * radius > .5 * room:
@@ -271,7 +284,9 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                    small_gain=False, secant_updated=False)
         if joint is not None:
             row.update(joint, predicted_step_loss_delta=_dot(loss_g, step), predicted_loss_delta=None)
-        if pbe_proposal == "inequality":
+        if not enforce_pbe:
+            row.update(pbe_proposal_used="disabled_diagnostic")
+        elif pbe_proposal == "inequality":
             row.update(pbe_proposal_used="tangent_fallback" if pbe_tangent else "interior_inequality",
                        pbe_model_slack_fraction=.5,
                        predicted_step_pbe=record["pbe"] + _dot(b, step))
@@ -286,7 +301,8 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
             dx = _vector(candidate - x, "retracted displacement", x.shape)
             row["x"] = candidate.copy()
             row["predicted_objective_delta"] = _dot(g, dx)
-            row["predicted_pbe"] = _scalar(record["pbe"] + _dot(b, dx), "predicted pbe")
+            if enforce_pbe:
+                row["predicted_pbe"] = _scalar(record["pbe"] + _dot(b, dx), "predicted pbe")
             if loss_g is not None:
                 row["predicted_loss_delta"] = _dot(loss_g, dx)
             if row["predicted_objective_delta"] >= 0.:
@@ -296,13 +312,15 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
             measured = measure(candidate.copy(), row["trial_id"])
             row["measurement"] = deepcopy(measured)
             actual_pbe = None
+            invalid_pbe = False
             if isinstance(measured, Mapping):
                 try:
                     actual_pbe = _scalar(measured.get("pbe"), "actual pbe")
                 except ValueError:
-                    pass
+                    invalid_pbe = measured.get("pbe") is not None
             if actual_pbe is not None:
                 row["actual_pbe"] = actual_pbe
+            if actual_pbe is not None and enforce_pbe:
                 error = _scalar(actual_pbe - row["predicted_pbe"], "PBE prediction error")
                 row["pbe_prediction_error"] = error
                 # Use the ambient retracted chord, never coefficients in old directions.
@@ -318,16 +336,16 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
             if not isinstance(measured, Mapping) or measured.get("gate") != "pass":
                 row["reason"] = ("cheap_reject" if isinstance(measured, Mapping)
                                  and measured.get("gate") == "cheap_reject" else "measurement_failed")
-            elif actual_pbe is None:
+            elif invalid_pbe or (enforce_pbe and actual_pbe is None):
                 row["reason"] = "invalid_actual_pbe"
-            elif abs(actual_pbe) > pbe_limit:
+            elif enforce_pbe and abs(actual_pbe) > pbe_limit:
                 row["reason"] = "pbe_limit_exceeded"
             else:
                 counts["evaluations"] += 1
                 evaluated = evaluate(candidate.copy(), row["trial_id"])
                 row["evaluation"] = deepcopy(evaluated)
                 try:
-                    trial_record = _record(evaluated, pbe_limit, actual_pbe)
+                    trial_record = _record(evaluated, pbe_limit, actual_pbe, enforce_pbe)
                 except ValueError as error:
                     row["reason"] = "invalid_evaluation"
                     row["detail"] = str(error)
@@ -336,7 +354,7 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                     row["objective_gain"] = gain
                     if gain <= 0.:
                         row["reason"] = "objective_not_improved"
-                    elif trial_record["loss"] > record["loss"]:
+                    elif require_nonincreasing_loss and trial_record["loss"] > record["loss"]:
                         row["reason"] = "loss_increased"
                     else:
                         row.update(accepted=True, reason="accepted", small_gain=gain <= gain_tolerance)

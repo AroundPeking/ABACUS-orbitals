@@ -56,6 +56,22 @@ class ResponseBandPolicyTest(unittest.TestCase):
             actual = prepare_c_band_guard(dataset, initial)(initial, diagnostics=diagnostics)
             self.assertEqual(actual, expected)
 
+    def test_response_policy_forwards_free_accuracy_to_real_screen(self):
+        from c_response_band_policy import prepare_c_band_guard, RESPONSE
+        from run_c_combined_step import screen_candidate
+        dataset, initial = self.fixture()
+        guard = prepare_c_band_guard(dataset, initial, policy=RESPONSE)
+        trial = {'C': [initial['C'][0].clone()]}
+        trial['C'][0][5,1] = .1
+        with self.assertRaises(CandidateGuardError):
+            screen_candidate((dataset,),trial,guard,1e-12)
+        result,capture = screen_candidate((dataset,),trial,
+            lambda c: guard(c,enforce_accuracy=False),1e-12,enforce_band_accuracy=False)
+        self.assertFalse(result['gate'])
+        self.assertGreater(result['maximum_target_band_change_ev'],.05)
+        self.assertGreater(capture,1e-12)
+        with self.assertRaises(ValueError):guard(trial,enforce_accuracy='false')
+
     def test_invalid_policy_fails_before_loading_cache(self):
         import optimize_c_all_radial_fast as runtime
         for policy in ('two', 2, None, True):

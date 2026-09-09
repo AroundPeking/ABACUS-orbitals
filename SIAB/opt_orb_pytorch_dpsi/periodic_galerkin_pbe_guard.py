@@ -57,11 +57,14 @@ def prepare_frozen_band_guard(
 
     reference = spectra(initial)
 
-    def guard(coefficients, *, diagnostics=False, include_unprotected_bands=False):
+    def guard(coefficients, *, diagnostics=False, include_unprotected_bands=False,
+              enforce_accuracy=True):
         if type(diagnostics) is not bool:
             raise ValueError('diagnostics must be a boolean')
         if type(include_unprotected_bands) is not bool or (include_unprotected_bands and not diagnostics):
             raise ValueError('unprotected-band output requires explicit diagnostics')
+        if type(enforce_accuracy) is not bool:
+            raise ValueError('enforce_accuracy must be a boolean')
         values = spectra(coefficients)
         changes, maximum = [], 0.
         details = []
@@ -102,7 +105,12 @@ def prepare_frozen_band_guard(
                       target_band_change_limit_ev=maximum_target_band_change_ev,
                       k_weight_sum=weight_sum,
                       k_weight_convention='ABACUS_spin_included_no_renormalization')
-        if not result['gate']:
+        if (not all(math.isfinite(x) for x in (band_sum,maximum,minimum_gap))
+                or minimum_gap <= 0.):
+            raise CandidateGuardError('nonfinite frozen spectrum or nonpositive indirect gap')
+        # Free-energy diagnostics report accuracy drift without hiding the
+        # original gate result; numerical admissibility remains mandatory.
+        if enforce_accuracy and not result['gate']:
             raise CandidateGuardError('frozen occupied/target-band screen rejected candidate')
         if diagnostics:
             result.update(target_band_details=details,

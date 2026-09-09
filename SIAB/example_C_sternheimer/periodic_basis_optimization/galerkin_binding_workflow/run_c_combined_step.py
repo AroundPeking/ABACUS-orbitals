@@ -32,10 +32,18 @@ ACCEPTANCE_SHA = '92a69a0213c7ecf891ad13a5036fcdda11457cd1a2ce9c3861f0a4c4ba1f99
 DIRECTIONS_SHA = 'e8265dc8b871d3a25b1ff500e3eee7999ff77ba1cf571d0be1e413ec0a22ccd9'
 
 
-def screen_candidate(datasets, coefficients, guard, floor):
+def screen_candidate(datasets, coefficients, guard, floor, *, enforce_band_accuracy=True):
+    if type(enforce_band_accuracy) is not bool:
+        raise ValueError('explicit boolean band accuracy switch required')
     bands = guard(coefficients)
-    if bands.get('gate') is not True:
+    if enforce_band_accuracy and bands.get('gate') is not True:
         raise CandidateGuardError('band guard failed')
+    if not enforce_band_accuracy:
+        for key in ('minimum_gap_ev','maximum_target_band_change_ev','occupied_band_sum_change_ev_per_atom'):
+            if not math.isfinite(bands[key]):
+                raise CandidateGuardError('nonfinite band diagnostic')
+        if bands['minimum_gap_ev'] <= 0:
+            raise CandidateGuardError('candidate gap is not positive')
     try:
         capture = _minimum_occupied_capture(datasets, coefficients,
             relative_rank_tolerance=1e-12, condition_limit=1e12)

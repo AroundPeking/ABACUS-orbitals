@@ -97,16 +97,20 @@ def _bounded_preparation(root, digest):
     return combined._prepared(root, digest)
 
 
-def _band_guard(guard):
-    _expect(guard, dict(gate=True, scf_pbe_gate="pending",
+def _band_guard(guard, *, enforce_accuracy=True):
+    if type(enforce_accuracy) is not bool:
+        raise ValueError('explicit boolean band accuracy switch required')
+    _expect(guard, dict(scf_pbe_gate="pending",
         scope="frozen_h_band_screen_not_scf_energy",
         k_weight_convention="ABACUS_spin_included_no_renormalization"), "band guard")
     for key, value in (("k_weight_sum", 2.), ("occupied_band_sum_limit_ev_per_atom", .01),
                        ("target_band_change_limit_ev", .05)):
         _near(guard.get(key), value, "band guard " + key)
-    if (abs(_number(guard.get("occupied_band_sum_change_ev_per_atom"), "occupied band change")) > .01
-            or not 0 <= _number(guard.get("maximum_target_band_change_ev"), "target band change") <= .05
-            or _number(guard.get("minimum_gap_ev"), "minimum gap") <= 0):
+    band_sum=_number(guard.get("occupied_band_sum_change_ev_per_atom"), "occupied band change")
+    shift=_number(guard.get("maximum_target_band_change_ev"), "target band change")
+    gap=_number(guard.get("minimum_gap_ev"), "minimum gap")
+    if (gap <= 0 or shift < 0 or (enforce_accuracy and
+            (guard.get('gate') is not True or abs(band_sum) > .01 or shift > .05))):
         raise ValueError("numerical frozen band protection failed")
 
 
@@ -115,14 +119,14 @@ def _capture(value, floor):
         raise ValueError("original occupied capture floor failed")
 
 
-def _record(record, floor, weights):
+def _record(record, floor, weights, *, enforce_band_accuracy=True):
     _expect(record, dict(energy_quantity="frozen_body_RPA_correlation_not_PBE_total"), "RPA record")
     if _number(record.get("loss"), "loss") < 0:
         raise ValueError("negative loss")
     _capture(record.get("minimum_occupied_capture"), floor)
     if not 0 < _number(record.get("maximum_overlap_condition"), "overlap condition") <= 1e12:
         raise ValueError("overlap condition gate failed")
-    _band_guard(record.get("coefficient_guard"))
+    _band_guard(record.get("coefficient_guard"),enforce_accuracy=enforce_band_accuracy)
     rpa = record.get("rpa")
     _expect(rpa, dict(complete_q_weight=True), "RPA integration")
     names = ("pi", "trace_log", "energy")

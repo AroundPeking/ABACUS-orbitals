@@ -83,6 +83,40 @@ class FrozenBandGuardTest(unittest.TestCase):
         with self.assertRaises(CandidateGuardError):
             guard({'C': [changed]})
 
+    def test_free_accuracy_reports_drift_but_keeps_finite_positive_gap(self):
+        dataset, initial = self.fixture()
+        guard = prepare_frozen_band_guard(dataset, initial)
+        changed = initial['C'][0].clone()
+        changed[2, 1] = .5
+        from periodic_galerkin_fit import CandidateGuardError
+        with self.assertRaises(CandidateGuardError):
+            guard({'C': [changed]})
+        result = guard({'C': [changed]}, enforce_accuracy=False)
+        self.assertFalse(result['gate'])
+        self.assertGreater(result['maximum_target_band_change_ev'], .05)
+        self.assertGreater(result['minimum_gap_ev'], 0.)
+        from run_c_combined_step import screen_candidate
+        _, capture = screen_candidate((dataset,), {'C': [changed]},
+            lambda c: guard(c, enforce_accuracy=False), 1e-12,
+            enforce_band_accuracy=False)
+        self.assertGreater(capture, 1e-12)
+        for value in (float('nan'), float('inf')):
+            invalid = changed.clone(); invalid[2, 1] = value
+            with self.assertRaises((CandidateGuardError, RuntimeError, ValueError)):
+                guard({'C': [invalid]}, enforce_accuracy=False)
+        with self.assertRaises(ValueError):
+            guard(initial, enforce_accuracy='false')
+
+    def test_free_accuracy_still_rejects_indirect_band_overlap(self):
+        dataset, initial = self.fixture()
+        first = replace(dataset.kpoints[0], k_weight=1.)
+        second = replace(first, source_ik=2, target_ik=2,
+                         hamiltonian_ha=first.hamiltonian_ha+2*first.overlap)
+        guard = prepare_frozen_band_guard(replace(dataset,kpoints=(first,second)), initial)
+        from periodic_galerkin_fit import CandidateGuardError
+        with self.assertRaises(CandidateGuardError):
+            guard(initial, enforce_accuracy=False)
+
     def test_invalid_limits_and_missing_records_are_rejected(self):
         dataset, initial = self.fixture()
         for options in ({'atoms_per_cell': 0}, {'atoms_per_cell': True},

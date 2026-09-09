@@ -21,6 +21,12 @@ SCOPE = 'consecutive_eight_radial_actual_PBE_constrained_frozen_body'
 COMMON_SCOPE = 'common_descent_eight_radial_actual_PBE_constrained_frozen_body'
 INEQUALITY_SCOPE = 'inequality_common_descent_eight_radial_actual_PBE_constrained_frozen_body'
 CONTINUATION_PARENTS = {
+    'stage-c-pbe-inequality-b9494967': dict(
+        result_sha256='91a9a858e678999d368cad3094478b6761d59e52f2123d07f5942bd5e7c4279e',
+        verification_sha256='6cfeddc7bb671f6853ed9f97967ea6392352a7167429268250ff67c3a2b3467c',
+        source_commit='b949496722cb3e7ae0be1eb8518d254ca389250c',job_id='21917546',
+        verification_status='verified_common_descent_frozen_body_not_SOS_qavg_or_GW',
+        scope=INEQUALITY_SCOPE,common_descent=True),
     'stage-c-consecutive-radials-7d8eef3c': dict(
         result_sha256='4dbed5d6f07e72487677565f06f384e53f461c68c2f098ee8283395951bae511',
         verification_sha256='4d21d1cf673b35774ceb7b128d9b30cc2ddd4fe9423be2f9391d1e4edf1b37c4',
@@ -44,10 +50,11 @@ def finite(x):
     return float(x)
 
 
-def controller_record(record, pbe):
+def controller_record(record, pbe, *, allow_unmeasured_pbe=False):
     r = record['rpa']
     return dict(objective=abs(finite(r['candidate_energy_ha'])-finite(r['reference_energy_ha'])),
-                loss=finite(record['loss']), pbe=finite(pbe))
+                loss=finite(record['loss']),
+                pbe=None if allow_unmeasured_pbe and pbe is None else finite(pbe))
 
 
 def validate_parent_trial(row):
@@ -202,9 +209,21 @@ def continuation_parent(result_sha, verification_sha, continuation_stage=None, p
     return prior.resolve(),dict(spec)
 
 
-def run_configuration(continuation, pbe_proposal='tangent'):
+def run_configuration(continuation, pbe_proposal='tangent', *, ablation=None):
     if pbe_proposal not in ('tangent','inequality'):
         raise ValueError('unknown PBE proposal mode')
+    if ablation is not None:
+        if ablation not in ('energy_pbe','energy_free') or continuation is None or pbe_proposal!='inequality':
+            raise ValueError('explicit pinned energy ablation continuation required')
+        prior,_=continuation_parent(continuation['result_sha256'],continuation['verification_sha256'],
+                                    continuation.get('continuation_stage'),pbe_proposal)
+        if prior.name!='stage-c-pbe-inequality-b9494967':
+            raise ValueError('both ablations must start at the verified inequality FINAL')
+        return dict(scope=ablation+'_eight_radial_frozen_body_diagnostic',
+            settings=dict(max_steps=20,max_trials=60,initial_radius=.02,max_radius=.10,
+                          pbe_proposal='inequality',enforce_pbe=ablation=='energy_pbe',
+                          require_nonincreasing_loss=False),
+            reservation_key=continuation['result_sha256'][:16]+'-'+ablation+'-v1')
     if continuation is None:
         if pbe_proposal!='tangent':
             raise ValueError('inequality requires verified continuation, never recalibration')
@@ -311,8 +330,10 @@ def admit_continuation(result_sha, verification_sha, continuation_stage=None, pb
     return cycle,old,parent,restart
 
 
-def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_proposal='tangent'):
-    configuration=run_configuration(continuation,pbe_proposal)
+def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_proposal='tangent', ablation=None):
+    configuration=run_configuration(continuation,pbe_proposal,ablation=ablation)
+    free_pbe=ablation=='energy_free'
+    common_descent=continuation is not None and ablation is None
     import numpy as np
     import torch
     from periodic_galerkin_consecutive import run_consecutive
@@ -360,13 +381,18 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
     datasets, records, guard = rt.load_frozen_c(old['freeze_path'],old['result']['freeze_sha256'],original,out,
         active_cache_index=old['active_cache_index_path'],
         active_cache_index_sha256=old['result']['active_cache_index_sha256'],band_guard_policy=cycle.RESPONSE)
+    if free_pbe:
+        accuracy_guard = guard
+        def guard(c):
+            return accuracy_guard(c,enforce_accuracy=False)
     cycle.admission.common.validate_dataset_extent(datasets,old)
     with torch.no_grad():
         datasets = tuple(prepare_periodic_occupied_reference(d) for d in datasets)
         datasets = _prepare_block_contraction_caches(datasets,initial,1)
         reference = prepare_periodic_rpa_reference(datasets)
     load_seconds = time.perf_counter()-load_start
-    floor, weights = old['occupied_capture_floor'], old['quarter']['training_weights']
+    floor = 1e-12 if free_pbe else old['occupied_capture_floor']
+    weights = old['quarter']['training_weights']
     batch_size = old['quarter']['configuration']['frequency_batch_size']
     inputs, orbital_name, log_name = cycle.frozen_pbe_bundle(old)
     checker = cycle.admission.refresh.accepted
@@ -398,20 +424,20 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         for prefix,key in (('rpa','candidate_energy_ha'),('reference_rpa','reference_energy_ha')):
             for suffix,divisor in (('cell',1),('c',2)):
                 record[prefix+'_correlation_energy_ev_per_'+suffix] = record['rpa'][key]*cycle.endpoint.HARTREE_TO_EV/divisor
-        checker._record(record,floor,weights)
+        checker._record(record,floor,weights,enforce_band_accuracy=not free_pbe)
         checker._same_grid_reference(record,parent['rpa']['candidate'])
         return record
     def fresh_gradient(x):
         c = unflatten(x)
         diagnostic = evaluate_radial_gradients(datasets,c,occupied_capture_tolerance=1-floor,
-            frequency_batch_size=batch_size,weights=weights,energy_only=continuation is None)
-        counts['forward'] += 1; counts['backward'] += 1 if continuation is None else 2
+            frequency_batch_size=batch_size,weights=weights,energy_only=not common_descent)
+        counts['forward'] += 1; counts['backward'] += 2 if common_descent else 1
         record = decorate(diagnostic,c)
         vector = flatten({'C':[torch.tensor(r['horizontal_gradient'],dtype=torch.float64)
                               for r in diagnostic['energy_gradient']['channels']]})
         if record['rpa']['candidate_energy_ha'] < record['rpa']['reference_energy_ha']:
             vector *= -1
-        if continuation is not None:
+        if common_descent:
             loss_cache.update(x=x.copy(), vector=flatten({'C':[
                 torch.tensor(r['horizontal_gradient'],dtype=torch.float64)
                 for r in diagnostic['loss_gradient']['channels']]}))
@@ -432,12 +458,12 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         if sha((out/'INITIAL'/name).read_bytes()) != parent['proposal'][key]:
             raise ValueError('parent export changed')
 
-    def measure_named(x, name):
+    def measure_named(x, name, *, force_scf=False):
         c,slot = unflatten(x),out/name
         hashes = export(slot,c)
         try:
             with torch.no_grad():
-                bands,capture = screen_candidate(datasets,c,guard,floor)
+                bands,capture = screen_candidate(datasets,c,guard,floor,enforce_band_accuracy=not free_pbe)
         except CandidateGuardError as error:
             sample = dict(gate='cheap_reject',reason=str(error),**hashes)
             write(slot/'MEASUREMENT.json',sample)
@@ -446,7 +472,15 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
             cheap_gate=bands,capture=capture,occupied_capture_floor=floor,
             parent_result_sha256=parent_sha,source_commit=source['source_commit'],
             physical_release_gate='hold',**hashes)
+        proposal.update(ablation=ablation,actual_pbe_enforced=not free_pbe,
+                        mixed_loss_monotone=configuration['settings'].get('require_nonincreasing_loss',True))
         write(slot/'CANDIDATE.json',proposal)
+        if free_pbe and not force_scf:
+            sample=dict(gate='pass',pbe=None,actual_pbe=None,pbe_gate='not_measured_diagnostic',
+                        name=name,candidate_sha256=sha((slot/'CANDIDATE.json').read_bytes()),**hashes)
+            points[name]=dict(x=x.copy(),sample=sample)
+            write(slot/'MEASUREMENT.json',sample)
+            return sample
         newinputs = dict(inputs); newinputs[orbital_name]=(slot/'C_3s3p2d.orb').read_bytes()
         counts['actual_scf'] += 1
         try:
@@ -497,7 +531,8 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
                    calibration_scf_count=0,model='ambient_secant_not_exact_PBE_derivative')
     write(out/'PBE_MODEL_INITIAL.json',dict(model,
         coordinate_metric='Euclidean_coefficient_signed_QR_frame',
-        complete_PBE_derivative=False,actual_SCF_required=True))
+        complete_PBE_derivative=False,actual_SCF_required=not free_pbe,
+        used_for_proposals=not free_pbe))
     first_gradient = [g0]
     current_record = [first]
     def gradient(x):
@@ -524,7 +559,7 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         record=decorate(dict(loss=float(loss),minimum_occupied_capture=capture,
                              maximum_overlap_condition=condition,rpa=rpa),c)
         write(out/name/'GALERKIN.json',record); point['record']=record
-        return controller_record(record,point['sample']['pbe'])
+        return controller_record(record,point['sample']['pbe'],allow_unmeasured_pbe=free_pbe)
     def checkpoint(state):
         accepted = [p for p in points.values() if np.array_equal(p['x'],state['x']) and 'record' in p]
         if len(accepted)!=1:
@@ -541,9 +576,10 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         write(slot/'CHECKPOINT.json',payload)
         print(json.dumps(dict(accepted_step=state['counts']['accepted_steps'],trial_count=state['counts']['trials'],
             body_error_ev_per_c=state['record']['objective']*cycle.endpoint.HARTREE_TO_EV/2,
-            pbe_mev_per_c=1000*state['record']['pbe'],radius=state['radius'])),flush=True)
+            pbe_mev_per_c=None if state['record']['pbe'] is None else 1000*state['record']['pbe'],
+            radius=state['radius'])),flush=True)
     settings=dict(configuration['settings'])
-    if continuation is not None:
+    if common_descent:
         settings['loss_gradient']=loss_gradient
     state=run_consecutive(x0,controller_record(first,parent['actual_pbe']['energy_delta_ev_per_c']),
         pbe_gradient,gradient=gradient,retract=retract,project=project,measure=measure,evaluate=evaluate,
@@ -553,6 +589,13 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         _,terminal=fresh_gradient(state['x'])
         cycle.endpoint._match_parent_initial(terminal,current_record[0])
         current_record[0]=terminal
+    endpoint_pbe=None
+    if free_pbe:
+        if state['counts']['accepted_steps']:
+            endpoint_pbe=measure_named(state['x'],'endpoint_pbe',force_scf=True)
+        else:
+            endpoint_pbe=dict(gate='pass',pbe=parent['actual_pbe']['energy_delta_ev_per_c'],
+                actual_pbe=parent['actual_pbe'],reused_from_result_sha256=parent_sha)
     state=json_safe(state)
     return dict(status='success',scope=scope,optimization=state,initial=first,initial_actual_pbe=parent['actual_pbe'],
         gradients=gradients,
@@ -564,7 +607,10 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_prop
         peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,nu=[3,3,2,0,0],fixed_nu=[0]*5,
         ao_per_C=22,delta_st_runs=0,ordinary_sos='not_run',gw='not_run',physical_release_gate='hold',
         calibration_scf_count=16 if continuation is None else 0,
-        common_descent=continuation is not None,
+        common_descent=common_descent,
+        ablation=ablation,endpoint_pbe=endpoint_pbe,
+        actual_pbe_enforced=not free_pbe,
+        mixed_loss_monotone=configuration['settings'].get('require_nonincreasing_loss',True),
         pbe_proposal=pbe_proposal,
         continuation_stage=None if continuation is None else continuation['continuation_stage'],
         full_constrained_stationarity='not_established')
@@ -579,6 +625,7 @@ def main():
     p.add_argument('--continuation-verification-sha256')
     p.add_argument('--continuation-stage')
     p.add_argument('--pbe-proposal',choices=('tangent','inequality'),default='tangent')
+    p.add_argument('--ablation',choices=('energy_pbe','energy_free'))
     args=p.parse_args(); stage=Path(args.stage).resolve()
     restart=None
     if (args.continuation_result_sha256 or args.continuation_verification_sha256
@@ -600,19 +647,20 @@ def main():
             or Path(os.environ.get('I_MPI_PMI_LIBRARY','/missing')).resolve()!=Path(runtime['mpi_library']).resolve()):
         raise ValueError('frozen one node/four ranks/seven OMP layout required')
     cycle.frozen_pbe_bundle(old)
+    configuration=run_configuration(restart,args.pbe_proposal,ablation=args.ablation)
     if args.preflight_only:
         return
-    configuration=run_configuration(restart,args.pbe_proposal)
     reservation=ROOT/('consecutive-radials-'+configuration['reservation_key'])
     reservation.mkdir()
     cycle.endpoint._write_json(reservation/'RESERVATION.json',dict(stage=str(stage),
-        scope=configuration['scope'],pbe_proposal=args.pbe_proposal,
+        scope=configuration['scope'],pbe_proposal=args.pbe_proposal,ablation=args.ablation,
         continuation_stage=None if restart is None else restart['continuation_stage'],
         parent_sha256=PARENT_SHA if restart is None else restart['result_sha256'],job_id=os.environ['SLURM_JOB_ID'],
         maximum_accepted_steps=configuration['settings']['max_steps'],maximum_trials=configuration['settings']['max_trials'],
         calibration_scf_count=16 if restart is None else 0))
     result=run(stage,source,cycle,old,parent,['srun','--mpi=pmi2','--cpu-bind=none','-n','4',runtime['abacus_binary']],
-               continuation=restart,pbe_proposal=args.pbe_proposal)
+               continuation=restart,pbe_proposal=args.pbe_proposal,
+               **({} if args.ablation is None else dict(ablation=args.ablation)))
     if restart is None:
         admit_parent()
     else:

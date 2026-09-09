@@ -18,9 +18,9 @@ def prepare_c_band_guard(dataset, initial, *, policy=LEGACY):
     if policy == LEGACY:
         return base
 
-    def guard(coefficients, *, diagnostics=False):
+    def guard(coefficients, *, diagnostics=False, enforce_accuracy=True):
         result = base(coefficients, diagnostics=diagnostics,
-                      include_unprotected_bands=diagnostics)
+                      include_unprotected_bands=diagnostics,enforce_accuracy=enforce_accuracy)
         result.update(band_guard_policy=RESPONSE, protected_virtual_bands=2,
                       first_two_virtual_accuracy='provisional_not_reference_validated',
                       higher_virtual_policy='diagnostic_only',
