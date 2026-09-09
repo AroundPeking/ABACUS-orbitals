@@ -682,5 +682,126 @@ class JointConsecutiveTest(unittest.TestCase):
         np.testing.assert_equal(default, explicit)
 
 
+
+class InequalityProposalTest(unittest.TestCase):
+    def setUp(self):
+        self.run_consecutive = importlib.import_module(
+            "periodic_galerkin_consecutive").run_consecutive
+
+    def problem(self, sign=1., offset=.008):
+        p = JointProblem(loss_weight=.1)
+        p.target = np.array([sign, .2, 0.])
+        p.loss_target = np.array([sign, 0., .2])
+        p.pbe = lambda x: float(sign * offset + x[0])
+        return p
+
+    def test_interior_releases_normal_component_and_caps_both_signed_boundaries(self):
+        for sign in (1., -1.):
+            p = self.problem(sign)
+            result = p.run(self.run_consecutive, pbe_proposal="inequality",
+                loss_gradient=p.loss_gradient, max_steps=1, initial_radius=.02)
+            row = result["history"][0]
+            self.assertEqual(result["accepted_steps"], 1)
+            self.assertAlmostEqual(result["x"][0], sign * .001, places=14)
+            self.assertAlmostEqual(result["record"]["pbe"], sign * .009, places=14)
+            self.assertEqual(row["pbe_proposal_used"], "interior_inequality")
+            self.assertLess(row["step_norm"], row["radius"])
+            self.assertEqual(row["normal_correction_norm"], 0.)
+            self.assertLess(row["predicted_step_loss_delta"], 0.)
+
+    def test_inward_direction_can_cross_zero_but_is_limited_by_opposite_boundary(self):
+        p = self.problem(-1., offset=-.009)
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            loss_gradient=p.loss_gradient, max_steps=1, initial_radius=.04)
+        self.assertEqual(result["accepted_steps"], 1)
+        self.assertAlmostEqual(result["x"][0], -.0095, places=14)
+        self.assertAlmostEqual(result["record"]["pbe"], -.0005, places=14)
+
+    def test_interior_pure_normal_gradient_is_not_wrongly_declared_unresolved(self):
+        p = self.problem()
+        p.target = np.array([1., 0., 0.])
+        p.loss_target = p.target.copy()
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            loss_gradient=p.loss_gradient, max_steps=1, initial_radius=.001)
+        self.assertEqual(result["accepted_steps"], 1)
+        self.assertAlmostEqual(result["x"][0], .001, places=14)
+
+    def test_no_pbe_slope_does_not_shorten_radius(self):
+        p = JointProblem()
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            loss_gradient=p.loss_gradient, max_steps=1, initial_radius=.001)
+        self.assertAlmostEqual(result["history"][0]["step_norm"], .001, places=14)
+        self.assertEqual(result["history"][0]["pbe_proposal_used"], "interior_inequality")
+
+    def test_boundary_or_tiny_model_margin_uses_existing_tangent_fallback(self):
+        for offset in (.010, .010 - 1e-8):
+            p = self.problem(offset=offset)
+            result = p.run(self.run_consecutive, pbe_proposal="inequality",
+                loss_gradient=p.loss_gradient, max_trials=1, initial_radius=.001)
+            self.assertEqual(len(p.measured), 1)
+            row = result["history"][0]
+            self.assertEqual(row["pbe_proposal_used"], "tangent_fallback")
+            self.assertLessEqual(row["predicted_pbe"], offset)
+            self.assertLess(row["predicted_step_objective_delta"], 0.)
+            self.assertLessEqual(row["predicted_step_loss_delta"], 0.)
+
+    def test_inaccurate_model_actual_pbe_violation_never_evaluates(self):
+        for sign in (1., -1.):
+            p = self.problem(sign)
+            result = p.run(self.run_consecutive, pbe_proposal="inequality",
+                loss_gradient=p.loss_gradient, max_trials=1,
+                measure=lambda x, i: dict(gate="pass", pbe=sign * .011))
+            self.assertEqual(p.evaluated, [])
+            self.assertEqual(p.checkpoints, [])
+            self.assertEqual(result["history"][0]["reason"], "pbe_limit_exceeded")
+            self.assertEqual(result["counts"]["secant_updates"], 1)
+
+    def test_half_slack_does_not_replace_actual_nonincreasing_loss_gate(self):
+        p = self.problem()
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            loss_gradient=p.loss_gradient, max_trials=1,
+            evaluate=lambda x, i: dict(objective=0., loss=999.))
+        self.assertEqual(result["accepted_steps"], 0)
+        self.assertEqual(result["history"][0]["reason"], "loss_increased")
+
+    def test_acceptances_refresh_gradients_once_and_keep_original_pbe_baseline(self):
+        p = self.problem()
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            loss_gradient=p.loss_gradient, max_steps=3, initial_radius=.0001)
+        self.assertEqual(result["accepted_steps"], 3)
+        self.assertEqual(len(p.gradients), 3)
+        self.assertEqual(len(p.loss_gradients), 3)
+        self.assertGreater(result["record"]["pbe"], .008)
+        self.assertLess(result["record"]["pbe"], .010)
+
+    def test_capped_rejection_backtracks_actual_step_without_repeating_candidate(self):
+        p = self.problem()
+        p.initial = np.zeros(1)
+        p.b = np.ones(1)
+        p.record = lambda x: dict(objective=float(1-x[0]),
+            loss=float(1-x[0]+2000*x[0]**2), pbe=float(.008+x[0]))
+        result = p.run(self.run_consecutive, pbe_proposal="inequality",
+            gradient=lambda x: -np.ones(1), loss_gradient=lambda x: np.array([-1+4000*x[0]]),
+            max_steps=1, max_trials=6, initial_radius=.02)
+        self.assertEqual(result["accepted_steps"], 1)
+        points = [tuple(x) for _, x in p.measured]
+        self.assertEqual(len(set(points)), len(points))
+        self.assertAlmostEqual(result["history"][0]["radius_next"], .0005, places=14)
+        self.assertLessEqual(result["trials"], 3)
+
+    def test_legacy_default_is_exact_and_invalid_mode_fails_before_callbacks(self):
+        default = JointProblem()
+        explicit = JointProblem()
+        a = default.run(self.run_consecutive, loss_gradient=default.loss_gradient, max_steps=2)
+        b = explicit.run(self.run_consecutive, loss_gradient=explicit.loss_gradient,
+                         pbe_proposal="tangent", max_steps=2)
+        np.testing.assert_equal(a, b)
+        for invalid in (None, False, "relaxed"):
+            p = self.problem()
+            with self.assertRaises(ValueError):
+                p.run(self.run_consecutive, pbe_proposal=invalid)
+            self.assertEqual(p.gradients, [])
+
+
 if __name__ == "__main__":
     unittest.main()

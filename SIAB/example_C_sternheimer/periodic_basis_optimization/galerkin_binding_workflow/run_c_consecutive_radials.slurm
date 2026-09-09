@@ -26,7 +26,12 @@ export I_MPI_PIN=1 I_MPI_PIN_DOMAIN=omp
 export I_MPI_PMI_LIBRARY=/opt/gridview/slurm/lib/libpmi2.so
 workflow=$stage/source/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow
 args=(--stage "$stage" --source-commit "$C_CONSECUTIVE_SOURCE_COMMIT" --deployment-sha256 "$C_CONSECUTIVE_DEPLOYMENT_SHA256")
-if [[ -n ${C_CONTINUATION_RESULT_SHA256:-} || -n ${C_CONTINUATION_VERIFICATION_SHA256:-} ]]; then
+proposal=${C_PBE_PROPOSAL:-tangent}
+args+=(--pbe-proposal "$proposal")
+if [[ -n ${C_CONTINUATION_STAGE:-} ]]; then
+ args+=(--continuation-stage "$C_CONTINUATION_STAGE")
+fi
+if [[ -n ${C_CONTINUATION_RESULT_SHA256:-} || -n ${C_CONTINUATION_VERIFICATION_SHA256:-} || -n ${C_CONTINUATION_STAGE:-} || "$proposal" != tangent ]]; then
  args+=(--continuation-result-sha256 "${C_CONTINUATION_RESULT_SHA256:?}" --continuation-verification-sha256 "${C_CONTINUATION_VERIFICATION_SHA256:?}")
 fi
 "$root/optimizer-env-torch1121cpu/bin/python" "$workflow/run_c_consecutive_radials.py" "${args[@]}" --preflight-only

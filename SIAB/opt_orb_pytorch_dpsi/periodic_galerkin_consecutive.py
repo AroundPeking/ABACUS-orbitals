@@ -72,7 +72,7 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                     max_trials=80, initial_radius=.02, max_radius=.04,
                     min_radius=1e-5, pbe_limit=.010, pbe_target=.0085,
                     gradient_tolerance=1e-10, gain_tolerance=1e-8,
-                    loss_gradient=None):
+                    loss_gradient=None, pbe_proposal="tangent"):
     """Optimize all coefficients with a fresh objective gradient at each center.
 
     ``gradient(x)`` returns the full objective derivative. ``project(x, v)`` is
@@ -101,6 +101,13 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
     half of each objective's tangential descent. Actual nonincreasing loss and
     measured PBE acceptance remain mandatory, irrespective of the model.
 
+    With pbe_proposal='inequality', first use the full horizontal common
+    direction, not an approximate PBE equality plane. Limit its length to half
+    the signed model distance to the approached +/-pbe_limit boundary. If that
+    length is below min_radius, fall back to the original tangent/inward rule.
+    This model only proposes a point; actual SCF and all acceptance gates below
+    remain mandatory. The default 'tangent' behavior is unchanged.
+
     ``measure(x, trial_id)`` returns a gate and, when actual SCF exists, signed
     ``pbe`` in eV/C. Only gate='pass' with abs(pbe)<=pbe_limit calls evaluate.
     ``evaluate`` returns nonnegative finite objective (absolute Ha/cell error)
@@ -120,9 +127,13 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
     come from the adapter's calibration cache; later centers need fresh values.
 
     Radius halves on rejection and grows by 1.5 on acceptance up to max_radius.
+    Inequality mode halves the actual attempted step on rejection, avoiding
+    repeated evaluation of the same model-capped candidate.
     Positive gains <=gain_tolerance are recorded as small_gain, not convergence
     or grounds to stop refreshing gradients. All callback arguments are copies.
     """
+    if not isinstance(pbe_proposal, str) or pbe_proposal not in ("tangent", "inequality"):
+        raise ValueError("pbe_proposal must be tangent or inequality")
     for name, value in (("max_steps", max_steps), ("max_trials", max_trials)):
         if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral) or value < 0:
             raise ValueError(f"{name} must be a nonnegative integer")
@@ -184,57 +195,72 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
         if pg_norm <= gradient_tolerance:
             return snapshot("feasible_direction_unresolved", "projected_gradient_tiny")
         normal_axis = pb / b_norm if b_norm > gradient_tolerance else np.zeros_like(x)
-        feasible = pg - _dot(pg, normal_axis) * normal_axis
-        feasible_norm = _norm(feasible)
-        if feasible_norm <= gradient_tolerance:
-            return snapshot("feasible_direction_unresolved", "pbe_tangent_gradient_tiny")
-        direction = -feasible / feasible_norm
-        joint = None
-        if loss_g is not None:
-            pl = _vector(project(x.copy(), loss_g.copy()), "projected loss_gradient", x.shape)
-            feasible_loss = _vector(pl - _dot(pl, normal_axis) * normal_axis,
-                                    "PBE-tangent loss_gradient", x.shape)
-            loss_norm = _norm(feasible_loss)
-            joint = dict(loss_gradient_norm=_norm(loss_g), projected_loss_gradient_norm=_norm(pl),
-                         feasible_loss_gradient_norm=loss_norm, joint_angle_degrees=None,
-                         joint_mixing_weight=1., joint_combination_norm=1.)
-            if loss_norm > gradient_tolerance:
-                u, v = feasible / feasible_norm, feasible_loss / loss_norm
-                difference = u - v
-                denominator = _dot(difference, difference)
-                # Minimize ||v + alpha*(u-v)||^2 on [0, 1]. At a nonzero
-                # minimum, its negative has negative slope for both gradients.
-                alpha = float(np.clip(-_dot(v, difference) / denominator, 0., 1.)) if denominator > 0. else 1.
-                combination = alpha * u + (1. - alpha) * v
-                combination_norm = _norm(combination)
-                joint.update(joint_angle_degrees=float(np.degrees(np.arccos(np.clip(_dot(u, v), -1., 1.)))),
-                             joint_mixing_weight=alpha, joint_combination_norm=combination_norm)
-                diagnostic = dict(joint, gradient_norm=g_norm, projected_gradient_norm=pg_norm,
-                                  feasible_gradient_norm=feasible_norm, pbe_gradient_norm=b_norm,
-                                  gradient_tolerance=gradient_tolerance)
-                if combination_norm <= gradient_tolerance:
-                    diagnostic["reason"] = "joint_combination_tiny"
-                    return snapshot("unresolved_joint_direction", "unresolved_joint_direction", diagnostic)
-                direction = -combination / combination_norm
-                objective_slope, loss_slope = _dot(g, direction), _dot(loss_g, direction)
-                if objective_slope >= 0. or loss_slope >= 0.:
-                    diagnostic.update(reason="non_descending_common_direction",
-                                      objective_direction_slope=objective_slope,
-                                      loss_direction_slope=loss_slope)
-                    return snapshot("unresolved_joint_direction", "unresolved_joint_direction", diagnostic)
-        normal_length = 0.
-        inward = -np.sign(record["pbe"]) * normal_axis
-        if abs(record["pbe"]) > pbe_target and b_norm > gradient_tolerance:
-            normal_length = min(.3 * radius, (abs(record["pbe"]) - pbe_target) / b_norm)
-            for full_gradient in ((g,) if loss_g is None else (g, loss_g)):
-                cost = _dot(full_gradient, inward)
-                if cost > 0.:
-                    # Reserve half of each tangential descent. A zero loss slope
-                    # permits no harmful normal correction, even if Ec benefits.
-                    tangent_gain = -radius * np.sqrt(1. - .3 ** 2) * _dot(full_gradient, direction)
-                    normal_length = min(normal_length, max(0., .5 * tangent_gain / cost))
-        tangent_length = radius * np.sqrt(max(0., 1. - (normal_length / radius) ** 2))
-        step = _vector(tangent_length * direction + normal_length * inward, "step", x.shape)
+        modes = (False, True) if pbe_proposal == "inequality" else (True,)
+        for pbe_tangent in modes:
+            projection_axis = normal_axis if pbe_tangent else np.zeros_like(x)
+            feasible = pg - _dot(pg, projection_axis) * projection_axis
+            feasible_norm = _norm(feasible)
+            if feasible_norm <= gradient_tolerance:
+                return snapshot("feasible_direction_unresolved", "pbe_tangent_gradient_tiny")
+            direction = -feasible / feasible_norm
+            joint = None
+            if loss_g is not None:
+                pl = _vector(project(x.copy(), loss_g.copy()), "projected loss_gradient", x.shape)
+                feasible_loss = _vector(pl - _dot(pl, projection_axis) * projection_axis,
+                                        "PBE-tangent loss_gradient", x.shape)
+                loss_norm = _norm(feasible_loss)
+                joint = dict(loss_gradient_norm=_norm(loss_g), projected_loss_gradient_norm=_norm(pl),
+                             feasible_loss_gradient_norm=loss_norm, joint_angle_degrees=None,
+                             joint_mixing_weight=1., joint_combination_norm=1.)
+                if loss_norm > gradient_tolerance:
+                    u, v = feasible / feasible_norm, feasible_loss / loss_norm
+                    difference = u - v
+                    denominator = _dot(difference, difference)
+                    # Minimize ||v + alpha*(u-v)||^2 on [0, 1]. At a nonzero
+                    # minimum, its negative has negative slope for both gradients.
+                    alpha = float(np.clip(-_dot(v, difference) / denominator, 0., 1.)) if denominator > 0. else 1.
+                    combination = alpha * u + (1. - alpha) * v
+                    combination_norm = _norm(combination)
+                    joint.update(joint_angle_degrees=float(np.degrees(np.arccos(np.clip(_dot(u, v), -1., 1.)))),
+                                 joint_mixing_weight=alpha, joint_combination_norm=combination_norm)
+                    diagnostic = dict(joint, gradient_norm=g_norm, projected_gradient_norm=pg_norm,
+                                      feasible_gradient_norm=feasible_norm, pbe_gradient_norm=b_norm,
+                                      gradient_tolerance=gradient_tolerance)
+                    if combination_norm <= gradient_tolerance:
+                        diagnostic["reason"] = "joint_combination_tiny"
+                        return snapshot("unresolved_joint_direction", "unresolved_joint_direction", diagnostic)
+                    direction = -combination / combination_norm
+                    objective_slope, loss_slope = _dot(g, direction), _dot(loss_g, direction)
+                    if objective_slope >= 0. or loss_slope >= 0.:
+                        diagnostic.update(reason="non_descending_common_direction",
+                                          objective_direction_slope=objective_slope,
+                                          loss_direction_slope=loss_slope)
+                        return snapshot("unresolved_joint_direction", "unresolved_joint_direction", diagnostic)
+            normal_length = 0.
+            if not pbe_tangent:
+                length = radius
+                slope = _dot(b, direction)
+                if slope != 0.:
+                    room = pbe_limit - np.sign(slope) * record["pbe"]
+                    if abs(slope) * radius > .5 * room:
+                        length = .5 * room / abs(slope)
+                if length < min_radius:
+                    continue
+                step = _vector(length * direction, "step", x.shape)
+                break
+            inward = -np.sign(record["pbe"]) * normal_axis
+            if abs(record["pbe"]) > pbe_target and b_norm > gradient_tolerance:
+                normal_length = min(.3 * radius, (abs(record["pbe"]) - pbe_target) / b_norm)
+                for full_gradient in ((g,) if loss_g is None else (g, loss_g)):
+                    cost = _dot(full_gradient, inward)
+                    if cost > 0.:
+                        # Reserve half of each tangential descent. A zero loss slope
+                        # permits no harmful normal correction, even if Ec benefits.
+                        tangent_gain = -radius * np.sqrt(1. - .3 ** 2) * _dot(full_gradient, direction)
+                        normal_length = min(normal_length, max(0., .5 * tangent_gain / cost))
+            tangent_length = radius * np.sqrt(max(0., 1. - (normal_length / radius) ** 2))
+            step = _vector(tangent_length * direction + normal_length * inward, "step", x.shape)
+            break
         row = dict(trial_id=counts["trials"], radius=radius, accepted=False,
                    reason=None, gradient_norm=g_norm, projected_gradient_norm=pg_norm,
                    feasible_gradient_norm=feasible_norm, pbe_gradient_norm=b_norm,
@@ -245,6 +271,10 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                    small_gain=False, secant_updated=False)
         if joint is not None:
             row.update(joint, predicted_step_loss_delta=_dot(loss_g, step), predicted_loss_delta=None)
+        if pbe_proposal == "inequality":
+            row.update(pbe_proposal_used="tangent_fallback" if pbe_tangent else "interior_inequality",
+                       pbe_model_slack_fraction=.5,
+                       predicted_step_pbe=record["pbe"] + _dot(b, step))
         counts["trials"] += 1
         candidate = None
         if row["predicted_step_objective_delta"] >= 0.:
@@ -315,6 +345,8 @@ def run_consecutive(initial, initial_record, pbe_gradient, *, gradient, retract,
                         g = None
                         loss_g = None
         radius = min(max_radius, radius * 1.5) if row["accepted"] else radius * .5
+        if pbe_proposal == "inequality" and not row["accepted"]:
+            radius = min(radius, .5 * row["step_norm"])
         row["radius_next"] = radius
         history.append(row)
         if row["accepted"]:

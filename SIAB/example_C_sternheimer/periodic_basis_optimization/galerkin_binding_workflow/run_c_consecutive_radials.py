@@ -18,6 +18,22 @@ PARENT_SHA = '3d6a7c081119a4e3195c26c652c817afcaf4103ebaf0db867687c9bfd7da5203'
 VERIFY_SHA = 'fd5bebee5512988c1be2d0dfbdfc520c3ade562cc6c959cb6c158b37c46789d9'
 ORIGINAL_ENERGY_EV = -309.8590820440637
 SCOPE = 'consecutive_eight_radial_actual_PBE_constrained_frozen_body'
+COMMON_SCOPE = 'common_descent_eight_radial_actual_PBE_constrained_frozen_body'
+INEQUALITY_SCOPE = 'inequality_common_descent_eight_radial_actual_PBE_constrained_frozen_body'
+CONTINUATION_PARENTS = {
+    'stage-c-consecutive-radials-7d8eef3c': dict(
+        result_sha256='4dbed5d6f07e72487677565f06f384e53f461c68c2f098ee8283395951bae511',
+        verification_sha256='4d21d1cf673b35774ceb7b128d9b30cc2ddd4fe9423be2f9391d1e4edf1b37c4',
+        source_commit='7d8eef3c155c771c082ffe5c41836e91c79a3ee4',job_id='21913349',
+        verification_status='verified_consecutive_frozen_body_not_SOS_qavg_or_GW',
+        scope=SCOPE,common_descent=False),
+    'stage-c-common-descent-8acbf7b9': dict(
+        result_sha256='dc3e2c5041cd5ba9ad53072c03ae4c29d4a90caa40fbdf82fbb98d9e6063bbc3',
+        verification_sha256='45550e3f6d0ff62494fb54482d3a00afabb624c834fc1a028bc4721654ae16d3',
+        source_commit='8acbf7b9db882c2c02139127492fa79e6609d6e8',job_id='21914609',
+        verification_status='verified_common_descent_frozen_body_not_SOS_qavg_or_GW',
+        scope=COMMON_SCOPE,common_descent=True),
+}
 sys.path[:0] = [str(Path(__file__).resolve().parents[4]/'SIAB/opt_orb_pytorch_dpsi'),
                 str(Path(__file__).resolve().parent.parent)]
 
@@ -162,12 +178,66 @@ def continuation_scf_root(prior, actual, measurement_actual):
     return root
 
 
-def admit_continuation(result_sha, verification_sha):
-    """Reuse the verified last center and secants, never repeat its SCF stencils."""
-    if any(not re.fullmatch('[0-9a-f]{64}',h or '') for h in (result_sha,verification_sha)):
+def continuation_parent(result_sha, verification_sha, continuation_stage=None, pbe_proposal='tangent'):
+    """Select only an explicitly pinned, direct child of the frozen run root."""
+    if pbe_proposal not in ('tangent','inequality'):
+        raise ValueError('unknown PBE proposal mode')
+    if any(not isinstance(h,str) or not re.fullmatch('[0-9a-f]{64}',h) for h in (result_sha,verification_sha)):
         raise ValueError('two explicit continuation SHA256 pins required')
+    if pbe_proposal=='inequality' and continuation_stage is None:
+        raise ValueError('inequality requires an explicit verified common-descent stage')
+    prior=Path(continuation_stage) if continuation_stage is not None else ROOT/'stage-c-consecutive-radials-7d8eef3c'
+    if not prior.is_absolute():
+        if len(prior.parts)!=1:
+            raise ValueError('continuation stage must be a direct child of the frozen root')
+        prior=ROOT/prior
+    if (prior.name not in CONTINUATION_PARENTS or prior.resolve().parent!=ROOT.resolve()
+            or prior.resolve()!=ROOT.resolve()/prior.name):
+        raise ValueError('continuation stage outside the approved frozen root/profile')
+    spec=CONTINUATION_PARENTS[prior.name]
+    if result_sha!=spec['result_sha256'] or verification_sha!=spec['verification_sha256']:
+        raise ValueError('continuation hashes do not match the approved stage')
+    if pbe_proposal=='inequality' and not spec['common_descent']:
+        raise ValueError('inequality requires the verified common-descent FINAL')
+    return prior.resolve(),dict(spec)
+
+
+def run_configuration(continuation, pbe_proposal='tangent'):
+    if pbe_proposal not in ('tangent','inequality'):
+        raise ValueError('unknown PBE proposal mode')
+    if continuation is None:
+        if pbe_proposal!='tangent':
+            raise ValueError('inequality requires verified continuation, never recalibration')
+        return dict(scope=SCOPE,settings=dict(max_steps=20,max_trials=80,initial_radius=.02,max_radius=.04),
+                    reservation_key=PARENT_SHA[:16]+'-v1')
+    if pbe_proposal=='inequality':
+        continuation_parent(continuation['result_sha256'],continuation['verification_sha256'],
+                            continuation.get('continuation_stage'),pbe_proposal)
+        return dict(scope=INEQUALITY_SCOPE,
+                    settings=dict(max_steps=6,max_trials=24,initial_radius=.001,max_radius=.01,
+                                  pbe_proposal='inequality'),
+                    reservation_key=continuation['result_sha256'][:16]+'-inequality-v1')
+    return dict(scope=COMMON_SCOPE,settings=dict(max_steps=12,max_trials=40,initial_radius=.001,max_radius=.01),
+                reservation_key=continuation['result_sha256'][:16]+'-common-v1')
+
+
+def validate_continuation_checkpoint(result, checkpoint, checkpoint_count):
+    state=result['optimization']
+    x=state['x']
+    count=state['counts']['accepted_steps']
+    if (len(x)!=248 or any(not math.isfinite(finite(v)) for v in x)
+            or type(count) is not int or count<1 or count!=checkpoint_count
+            or checkpoint['counts']['accepted_steps']!=count
+            or state['best']['x']!=x or checkpoint['x']!=x
+            or state['best']['record']!=state['record'] or checkpoint['record']!=state['record']
+            or result['gradients'][-1]['coefficient_sha256']!=result['coefficient_sha256']):
+        raise ValueError('continuation FINAL, last accepted best checkpoint and terminal gradient must match')
+
+
+def admit_continuation(result_sha, verification_sha, continuation_stage=None, pbe_proposal='tangent'):
+    """Reuse the verified last center and secants, never repeat its SCF stencils."""
+    prior,spec=continuation_parent(result_sha,verification_sha,continuation_stage,pbe_proposal)
     cycle,old,origin=admit_parent()
-    prior=ROOT/'stage-c-consecutive-radials-7d8eef3c'
     check=cycle.admission.common._check_file
     check(prior/'result/RESULT.json',result_sha)
     check(prior/'VERIFICATION.json',verification_sha)
@@ -175,20 +245,25 @@ def admit_continuation(result_sha, verification_sha):
     audit=json.loads((prior/'VERIFICATION.json').read_text())
     provenance=json.loads((prior/'PROVENANCE.json').read_text())
     if ((prior/'STATUS').read_text()!='success\n'
-            or audit['status']!='verified_consecutive_frozen_body_not_SOS_qavg_or_GW'
-            or audit['result_sha256']!=result_sha or audit['job_id']!='21913349'
-            or provenance['status']!='success' or provenance['job_id']!='21913349'
+            or audit['status']!=spec['verification_status']
+            or audit['result_sha256']!=result_sha or audit['job_id']!=spec['job_id']
+            or provenance['status']!='success' or provenance['job_id']!=spec['job_id']
             or provenance['result_sha256']!=result_sha
-            or result['source_commit']!='7d8eef3c155c771c082ffe5c41836e91c79a3ee4'):
-        raise ValueError('independently verified consecutive parent required')
+            or result['source_commit']!=spec['source_commit'] or provenance['source_commit']!=spec['source_commit']
+            or provenance['deployment_sha256']!=result['deployment_sha256']
+            or result['scope']!=spec['scope'] or result.get('common_descent',False) is not spec['common_descent']):
+        raise ValueError('independently verified continuation parent identity/scope required')
+    if spec['common_descent'] and (result['calibration_scf_count']!=0 or result['cache_loads']!=1):
+        raise ValueError('common-descent parent must reuse secants and one frozen cache')
     rows=[line.split('|') for line in audit['scheduler'].splitlines() if line]
-    if not rows or not any(r[0]=='21913349' for r in rows) or any(r[1:3]!=['COMPLETED','0:0'] for r in rows):
+    if not rows or not any(r[0]==spec['job_id'] for r in rows) or any(r[1:3]!=['COMPLETED','0:0'] for r in rows):
         raise ValueError('parent scheduler gate failed')
     verify_parent_source(prior,result['deployment_sha256'],result['source_commit'])
     checkpoints=sorted((prior/'result').glob('checkpoint_*/CHECKPOINT.json'))
     if not checkpoints:
         raise ValueError('continuation requires an accepted checkpoint')
     checkpoint=json.loads(checkpoints[-1].read_text())
+    validate_continuation_checkpoint(result,checkpoint,len(checkpoints))
     actual=checkpoint['actual_pbe']
     validate_continuation_payload(result,actual)
     for name,key in (('COEFFICIENTS.txt','coefficient_sha256'),('C_3s3p2d.orb','orbital_sha256')):
@@ -196,6 +271,14 @@ def admit_continuation(result_sha, verification_sha):
         check(checkpoints[-1].parent/name,result[key])
         if checkpoint[key]!=result[key]:
             raise ValueError('final must be the last accepted best checkpoint')
+    terminal=result['gradients'][-1]
+    gradient_slot=prior/'result'/('gradient_%03d'%terminal['index'])
+    check(gradient_slot/'GRADIENT.json',terminal['gradient_sha256'])
+    check(gradient_slot/'COEFFICIENTS.txt',result['coefficient_sha256'])
+    gradient_record=json.loads((gradient_slot/'GRADIENT.json').read_text())
+    if (gradient_record['coefficient_sha256']!=result['coefficient_sha256']
+            or (spec['common_descent'] and 'loss_gradient' not in gradient_record)):
+        raise ValueError('terminal same-center common gradient evidence required')
     checker=cycle.admission.refresh.accepted
     checker._record(result['final_candidate'],old['occupied_capture_floor'],old['quarter']['training_weights'])
     cycle.endpoint._match_parent_initial(result['final_candidate'],checkpoint['candidate'])
@@ -223,11 +306,13 @@ def admit_continuation(result_sha, verification_sha):
     parent=dict(proposal=dict(coefficient_sha256=result['coefficient_sha256'],orbital_sha256=result['orbital_sha256']),
                 actual_pbe=actual,rpa=dict(candidate=result['final_candidate']))
     restart=dict(coefficient_path=str(prior/'result/FINAL/COEFFICIENTS.txt'),result_sha256=result_sha,
-                 verification_sha256=verification_sha,pbe_gradient=result['optimization']['pbe_gradient'])
+                 verification_sha256=verification_sha,pbe_gradient=result['optimization']['pbe_gradient'],
+                 continuation_stage=str(prior))
     return cycle,old,parent,restart
 
 
-def run(stage, source, cycle, old, parent, launcher, continuation=None):
+def run(stage, source, cycle, old, parent, launcher, continuation=None, pbe_proposal='tangent'):
+    configuration=run_configuration(continuation,pbe_proposal)
     import numpy as np
     import torch
     from periodic_galerkin_consecutive import run_consecutive
@@ -247,7 +332,7 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None):
                   else Path(continuation['coefficient_path']))
     parent_sha=PARENT_SHA if continuation is None else continuation['result_sha256']
     verify_sha=VERIFY_SHA if continuation is None else continuation['verification_sha256']
-    scope=SCOPE if continuation is None else 'common_descent_eight_radial_actual_PBE_constrained_frozen_body'
+    scope=configuration['scope']
     initial = read(rt, initial_path)
     original = read(rt, old['original_coefficient_path'])
     shapes = [b.shape for b in initial['C']]
@@ -449,14 +534,17 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None):
         hashes=export(slot,unflatten(state['x']))
         payload=json_safe(state)
         payload.update(candidate=point['record'],actual_pbe=point['sample']['actual_pbe'],
-                       measurement=point['sample'],**hashes,physical_release_gate='hold')
+                       measurement=point['sample'],**hashes,physical_release_gate='hold',scope=scope,
+                       pbe_proposal=pbe_proposal,
+                       continuation_stage=None if continuation is None else continuation['continuation_stage'],
+                       parent_result_sha256=parent_sha,parent_verification_sha256=verify_sha)
         write(slot/'CHECKPOINT.json',payload)
         print(json.dumps(dict(accepted_step=state['counts']['accepted_steps'],trial_count=state['counts']['trials'],
             body_error_ev_per_c=state['record']['objective']*cycle.endpoint.HARTREE_TO_EV/2,
             pbe_mev_per_c=1000*state['record']['pbe'],radius=state['radius'])),flush=True)
-    settings=(dict(max_steps=20,max_trials=80,initial_radius=.02,max_radius=.04) if continuation is None
-              else dict(max_steps=12,max_trials=40,initial_radius=.001,max_radius=.01,
-                        loss_gradient=loss_gradient))
+    settings=dict(configuration['settings'])
+    if continuation is not None:
+        settings['loss_gradient']=loss_gradient
     state=run_consecutive(x0,controller_record(first,parent['actual_pbe']['energy_delta_ev_per_c']),
         pbe_gradient,gradient=gradient,retract=retract,project=project,measure=measure,evaluate=evaluate,
         checkpoint=checkpoint,**settings)
@@ -477,6 +565,8 @@ def run(stage, source, cycle, old, parent, launcher, continuation=None):
         ao_per_C=22,delta_st_runs=0,ordinary_sos='not_run',gw='not_run',physical_release_gate='hold',
         calibration_scf_count=16 if continuation is None else 0,
         common_descent=continuation is not None,
+        pbe_proposal=pbe_proposal,
+        continuation_stage=None if continuation is None else continuation['continuation_stage'],
         full_constrained_stationarity='not_established')
 
 
@@ -487,10 +577,14 @@ def main():
     p.add_argument('--preflight-only',action='store_true')
     p.add_argument('--continuation-result-sha256')
     p.add_argument('--continuation-verification-sha256')
+    p.add_argument('--continuation-stage')
+    p.add_argument('--pbe-proposal',choices=('tangent','inequality'),default='tangent')
     args=p.parse_args(); stage=Path(args.stage).resolve()
     restart=None
-    if args.continuation_result_sha256 or args.continuation_verification_sha256:
-        cycle,old,parent,restart=admit_continuation(args.continuation_result_sha256,args.continuation_verification_sha256)
+    if (args.continuation_result_sha256 or args.continuation_verification_sha256
+            or args.continuation_stage is not None or args.pbe_proposal!='tangent'):
+        cycle,old,parent,restart=admit_continuation(args.continuation_result_sha256,args.continuation_verification_sha256,
+            continuation_stage=args.continuation_stage,pbe_proposal=args.pbe_proposal)
     else:
         cycle,old,parent=admit_parent()
     source=cycle.admission.common.verify_source(stage,args.deployment_sha256,args.source_commit)
@@ -508,20 +602,22 @@ def main():
     cycle.frozen_pbe_bundle(old)
     if args.preflight_only:
         return
-    reservation_key=(PARENT_SHA[:16]+'-v1' if restart is None else restart['result_sha256'][:16]+'-common-v1')
-    reservation=ROOT/('consecutive-radials-'+reservation_key)
+    configuration=run_configuration(restart,args.pbe_proposal)
+    reservation=ROOT/('consecutive-radials-'+configuration['reservation_key'])
     reservation.mkdir()
     cycle.endpoint._write_json(reservation/'RESERVATION.json',dict(stage=str(stage),
-        scope=SCOPE if restart is None else 'common_descent_eight_radial_actual_PBE_constrained_frozen_body',
+        scope=configuration['scope'],pbe_proposal=args.pbe_proposal,
+        continuation_stage=None if restart is None else restart['continuation_stage'],
         parent_sha256=PARENT_SHA if restart is None else restart['result_sha256'],job_id=os.environ['SLURM_JOB_ID'],
-        maximum_accepted_steps=20 if restart is None else 12,maximum_trials=80 if restart is None else 40,
+        maximum_accepted_steps=configuration['settings']['max_steps'],maximum_trials=configuration['settings']['max_trials'],
         calibration_scf_count=16 if restart is None else 0))
     result=run(stage,source,cycle,old,parent,['srun','--mpi=pmi2','--cpu-bind=none','-n','4',runtime['abacus_binary']],
-               continuation=restart)
+               continuation=restart,pbe_proposal=args.pbe_proposal)
     if restart is None:
         admit_parent()
     else:
-        admit_continuation(args.continuation_result_sha256,args.continuation_verification_sha256)
+        admit_continuation(args.continuation_result_sha256,args.continuation_verification_sha256,
+            continuation_stage=args.continuation_stage,pbe_proposal=args.pbe_proposal)
     cycle.admission.common.verify_source(stage,args.deployment_sha256,args.source_commit)
     for pkey,hkey in (('abacus_binary','abacus_sha256'),('mpi_library','mpi_sha256')):
         cycle.admission.common._check_file(runtime[pkey],runtime[hkey])
