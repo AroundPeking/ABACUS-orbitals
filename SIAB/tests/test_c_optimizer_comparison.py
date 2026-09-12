@@ -28,5 +28,30 @@ class ComparisonContractTests(unittest.TestCase):
         self.assertEqual(self.m.BUNDLE_SHA,'a0e285e12c05d1138f14f9e2e94b9a67641c25aacd6344eba70c9a0ed442a215')
         self.assertEqual(self.m.PHYSICAL_RELEASE,'hold')
 
+    def test_consecutive_evaluator_accepts_trial_id(self):
+        seen=[]
+        def evaluate(c):
+            seen.append(c)
+            return {'energy':c}
+        callback=self.m.consecutive_evaluator(lambda x:x*2,evaluate,lambda d:d['energy'])
+        self.assertEqual(callback(3,17),6)
+        self.assertEqual(seen,[6])
+
+    def test_recovery_rejects_changed_parent_and_accepted_work(self):
+        r=dict(status='failed_before_any_optimizer_evaluation',job_id='3330163',
+               source_commit='5f8a50fd327319848bc708e2beae76c1de2d0c62',
+               bundle_sha256=self.m.BUNDLE_SHA,shared_gradient_sha256='a'*64,
+               scheduler_state='FAILED',exit_code='1:0',accepted_steps=0,evaluations=0)
+        self.m.validate_recovery(r)
+        for k,v in [('scheduler_state','RUNNING'),('accepted_steps',1),('evaluations',1),
+                    ('source_commit','b'*40),('shared_gradient_sha256','')]:
+            with self.assertRaises(ValueError): self.m.validate_recovery(dict(r,**{k:v}))
+
+    def test_parent_scheduler_must_be_exact_failed_job(self):
+        self.assertEqual(self.m.parent_scheduler_state('3330163|FAILED|1:0\n'),('FAILED','1:0'))
+        for text in ('3330163|RUNNING|0:0\n','3330163|COMPLETED|0:0\n',
+                     '3330163.batch|FAILED|1:0\n','3330163|FAILED|2:0\n', ''):
+            with self.assertRaises(ValueError): self.m.parent_scheduler_state(text)
+
 
 if __name__ == '__main__': unittest.main()

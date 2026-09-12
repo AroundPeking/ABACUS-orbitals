@@ -23,9 +23,15 @@ test -d "$ROOT"
 test ! -e "$ROOT/result"
 test ! -e "$ROOT/BATCH_STATUS"
 printf 'running\n' > "$ROOT/BATCH_STATUS"
+RECOVERY_ARGS=()
+if [[ -n "${C_COMPARISON_RECOVERY_ROOT:-}" ]]; then
+  RECOVERY_SHA=$("$PYTHON" "$SOURCE/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_optimizer_comparison.py" \
+    --prepare-recovery "$C_COMPARISON_RECOVERY_ROOT")
+  RECOVERY_ARGS=(--recovery-root "$C_COMPARISON_RECOVERY_ROOT" --recovery-sha256 "$RECOVERY_SHA")
+fi
 /usr/bin/time -v -o "$ROOT/TIMING.txt" "$PYTHON" -u \
   "$SOURCE/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_optimizer_comparison.py" \
-  --bundle "$BUNDLE" --output "$ROOT/result" --source-commit "$COMMIT"
+  --bundle "$BUNDLE" --output "$ROOT/result" --source-commit "$COMMIT" "${RECOVERY_ARGS[@]}"
 "$PYTHON" - "$ROOT/result/RESULT.json" <<'PY'
 import json, os, sys
 r=json.load(open(sys.argv[1]))

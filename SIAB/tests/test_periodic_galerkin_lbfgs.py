@@ -64,6 +64,20 @@ class ChartTests(unittest.TestCase):
 
 
 class LBFGSTests(unittest.TestCase):
+    def test_real_consecutive_core_calls_two_argument_adapter(self):
+        wf=Path(__file__).resolve().parents[1]/'example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow'
+        sys.path.insert(0,str(wf))
+        from run_c_optimizer_comparison import consecutive_evaluator
+        from periodic_galerkin_consecutive import run_consecutive
+        record=lambda x:dict(objective=float(x@x),loss=float(x@x),pbe=None)
+        f=consecutive_evaluator(lambda x:x,lambda x:x,record)
+        result=run_consecutive(np.ones(2),record(np.ones(2)),np.zeros(2),
+            gradient=lambda x:2*x,retract=lambda x,s:x+s,project=lambda x,g:g,
+            measure=lambda x,i:dict(gate='pass',pbe=None),evaluate=f,
+            checkpoint=lambda s:None,max_steps=1,enforce_pbe=False,
+            require_nonincreasing_loss=False)
+        self.assertEqual(result['accepted_steps'],1)
+
     def test_analytic_quadratic_and_accepted_checkpoints(self):
         checkpoints = []
         target = np.array([.02,-.025,.01])

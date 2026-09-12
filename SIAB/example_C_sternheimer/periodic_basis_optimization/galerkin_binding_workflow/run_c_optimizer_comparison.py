@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import resource
 import shutil
+import subprocess
 import sys
 import time
 
@@ -36,7 +37,64 @@ def validate_budget(steps, forwards):
             and type(forwards) is int and 0 < forwards <= 40, 'bounded comparison required')
 
 
-def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
+def consecutive_evaluator(unflatten,evaluate,record):
+    def evaluate_point(x,trial_id):
+        return record(evaluate(unflatten(x)))
+    return evaluate_point
+
+
+def validate_recovery(r):
+    require(r.get('status')=='failed_before_any_optimizer_evaluation'
+            and r.get('job_id')=='3330163'
+            and r.get('source_commit')=='5f8a50fd327319848bc708e2beae76c1de2d0c62'
+            and r.get('bundle_sha256')==BUNDLE_SHA
+            and r.get('scheduler_state')=='FAILED' and r.get('exit_code')=='1:0'
+            and r.get('accepted_steps')==0 and r.get('evaluations')==0,
+            'only the failed zero-step adapter attempt can be recovered')
+    sha=r.get('shared_gradient_sha256','')
+    require(len(sha)==64 and all(c in '0123456789abcdef' for c in sha),'recovery gradient hash required')
+
+
+def parent_scheduler_state(text):
+    rows=[row.strip().split('|') for row in text.splitlines() if row.strip()]
+    require(rows==[['3330163','FAILED','1:0']], 'exact terminal FAILED/1:0 parent required')
+    return rows[0][1],rows[0][2]
+
+
+def prepare_recovery(parent):
+    root=Path('/data/home/df_iopcas_ghj/app/siab/c-solid-rpa-continuation-20260912')
+    require(parent==root/'optimizer-comparison-5f8a50fd','exact recovery directory required')
+    state,exit_code=parent_scheduler_state(subprocess.check_output([
+        'sacct','-n','-P','-X','-j','3330163','--format=JobID,State,ExitCode'],text=True))
+    hashed(root/'source-5f8a50fd/SOURCE_MANIFEST.json',
+           '710f1558b634d4e01fda318517fe17dbf2721970c9dd25a48e7ed78b0635b5fb')
+    submission=json.loads((parent/'SUBMISSION.json').read_text())
+    require(submission['job_id']=='3330163' and submission['bundle_sha256']==BUNDLE_SHA,
+            'parent submission identity changed')
+    error=(parent/'slurm-3330163.err').read_text()
+    require('TypeError' in error and 'takes 1 positional argument but 2 were given' in error,
+            'only the known zero-step callback failure can be recovered')
+    require(not list((parent/'result').glob('*/checkpoint_*'))
+            and not list((parent/'result').glob('*/evaluation_*')),
+            'existing optimization work must not be replayed')
+    gradient=parent/'result/SHARED_INITIAL_GRADIENT.json'
+    data=gradient.read_bytes(); d=json.loads(data)
+    require(abs(d['rpa']['candidate_energy_ha']-(-.43346679493776147))<=1e-9,
+            'recovery initial energy changed')
+    objective_and_sign(d['rpa']['candidate_energy_ha'],d['rpa']['reference_energy_ha'])
+    receipt=dict(status='failed_before_any_optimizer_evaluation',job_id='3330163',
+        source_commit=submission['source_commit'],bundle_sha256=BUNDLE_SHA,
+        shared_gradient_sha256=hashlib.sha256(data).hexdigest(),scheduler_state=state,
+        exit_code=exit_code,accepted_steps=0,evaluations=0)
+    validate_recovery(receipt)
+    path=parent/'RECOVERY.json'
+    if path.exists(): require(json.loads(path.read_text())==receipt,'recovery receipt changed')
+    else: write(path,receipt)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
+        recovery_root=None,recovery_sha256=None):
     import numpy as np
     import scipy
     import torch
@@ -80,6 +138,14 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
     for name, sha in manifest['files'].items(): hashed(within(bundle, name), sha)
     # Existing numerical kernels must remain byte-identical to the verified replay.
     for name, sha in manifest['source_files'].items(): hashed(within(repo, name), sha)
+    recovery=None
+    if recovery_root is not None:
+        require(recovery_root==bundle.parent/'optimizer-comparison-5f8a50fd', 'exact recovery parent required')
+        recovery=json.loads(hashed(recovery_root/'RECOVERY.json',recovery_sha256))
+        validate_recovery(recovery)
+        require(not list((recovery_root/'result').glob('*/checkpoint_*'))
+                and not list((recovery_root/'result').glob('*/evaluation_*')),
+                'cannot replay an optimizer arm with completed evaluations')
     frozen = json.loads(hashed(bundle/'backoff_INPUT_FREEZE.json', FREEZE_SHA))
     index = json.loads(hashed(bundle/'backoff_ACTIVE_DATA_CACHE.json', INDEX_SHA))
     records = validate_cache_contract(frozen, index)
@@ -141,7 +207,8 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
 
     screen(initial)
     shared_start = time.perf_counter()
-    shared = gradient_kernel(initial)
+    shared = (gradient_kernel(initial) if recovery is None else json.loads(hashed(
+        recovery_root/'result/SHARED_INITIAL_GRADIENT.json',recovery['shared_gradient_sha256'])))
     check_replay(shared['rpa']['candidate_energy_ha'],parent['final_candidate']['rpa']['candidate_energy_ha'],
                  flatten(raw(shared,'horizontal_gradient')),flatten(raw(old,'horizontal_gradient')),
                  shared['rpa']['reference_energy_ha'],REFERENCE)
@@ -222,7 +289,7 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
             try:
                 state=run_consecutive(initial_x,initial_record,np.zeros(248),gradient=grad,
                     retract=lambda x,v:flatten(retract_displacement(unflatten(x),unflatten(v),1.)),
-                    project=project,measure=measure,evaluate=lambda x:record(evaluate(unflatten(x))),
+                    project=project,measure=measure,evaluate=consecutive_evaluator(unflatten,evaluate,record),
                     checkpoint=lambda s:checkpoint(unflatten(s['x']),s),max_steps=max_steps,
                     max_trials=max_forwards*3,initial_radius=parent['optimization']['radius'],
                     max_radius=.04,min_radius=1e-6,enforce_pbe=False,require_nonincreasing_loss=False)
@@ -269,7 +336,8 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
         torch_version=torch.__version__,numpy_version=np.__version__,scipy_version=scipy.__version__,
         max_steps=max_steps,max_forwards_per_arm=max_forwards,chart_dimension=226,
         coefficient_count=248,chart_coordinate_bound=.05,load_seconds=load_seconds,
-        shared_initial_seconds=shared_seconds,shared_initial_forward=1,shared_initial_backward=1,
+        shared_initial_seconds=shared_seconds,shared_initial_forward=int(recovery is None),
+        shared_initial_backward=int(recovery is None),recovery=recovery,
         job_id=os.environ['SLURM_JOB_ID'],seconds=time.perf_counter()-start,
         peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         delta_st_runs=0,scf_runs=0,sos_runs=0)
@@ -280,11 +348,21 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--bundle',type=Path,required=True)
-    p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--source-commit',required=True)
+    p.add_argument('--bundle',type=Path)
+    p.add_argument('--output',type=Path)
+    p.add_argument('--source-commit')
+    p.add_argument('--prepare-recovery',type=Path)
+    p.add_argument('--recovery-root',type=Path)
+    p.add_argument('--recovery-sha256')
     args=p.parse_args()
-    run(args.bundle.resolve(),args.output.resolve(),args.source_commit)
+    if args.prepare_recovery:
+        print(prepare_recovery(args.prepare_recovery.resolve()))
+        return
+    if args.bundle is None or args.output is None or args.source_commit is None:
+        p.error('--bundle, --output and --source-commit are required for optimization')
+    run(args.bundle.resolve(),args.output.resolve(),args.source_commit,
+        recovery_root=args.recovery_root.resolve() if args.recovery_root else None,
+        recovery_sha256=args.recovery_sha256)
 
 
 if __name__ == '__main__': main()
