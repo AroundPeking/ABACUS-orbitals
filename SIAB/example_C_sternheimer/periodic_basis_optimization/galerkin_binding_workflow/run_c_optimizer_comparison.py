@@ -37,6 +37,15 @@ def validate_budget(steps, forwards):
             and type(forwards) is int and 0 < forwards <= 40, 'bounded comparison required')
 
 
+def execution_policy(continuation,steps,forwards):
+    if not continuation:
+        validate_budget(steps,forwards)
+        return ('steepest','lbfgs')
+    require(type(steps) is int and 0<steps<=60 and type(forwards) is int
+            and 0<forwards<=120,'bounded continuation required')
+    return ('lbfgs',)
+
+
 def consecutive_evaluator(unflatten,evaluate,record):
     def evaluate_point(x,trial_id):
         return record(evaluate(unflatten(x)))
@@ -94,7 +103,7 @@ def prepare_recovery(parent):
 
 
 def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
-        recovery_root=None,recovery_sha256=None):
+        recovery_root=None,recovery_sha256=None,continuation_root=None,continuation_sha256=None):
     import numpy as np
     import scipy
     import torch
@@ -124,7 +133,9 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
     def digest(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
     start = time.perf_counter()
-    validate_budget(max_steps, max_forwards)
+    arm_names=execution_policy(continuation_root is not None,max_steps,max_forwards)
+    require(not (continuation_root is not None and recovery_root is not None),
+            'continuation and failed-zero-step recovery are distinct')
     require(len(source_commit) == 40 and all(c in '0123456789abcdef' for c in source_commit),
             'immutable source commit required')
     require(os.environ.get('SLURM_JOB_ID') and os.environ.get('SLURM_JOB_NUM_NODES') == '1'
@@ -154,13 +165,24 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
     parent = json.loads(hashed(bundle/'energy_free/RESULT.json', PARENTS['energy_free']))
     cpath = bundle/'energy_free/FINAL/COEFFICIENTS.txt'
     hashed(cpath, parent['coefficient_sha256'])
-    initial = read(cpath)
     original = read(bundle/'backoff_ORIGINAL_COEFFICIENTS.txt')
     old = json.loads(hashed(bundle/'energy_free/gradient_020/GRADIENT.json',
                            parent['gradients'][-1]['gradient_sha256']))
     require(old['coefficient_sha256'] == parent['coefficient_sha256'], 'terminal center mismatch')
+    continuation=None
+    if continuation_root is not None:
+        from c_optimizer_continuation import admit_parent
+        require(continuation_root.parent==bundle.parent and continuation_root!=output.parent,
+                'continuation must use a distinct sibling df run')
+        continuation=admit_parent(continuation_root,continuation_sha256)
+        cpath=Path(continuation['coefficient_path'])
+        old=json.loads(hashed(Path(continuation['gradient_path']),continuation['gradient_sha256']))['diagnostic']
+        parent=dict(coefficient_sha256=continuation['coefficient_sha256'],
+                    final_candidate={'rpa':old['rpa']})
+    initial = read(cpath)
     torch.set_num_threads(int(os.environ['SLURM_CPUS_PER_TASK']))
     output.mkdir()
+    if continuation is not None: write(output/'CONTINUATION_PARENT.json',continuation)
     datasets = []
     for item, rec, iq, mult in zip(frozen['datasets'], records, INDICES, MULT):
         d = read_periodic_galerkin_dataset_cache(
@@ -207,8 +229,9 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
 
     screen(initial)
     shared_start = time.perf_counter()
-    shared = (gradient_kernel(initial) if recovery is None else json.loads(hashed(
-        recovery_root/'result/SHARED_INITIAL_GRADIENT.json',recovery['shared_gradient_sha256'])))
+    shared = (old if continuation is not None else gradient_kernel(initial) if recovery is None
+              else json.loads(hashed(recovery_root/'result/SHARED_INITIAL_GRADIENT.json',
+                                     recovery['shared_gradient_sha256'])))
     check_replay(shared['rpa']['candidate_energy_ha'],parent['final_candidate']['rpa']['candidate_energy_ha'],
                  flatten(raw(shared,'horizontal_gradient')),flatten(raw(old,'horizontal_gradient')),
                  shared['rpa']['reference_energy_ha'],REFERENCE)
@@ -224,7 +247,7 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
     require(np.max(np.abs(flatten(chart_zero)-initial_x)) < 1e-12, 'chart origin changed')
     arms={}
 
-    for arm in ('steepest','lbfgs'):
+    for arm in arm_names:
         arm_start=time.perf_counter(); root=output/arm; root.mkdir()
         counts=dict(forward=0,backward=0,cheap_screen=0,cache_hits=0)
         receipts=[]; accepted=[]
@@ -328,16 +351,18 @@ def run(bundle, output, source_commit, max_steps=12, max_forwards=24,
         write(root/'RESULT.json',result); arms[arm]=result
         (root/'STATUS').write_text('success\n')
 
-    result=dict(status='success',scope='bounded_optimizer_comparison',arms=arms,
+    fresh_shared=recovery is None and continuation is None
+    result=dict(status='success',scope='lbfgs_continuation' if continuation else 'bounded_optimizer_comparison',arms=arms,
         physical_release_gate=PHYSICAL_RELEASE,reference_energy_ha=REFERENCE,
-        parent_result_sha256=PARENTS['energy_free'],bundle_sha256=BUNDLE_SHA,
+        parent_result_sha256=continuation_sha256 if continuation else PARENTS['energy_free'],bundle_sha256=BUNDLE_SHA,
         source_commit=source_commit,source_manifest_sha256=digest(repo/'SOURCE_MANIFEST.json'),
         chart_sha256=digest(output/'CHART.json'),
         torch_version=torch.__version__,numpy_version=np.__version__,scipy_version=scipy.__version__,
         max_steps=max_steps,max_forwards_per_arm=max_forwards,chart_dimension=226,
         coefficient_count=248,chart_coordinate_bound=.05,load_seconds=load_seconds,
-        shared_initial_seconds=shared_seconds,shared_initial_forward=int(recovery is None),
-        shared_initial_backward=int(recovery is None),recovery=recovery,
+        shared_initial_seconds=shared_seconds,shared_initial_forward=int(fresh_shared),
+        shared_initial_backward=int(fresh_shared),recovery=recovery,continuation=continuation,
+        curvature_history='restarted_at_verified_parent' if continuation else 'fresh_comparison',
         job_id=os.environ['SLURM_JOB_ID'],seconds=time.perf_counter()-start,
         peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         delta_st_runs=0,scf_runs=0,sos_runs=0)
@@ -354,6 +379,10 @@ def main():
     p.add_argument('--prepare-recovery',type=Path)
     p.add_argument('--recovery-root',type=Path)
     p.add_argument('--recovery-sha256')
+    p.add_argument('--continuation-root',type=Path)
+    p.add_argument('--continuation-sha256')
+    p.add_argument('--max-steps',type=int,default=12)
+    p.add_argument('--max-forwards',type=int,default=24)
     args=p.parse_args()
     if args.prepare_recovery:
         print(prepare_recovery(args.prepare_recovery.resolve()))
@@ -361,8 +390,11 @@ def main():
     if args.bundle is None or args.output is None or args.source_commit is None:
         p.error('--bundle, --output and --source-commit are required for optimization')
     run(args.bundle.resolve(),args.output.resolve(),args.source_commit,
+        max_steps=args.max_steps,max_forwards=args.max_forwards,
         recovery_root=args.recovery_root.resolve() if args.recovery_root else None,
-        recovery_sha256=args.recovery_sha256)
+        recovery_sha256=args.recovery_sha256,
+        continuation_root=args.continuation_root.resolve() if args.continuation_root else None,
+        continuation_sha256=args.continuation_sha256)
 
 
 if __name__ == '__main__': main()
