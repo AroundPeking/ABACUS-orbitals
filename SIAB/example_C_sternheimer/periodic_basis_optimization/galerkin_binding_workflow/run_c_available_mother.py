@@ -47,7 +47,21 @@ def summarize(rows):
                 **{k: rows[0][k] for k in shared}, per_q=rows)
 
 
-def run(bundle, output, q_slot, source_commit):
+def validate_rank_tolerance(value):
+    require(math.isfinite(value) and 0 < value < 1, 'invalid relative rank tolerance')
+    return value
+
+
+def validate_job_contract(job, job_id, source_commit, relative_rank_tolerance):
+    validate_rank_tolerance(relative_rank_tolerance)
+    require(job.get('job_id') == job_id and job.get('source_commit') == source_commit
+            and job.get('bundle_sha256') == BUNDLE_SHA
+            and job.get('relative_rank_tolerance') == relative_rank_tolerance,
+            'unique registered job and rank tolerance required')
+
+
+def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12):
+    validate_rank_tolerance(relative_rank_tolerance)
     import numpy as np
     import torch
     repo = Path(__file__).resolve().parents[4]
@@ -77,9 +91,8 @@ def run(bundle, output, q_slot, source_commit):
     index = json.loads(hashed(bundle/'backoff_ACTIVE_DATA_CACHE.json', INDEX_SHA))
     records = validate_cache_contract(frozen, index)
     job = json.loads((output/'JOB.json').read_text())
-    require(job['job_id'] == os.environ.get('SLURM_ARRAY_JOB_ID')
-            and job['source_commit'] == source_commit and job['bundle_sha256'] == BUNDLE_SHA,
-            'unique registered job required')
+    validate_job_contract(job, os.environ.get('SLURM_ARRAY_JOB_ID'), source_commit,
+                          relative_rank_tolerance)
     target = output/('q%02d' % q_slot)
     target.mkdir()
     start = time.perf_counter()
@@ -108,7 +121,8 @@ def run(bundle, output, q_slot, source_commit):
                 progress.write(json.dumps(entry, allow_nan=False)+'\n')
                 progress.flush()
                 print(json.dumps(dict(q_slot=q_slot, **entry)), flush=True)
-            response, details = available_mother_response(dataset, progress=log)
+            response, details = available_mother_response(
+                dataset, relative_rank_tolerance=relative_rank_tolerance, progress=log)
         np.save(target/'PI.npy', response, allow_pickle=False)
         result = periodic_rpa_objective((dataset,), (torch.from_numpy(response),))
         qrecord = {k: (v.tolist() if isinstance(v, torch.Tensor) else v)
@@ -141,16 +155,26 @@ def run(bundle, output, q_slot, source_commit):
     except Exception as error:
         write(target/'FAILURE.json', dict(status='failed', exception=type(error).__name__,
             message=str(error), elapsed_seconds=time.perf_counter()-start,
-            source_commit=source_commit, physical_release_gate='hold'))
+            source_commit=source_commit, relative_rank_tolerance=relative_rank_tolerance,
+            physical_release_gate='hold'))
         (target/'STATUS').write_text('failed\n')
         raise
 
 
-if __name__ == '__main__':
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bundle', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--q-slot', type=int, required=True)
-    args = parser.parse_args()
-    run(args.bundle, args.output, args.q_slot, args.source_commit)
+    parser.add_argument('--relative-rank-tolerance', type=float, default=1e-12,
+                        help='normalized overlap rank cutoff; not auxiliary PCA threshold')
+    args = parser.parse_args(argv)
+    validate_rank_tolerance(args.relative_rank_tolerance)
+    return args
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    run(args.bundle, args.output, args.q_slot, args.source_commit,
+        relative_rank_tolerance=args.relative_rank_tolerance)

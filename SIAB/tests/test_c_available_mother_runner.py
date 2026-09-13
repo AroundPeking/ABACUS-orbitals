@@ -10,6 +10,33 @@ import run_c_available_mother as runner
 
 
 class MotherSummaryTest(unittest.TestCase):
+    def test_cutoff_cli_default_and_explicit_control(self):
+        flags = ['--bundle', '/bundle', '--output', '/output',
+                 '--source-commit', 'a'*40, '--q-slot', '0']
+        self.assertTrue(hasattr(runner, 'parse_args'))
+        self.assertEqual(runner.parse_args(flags).relative_rank_tolerance, 1e-12)
+        self.assertEqual(runner.parse_args(flags+['--relative-rank-tolerance', '1e-10'])
+                         .relative_rank_tolerance, 1e-10)
+
+    def test_invalid_cutoff_is_rejected_before_input_io(self):
+        self.assertTrue(hasattr(runner, 'validate_rank_tolerance'))
+        for value in (0., -1e-10, 1., float('nan'), float('inf')):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'rank tolerance'):
+                runner.validate_rank_tolerance(value)
+
+    def test_cutoff_must_match_unique_registered_job(self):
+        self.assertTrue(hasattr(runner, 'validate_job_contract'))
+        job = dict(job_id='123', source_commit='a'*40, bundle_sha256=runner.BUNDLE_SHA,
+                   relative_rank_tolerance=1e-10)
+        runner.validate_job_contract(job, '123', 'a'*40, 1e-10)
+        for changes in ({'relative_rank_tolerance': 1e-12}, {'job_id': '124'},
+                        {'source_commit': 'b'*40}, {'bundle_sha256': 'b'*64}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                runner.validate_job_contract(dict(job, **changes), '123', 'a'*40, 1e-10)
+        del job['relative_rank_tolerance']
+        with self.assertRaises(ValueError):
+            runner.validate_job_contract(job, '123', 'a'*40, 1e-10)
+
     def test_runner_preflight_has_no_dependency_on_optimizer_cli(self):
         with patch.dict('os.environ', {}, clear=True), patch.dict(
                 sys.modules, {'optimize_c_all_radial_fast': None}):
@@ -47,6 +74,7 @@ class MotherSummaryTest(unittest.TestCase):
                              ('reference_energy_ha', -1.), ('status', 'failed'),
                              ('shared_protocol', {'other': True}),
                              ('k_record_count', 63), ('source_commit', 'b'*40),
+                             ('relative_rank_tolerance', 1e-10),
                              ('candidate_energy_ha', float('nan'))]:
             changed = copy.deepcopy(rows)
             changed[1][field] = value
