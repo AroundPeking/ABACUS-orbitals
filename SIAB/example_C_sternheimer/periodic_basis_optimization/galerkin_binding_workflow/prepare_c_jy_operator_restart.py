@@ -1,4 +1,4 @@
-"""Prepare one Gamma frozen-density operator check; never submit a job."""
+"""Prepare one frozen-density operator check; finite q requires accepted Gamma."""
 import argparse
 import hashlib
 import json
@@ -82,7 +82,27 @@ def frequency_rows(text):
     return ''.join(row[2] + ' ' + row[3] + '\n' for row in rows)
 
 
-def prepare(reference, build_root, output):
+def export_q_contract(iq, gamma_acceptance):
+    if iq not in (1, 22, 43, 6, 27, 23, 11, 55):
+        raise ValueError('q index is not a frozen canonical representative')
+    if iq == 1:
+        return dict(scope='Gamma_frozen_density_operator_compatibility', selected_iq=1)
+    if gamma_acceptance is None:
+        raise ValueError('finite-q export requires accepted Gamma compatibility')
+    result = json.loads(gamma_acceptance.read_text())
+    if (result.get('status') != 'success'
+            or result.get('gamma_operator_compatibility_gate') != 'pass'
+            or result.get('failure_reasons') != []
+            or len(result.get('per_k', [])) != 64
+            or not all(row.get('pass_gate') is True for row in result['per_k'])):
+        raise ValueError('Gamma compatibility did not pass')
+    return dict(scope='finite_q_frozen_density_operators_pending_spd_compatibility',
+        selected_iq=iq, gamma_acceptance=str(gamma_acceptance.resolve()),
+        gamma_acceptance_sha256=sha(gamma_acceptance))
+
+
+def prepare(reference, build_root, output, iq=1, gamma_acceptance=None):
+    q_contract = export_q_contract(iq, gamma_acceptance)
     acceptance = json.loads((build_root/'result/BUILD_ACCEPTANCE.json').read_text())
     binary = build_root/'build/abacus_3p'
     if (acceptance['status'] != 'success'
@@ -127,11 +147,12 @@ def prepare(reference, build_root, output):
         coulomb_reuse.append(dict(source=str(source), staged=name, sha256=sha(source)))
     values.update(calculation='nscf', init_chg='file', read_file_dir='./frozen-density/',
         pseudo_dir='./', orbital_dir='./', kpar='8', sternheimer_frequency_mpi='0',
-        sternheimer_siab_source_only='1', sternheimer_frequency_grid_file='FREQUENCY_GRID.dat')
+        sternheimer_siab_source_only='1', sternheimer_frequency_grid_file='FREQUENCY_GRID.dat',
+        sternheimer_q_index=str(iq))
     (output/'INPUT').write_text('INPUT_PARAMETERS\n' + ''.join(k + ' ' + v + '\n' for k, v in values.items()))
     (output/'FREQUENCY_GRID.dat').write_text(frequencies)
     inputs = {str(p.relative_to(output)): sha(p) for p in output.rglob('*') if p.is_file()}
-    contract = dict(scope='Gamma_frozen_density_operator_compatibility',
+    contract = dict(q_contract,
         reference=str(reference), reference_manifest_sha256=sha(manifest),
         density_sha256=sha(density), source_commit=acceptance['source_commit'],
         build_acceptance_sha256=sha(build_root/'result/BUILD_ACCEPTANCE.json'),
@@ -150,5 +171,7 @@ if __name__ == '__main__':
     parser.add_argument('--reference', type=Path, required=True)
     parser.add_argument('--build-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--iq', type=int, default=1)
+    parser.add_argument('--gamma-acceptance', type=Path)
     args = parser.parse_args()
-    prepare(args.reference, args.build_root, args.output)
+    prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance)

@@ -3,6 +3,7 @@ from pathlib import Path
 import unittest
 import struct
 import tempfile
+import json
 
 PATH = Path(__file__).resolve().parents[1]/'example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/prepare_c_jy_operator_restart.py'
 SPEC = importlib.util.spec_from_file_location('operator_restart', PATH)
@@ -11,6 +12,25 @@ SPEC.loader.exec_module(MODULE)
 
 
 class OperatorRestartTest(unittest.TestCase):
+    def test_finite_q_requires_accepted_gamma_compatibility(self):
+        self.assertEqual(MODULE.export_q_contract(1, None)['selected_iq'], 1)
+        with self.assertRaisesRegex(ValueError, 'Gamma'):
+            MODULE.export_q_contract(22, None)
+        with self.assertRaisesRegex(ValueError, 'representative'):
+            MODULE.export_q_contract(2, None)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'RESULT.json'
+            result = dict(status='success', gamma_operator_compatibility_gate='hold',
+                failure_reasons=['k1'], per_k=[dict(pass_gate=True)]*64)
+            path.write_text(json.dumps(result))
+            with self.assertRaisesRegex(ValueError, 'Gamma'):
+                MODULE.export_q_contract(22, path)
+            result.update(gamma_operator_compatibility_gate='pass', failure_reasons=[])
+            path.write_text(json.dumps(result))
+            contract = MODULE.export_q_contract(22, path)
+            self.assertEqual(contract['selected_iq'], 22)
+            self.assertEqual(contract['gamma_acceptance_sha256'], MODULE.sha(path))
+
     def test_gamma_coulomb_reuse_requires_complete_unique_pairs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
