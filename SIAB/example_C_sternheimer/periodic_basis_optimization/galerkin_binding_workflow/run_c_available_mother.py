@@ -56,7 +56,6 @@ def run(bundle, output, q_slot, source_commit):
     from periodic_galerkin_basis import read_periodic_optimizer_coefficients
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_rpa import periodic_rpa_objective
-    from optimize_c_all_radial_fast import _validate_c_dataset
 
     require(0 <= q_slot < 8, 'invalid q slot')
     require(os.environ.get('C_EXECUTION_HOST') == 'df_iopcas_ghj'
@@ -94,7 +93,14 @@ def run(bundle, output, q_slot, source_commit):
             within(bundle, manifest['cache_paths'][str(item['label'])]),
             cache_sha256=record['complete_sha256'], active_coefficients=original,
             **record['binding'])
-        _validate_c_dataset(dataset, item, INDICES[q_slot], MULT[q_slot])
+        require(dataset.selected_iq == item['selected_iq'] == INDICES[q_slot]
+                and dataset.q_count == 64
+                and dataset.q_weight == item['q_weight'] == MULT[q_slot]/64.
+                and dataset.physics_hash == item['physics_hash'], 'q identity mismatch')
+        require(len(dataset.kpoints) == 64 and dataset.frequency_ha.numel() == 12
+                and dataset.primitive_count == 558
+                and dataset.active_primitive_reduction.original_primitive_count == 1550,
+                'full-k/frequency/exact-reduction contract mismatch')
         load_seconds = time.perf_counter()-start
         with (target/'K_PROGRESS.jsonl').open('x') as progress:
             def log(entry):

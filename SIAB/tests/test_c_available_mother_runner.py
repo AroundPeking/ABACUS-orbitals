@@ -2,6 +2,7 @@ import copy
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'example_C_sternheimer'
                        /'periodic_basis_optimization/galerkin_binding_workflow'))
@@ -9,6 +10,12 @@ import run_c_available_mother as runner
 
 
 class MotherSummaryTest(unittest.TestCase):
+    def test_runner_preflight_has_no_dependency_on_optimizer_cli(self):
+        with patch.dict('os.environ', {}, clear=True), patch.dict(
+                sys.modules, {'optimize_c_all_radial_fast': None}):
+            with self.assertRaisesRegex(ValueError, 'registered single-node DF'):
+                runner.run(Path('/not-opened'), Path('/not-created'), 0, 'a'*40)
+
     def rows(self):
         return [dict(status='success', selected_iq=iq, q_weight=m/64.,
                      candidate_energy_ha=-.5*m/64.,
