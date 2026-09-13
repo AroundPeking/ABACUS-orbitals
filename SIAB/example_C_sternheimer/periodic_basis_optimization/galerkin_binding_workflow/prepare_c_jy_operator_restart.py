@@ -9,6 +9,8 @@ import struct
 
 REFERENCE_REUSE_SHA = '0bc101cdfdd6b2fb3b279a0f24404f49e182c917c0efd7de574bfb366aec0bb2'
 GAMMA_SOURCE_AUDIT_SHA = '98c59af6cafcde09ffdc9807fa042bc1279b6e32b9ca0f0f69c490ec83d4e9b5'
+FROZEN_AUXILIARY_COMMIT = '0613452ee9e176e5fb34364cfe296cccca706e77'
+Q2_CACHE_METADATA_SHA = 'd7935a428448db3b75c52ed639487a4b5677685ef90a2ca8a14ba53944c21454'
 
 
 def gamma_coulomb_files(reference):
@@ -58,6 +60,50 @@ def sha(path):
         for block in iter(lambda: stream.read(2**20), b''):
             digest.update(block)
     return digest.hexdigest()
+
+
+def freeze_auxiliary_cache(cache, output, iq, expected_metadata_sha256):
+    """Serialize the pinned reference V/W, without diagonalization or truncation."""
+    import numpy as np
+    complete_path, metadata_path = cache / 'COMPLETE.json', cache / 'dataset.json'
+    complete = json.loads(complete_path.read_text())
+    if complete.get('status') != 'complete' or complete.get('format_version') != 1:
+        raise ValueError('complete cache required for frozen auxiliary input')
+    metadata_sha = sha(metadata_path)
+    if metadata_sha != expected_metadata_sha256 or complete.get('metadata_sha256') != metadata_sha:
+        raise ValueError('frozen auxiliary cache metadata hash mismatch')
+    metadata = json.loads(metadata_path.read_text())
+    scalar = metadata['source']['scalar']
+    if scalar['selected_iq'] != [str(iq)] or scalar['kernel'] != ['full_coulomb']:
+        raise ValueError('frozen auxiliary cache q or kernel mismatch')
+    raw, rank = int(scalar['raw_auxiliary_dimension'][0]), int(scalar['whitened_auxiliary_rank'][0])
+    if not 0 < rank <= raw:
+        raise ValueError('frozen auxiliary cache dimensions invalid')
+    payloads, records = {}, {}
+    for key, kind, shape in (('coulomb_metric', 4, (raw, raw)), ('coulomb_whitening', 5, (raw, rank))):
+        field = metadata['dataset']['fields'][key]
+        if field['type'] != 'tensor' or not 0 <= field['index'] < len(metadata['arrays']):
+            raise ValueError('frozen auxiliary array descriptor invalid')
+        record = metadata['arrays'][field['index']]
+        path = (cache / record['file']).resolve()
+        if cache.resolve() not in path.parents or sha(path) != record['sha256']:
+            raise ValueError('frozen auxiliary array path or hash mismatch')
+        value = np.load(path, allow_pickle=False)
+        if (tuple(record['shape']) != shape or value.shape != shape or value.dtype.str != record['dtype']
+                or value.dtype.kind != 'c' or not np.isfinite(value).all()):
+            raise ValueError('frozen auxiliary array shape, dtype or finite-value mismatch')
+        payloads[key] = (struct.pack('<16sIIiiiQQ', b'ABACUS_STBOPT_V1', 1, kind, iq, 0, -1, *shape)
+                         + np.asarray(value, dtype='<c16').tobytes(order='C'))
+        records[key] = record
+    output.mkdir()
+    for key, payload in payloads.items():
+        (output / (key + '.bin')).write_bytes(payload)
+    return dict(origin='frozen_reference', cache=str(cache.resolve()), selected_iq=iq,
+                metadata_sha256=metadata_sha, complete_sha256=sha(complete_path),
+                raw_auxiliary_dimension=raw, whitened_auxiliary_rank=rank, arrays=records,
+                metric_sha256=sha(output / 'coulomb_metric.bin'),
+                whitening_sha256=sha(output / 'coulomb_whitening.bin'),
+                reselected_or_padded=False, identity_error_is_diagnostic_only=True)
 
 
 def input_values(text):
@@ -166,7 +212,11 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path):
 
 
 def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
-            source_extension_reference_reuse=None, source_extension_gamma_audit=None):
+            source_extension_reference_reuse=None, source_extension_gamma_audit=None,
+            frozen_auxiliary_cache=None):
+    if frozen_auxiliary_cache is not None and (iq != 22 or source_extension_reference_reuse is None
+                                              or source_extension_gamma_audit is None):
+        raise ValueError('frozen auxiliary mode requires the admitted iq=22 source-extension contract')
     if source_extension_reference_reuse is not None or source_extension_gamma_audit is not None:
         if gamma_acceptance is not None:
             raise ValueError('operator and source-extension modes are mutually exclusive')
@@ -176,8 +226,10 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
         q_contract = export_q_contract(iq, gamma_acceptance)
     acceptance = json.loads((build_root/'result/BUILD_ACCEPTANCE.json').read_text())
     binary = build_root/'build/abacus_3p'
+    required_commit = (FROZEN_AUXILIARY_COMMIT if frozen_auxiliary_cache is not None
+                       else 'e1d0e64591fbd0324533c25cffbd6f94f6a1da4f')
     if (acceptance['status'] != 'success'
-            or acceptance['source_commit'] != 'e1d0e64591fbd0324533c25cffbd6f94f6a1da4f'
+            or acceptance['source_commit'] != required_commit
             or acceptance['binary_sha256'] != sha(binary)):
         raise ValueError('accepted operators-only build required')
     values = input_values((reference/'INPUT').read_text())
@@ -222,6 +274,9 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
         sternheimer_q_index=str(iq))
     (output/'INPUT').write_text('INPUT_PARAMETERS\n' + ''.join(k + ' ' + v + '\n' for k, v in values.items()))
     (output/'FREQUENCY_GRID.dat').write_text(frequencies)
+    if frozen_auxiliary_cache is not None:
+        q_contract['frozen_auxiliary'] = freeze_auxiliary_cache(
+            frozen_auxiliary_cache, output/'frozen-auxiliary', iq, Q2_CACHE_METADATA_SHA)
     inputs = {str(p.relative_to(output)): sha(p) for p in output.rglob('*') if p.is_file()}
     contract = dict(q_contract,
         reference=str(reference), reference_manifest_sha256=sha(manifest),
@@ -246,6 +301,8 @@ if __name__ == '__main__':
     parser.add_argument('--gamma-acceptance', type=Path)
     parser.add_argument('--source-extension-reference-reuse', type=Path)
     parser.add_argument('--source-extension-gamma-audit', type=Path)
+    parser.add_argument('--frozen-auxiliary-cache', type=Path)
     args = parser.parse_args()
     prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance,
-            args.source_extension_reference_reuse, args.source_extension_gamma_audit)
+            args.source_extension_reference_reuse, args.source_extension_gamma_audit,
+            args.frozen_auxiliary_cache)
