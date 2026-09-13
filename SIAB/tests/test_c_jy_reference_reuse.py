@@ -76,6 +76,17 @@ class ReferenceReuseTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.validate_reader_tree(root, {'../reader.py': bindings['reader.py']})
 
+    def test_two_archives_use_separate_accepted_manifest_identities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'manifest.dat').write_bytes(b'Gamma full mother')
+            (root/'status.dat').write_bytes(b'accepted')
+            manifest = hashlib.sha256(b'Gamma full mother').hexdigest()
+            status = hashlib.sha256(b'accepted').hexdigest()
+            MODULE.validate_reference_archive(root, manifest, status)
+            with self.assertRaises(ValueError):
+                MODULE.validate_reference_archive(root, hashlib.sha256(b'spd cache producer').hexdigest(), status)
+
 
 if __name__ == '__main__':
     unittest.main()
