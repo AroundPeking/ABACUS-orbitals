@@ -10,6 +10,24 @@ import run_c_available_mother as runner
 
 
 class MotherSummaryTest(unittest.TestCase):
+    def test_target_preparation_is_explicit_and_bound_to_accepted_control(self):
+        flags = ['--bundle', '/bundle', '--output', '/output',
+                 '--source-commit', 'a'*40, '--q-slot', '0']
+        self.assertTrue(hasattr(runner, 'validate_target_job'))
+        self.assertIsNone(runner.parse_args(flags).prepare_targets_from)
+        args = runner.parse_args(flags+['--relative-rank-tolerance', '1e-10',
+                                       '--prepare-targets-from', '/accepted'])
+        self.assertEqual(args.prepare_targets_from, Path('/accepted'))
+        job = dict(stage='available_response_target_preparation', target_baseline='/accepted',
+                   target_baseline_summary_sha256=runner.TARGET_BASELINE_SHA)
+        runner.validate_target_job(job, Path('/accepted'), 1e-10)
+        for changes in ({'stage': 'available_mother'}, {'target_baseline': '/other'},
+                        {'target_baseline_summary_sha256': 'b'*64}):
+            with self.assertRaises(ValueError):
+                runner.validate_target_job(dict(job, **changes), Path('/accepted'), 1e-10)
+        with self.assertRaises(ValueError):
+            runner.validate_target_job(job, Path('/accepted'), 1e-12)
+
     def test_cutoff_cli_default_and_explicit_control(self):
         flags = ['--bundle', '/bundle', '--output', '/output',
                  '--source-commit', 'a'*40, '--q-slot', '0']

@@ -21,7 +21,7 @@ def _array(value):
 
 def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
                               condition_limit=1e12, capture_tolerance=1e-6,
-                              progress=None):
+                              progress=None, target_consumer=None):
     """Sum the existing Hermitian per-k response convention, weights once.
 
     The metric is diagonally normalized before rank truncation, exactly as in
@@ -110,6 +110,11 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
                      raw_minimum_capture=float(raw_capture[0]),
                      raw_maximum_capture=float(raw_capture[-1]), **captures)
         entry.update(spectral)
+        if target_consumer is not None:
+            # A read-only target builder can consume this exact retained frame.
+            # No coordinate alignment across q/k records is assumed.
+            target_consumer(record, hvirtual, (_array(record.source)@lowdin)@virtual,
+                            virtual.conj().T@lowdin.conj().T@overlap, pi, dict(entry))
         report['k_records'].append(entry)
         report['k_weight_sum'] += record.k_weight
         if progress is not None:

@@ -19,6 +19,16 @@ from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, INDICES, MULT,
                                     hashed, require, validate_cache_contract, within, write)
 from run_c_optimizer_comparison import BUNDLE_SHA, REFERENCE, EV_PER_HA_PER_C
 
+TARGET_BASELINE_SHA = '1150140a725f40ad5f96f58954231d58516e5480bf95bfc19b03d3f7f175adf4'
+
+
+def validate_target_job(job, baseline, relative_rank_tolerance):
+    require(relative_rank_tolerance == 1e-10
+            and job.get('stage') == 'available_response_target_preparation'
+            and job.get('target_baseline') == str(baseline)
+            and job.get('target_baseline_summary_sha256') == TARGET_BASELINE_SHA,
+            'response target must bind accepted 1e-10 control and explicit job stage')
+
 
 def summarize(rows):
     require(len(rows) == 8 and [r['selected_iq'] for r in rows] == list(INDICES),
@@ -60,7 +70,8 @@ def validate_job_contract(job, job_id, source_commit, relative_rank_tolerance):
             'unique registered job and rank tolerance required')
 
 
-def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12):
+def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12,
+        prepare_targets_from=None):
     validate_rank_tolerance(relative_rank_tolerance)
     import numpy as np
     import torch
@@ -93,6 +104,13 @@ def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12)
     job = json.loads((output/'JOB.json').read_text())
     validate_job_contract(job, os.environ.get('SLURM_ARRAY_JOB_ID'), source_commit,
                           relative_rank_tolerance)
+    baseline = None
+    if prepare_targets_from is not None:
+        validate_target_job(job, prepare_targets_from, relative_rank_tolerance)
+        baseline = json.loads(hashed(prepare_targets_from/'SUMMARY.json', TARGET_BASELINE_SHA))
+        require(baseline['status'] == 'success' and baseline['bundle_sha256'] == BUNDLE_SHA
+                and baseline['relative_rank_tolerance'] == relative_rank_tolerance,
+                'accepted target baseline mismatch')
     target = output/('q%02d' % q_slot)
     target.mkdir()
     start = time.perf_counter()
@@ -115,14 +133,64 @@ def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12)
                 and dataset.active_primitive_reduction.original_primitive_count == 1550,
                 'full-k/frequency/exact-reduction contract mismatch')
         load_seconds = time.perf_counter()-start
+        target_rows = []
         with (target/'K_PROGRESS.jsonl').open('x') as progress:
             def log(entry):
                 entry = dict(entry, elapsed_seconds=time.perf_counter()-start)
                 progress.write(json.dumps(entry, allow_nan=False)+'\n')
                 progress.flush()
                 print(json.dumps(dict(q_slot=q_slot, **entry)), flush=True)
-            response, details = available_mother_response(
-                dataset, relative_rank_tolerance=relative_rank_tolerance, progress=log)
+            if baseline is None:
+                response, details = available_mother_response(
+                    dataset, relative_rank_tolerance=relative_rank_tolerance, progress=log)
+            else:
+                from response_target import build_available_response_targets
+                def consume(covariance, embedding, pi, metadata):
+                    values = np.linalg.eigvalsh(covariance)
+                    require(np.isfinite(embedding).all() and values[-1] > 0
+                            and values[0] >= -1e-10*values[-1], 'invalid fixed target spectrum')
+                    stem = 'k%04d' % metadata['source_ik']
+                    array_file = target/(stem+'.npz')
+                    with array_file.open('xb') as stream:
+                        np.savez(stream, covariance=covariance, embedding=embedding)
+                    row = dict(metadata, file=array_file.name,
+                        sha256=hashlib.sha256(array_file.read_bytes()).hexdigest(),
+                        covariance_dimension=len(covariance), primitive_count=embedding.shape[1],
+                        covariance_minimum=float(values[0]), covariance_maximum=float(values[-1]),
+                        source_kpoint=list(dataset.kpoints[len(target_rows)].source_kpoint),
+                        target_kpoint=list(dataset.kpoints[len(target_rows)].target_kpoint))
+                    target_rows.append(row)
+                response, details = build_available_response_targets(dataset, consume,
+                    relative_rank_tolerance=relative_rank_tolerance, progress=log)
+                expected = baseline['per_q'][q_slot]
+                baseline_q = prepare_targets_from/('q%02d' % q_slot)
+                previous = json.loads((baseline_q/'PROVENANCE.json').read_text())
+                require(previous['status'] == 'success', 'baseline q provenance failed')
+                for name, sha in previous['files'].items():
+                    hashed(within(baseline_q, name), sha)
+                old_pi = np.load(baseline_q/'PI.npy', allow_pickle=False)
+                pi_error = float(np.linalg.norm(response-old_pi)/max(np.linalg.norm(old_pi), 1e-300))
+                require(expected['selected_iq'] == dataset.selected_iq
+                        and expected['cache_complete_sha256'] == record['complete_sha256']
+                        and expected['frequency_ha'] == dataset.frequency_ha.tolist()
+                        and expected['frequency_weights_ha'] == dataset.frequency_weights_ha.tolist()
+                        and pi_error <= 1e-10 and len(target_rows) == 64,
+                        'target failed accepted full-q mother consistency')
+                details.update(target_sector_count=len(target_rows),
+                    target_norm2=math.fsum(r['target_norm2'] for r in target_rows),
+                    baseline_pi_relative_error=pi_error,
+                    target_baseline_summary_sha256=TARGET_BASELINE_SHA)
+                write(target/'TARGETS.json', dict(status='success',
+                    source_commit=source_commit, bundle_sha256=BUNDLE_SHA,
+                    cache_complete_sha256=record['complete_sha256'],
+                    relative_rank_tolerance=relative_rank_tolerance,
+                    primitive_blocks=[asdict(block) for block in dataset.primitive_blocks],
+                    frequency_ha=dataset.frequency_ha.tolist(),
+                    frequency_weights_ha=dataset.frequency_weights_ha.tolist(),
+                    sector_count=len(target_rows), target_norm2=details['target_norm2'],
+                    exact_reference_snapshot_fit=False, physical_release_gate='hold',
+                    target_truncation='none', coordinate_merge='none_per_q_source_target_record',
+                    target_baseline_summary_sha256=TARGET_BASELINE_SHA, sectors=target_rows))
         np.save(target/'PI.npy', response, allow_pickle=False)
         result = periodic_rpa_objective((dataset,), (torch.from_numpy(response),))
         qrecord = {k: (v.tolist() if isinstance(v, torch.Tensor) else v)
@@ -150,7 +218,8 @@ def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12)
         write(target/'PROVENANCE.json', dict(status='success', source_commit=source_commit,
             job_id=os.environ['SLURM_JOB_ID'], array_slot=q_slot,
             files={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                   for p in (target/'PI.npy', target/'RESULT.json', target/'K_PROGRESS.jsonl')}))
+                   for p in ((target/'PI.npy', target/'RESULT.json', target/'K_PROGRESS.jsonl')
+                             + ((target/'TARGETS.json',) if baseline is not None else ()))}))
         (target/'STATUS').write_text('success\n')
     except Exception as error:
         write(target/'FAILURE.json', dict(status='failed', exception=type(error).__name__,
@@ -169,6 +238,8 @@ def parse_args(argv=None):
     parser.add_argument('--q-slot', type=int, required=True)
     parser.add_argument('--relative-rank-tolerance', type=float, default=1e-12,
                         help='normalized overlap rank cutoff; not auxiliary PCA threshold')
+    parser.add_argument('--prepare-targets-from', type=Path,
+                        help='explicit fixed-target mode; binds the accepted 1e-10 mother run')
     args = parser.parse_args(argv)
     validate_rank_tolerance(args.relative_rank_tolerance)
     return args
@@ -177,4 +248,5 @@ def parse_args(argv=None):
 if __name__ == '__main__':
     args = parse_args()
     run(args.bundle, args.output, args.q_slot, args.source_commit,
-        relative_rank_tolerance=args.relative_rank_tolerance)
+        relative_rank_tolerance=args.relative_rank_tolerance,
+        prepare_targets_from=args.prepare_targets_from)
