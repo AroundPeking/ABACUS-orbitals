@@ -1,4 +1,4 @@
-"""Prepare one frozen-density operator check; finite q requires accepted Gamma."""
+"""Prepare frozen-density exports with separate operator and source-only contracts."""
 import argparse
 import hashlib
 import json
@@ -6,6 +6,9 @@ import math
 from pathlib import Path
 import shutil
 import struct
+
+REFERENCE_REUSE_SHA = '0bc101cdfdd6b2fb3b279a0f24404f49e182c917c0efd7de574bfb366aec0bb2'
+GAMMA_SOURCE_AUDIT_SHA = '98c59af6cafcde09ffdc9807fa042bc1279b6e32b9ca0f0f69c490ec83d4e9b5'
 
 
 def gamma_coulomb_files(reference):
@@ -101,8 +104,76 @@ def export_q_contract(iq, gamma_acceptance):
         gamma_acceptance_sha256=sha(gamma_acceptance))
 
 
-def prepare(reference, build_root, output, iq=1, gamma_acceptance=None):
-    q_contract = export_q_contract(iq, gamma_acceptance)
+def validate_source_extension_evidence(reuse, gamma):
+    """Admit a source export, never the regenerated Hamiltonian or its energy."""
+    qrows = reuse.get('per_q', [])
+    if (reuse.get('status') != 'success'
+            or reuse.get('original_gamma_operator_reuse_gate') != 'pass'
+            or reuse.get('failure_reasons') != []
+            or reuse.get('compared_space') != 'existing_spd_subblocks_only'
+            or reuse.get('regenerated_hamiltonian_admitted') is not False
+            or reuse.get('missing_finite_q_sources_admitted') is not False
+            or [q.get('selected_iq') for q in qrows] != [1, 22, 43, 6, 27, 23, 11, 55]):
+        raise ValueError('complete original all-q reuse evidence required')
+    for q in qrows:
+        rows = q.get('per_k', [])
+        if (q.get('pass_gate') is not True or len(rows) != 64
+                or not all(r.get('pass_gate') is True for r in rows)
+                or sorted(r['source_ik'] for r in rows) != list(range(1, 65))
+                or sorted(r['target_ik'] for r in rows) != list(range(1, 65))):
+            raise ValueError('all-q reuse failed or k routing incomplete')
+    rows = gamma.get('per_k', [])
+    if (gamma.get('status') != 'success' or len(rows) != 64
+            or sorted(r['ik'] for r in rows) != list(range(1, 65))):
+        raise ValueError('complete Gamma source audit required')
+    values = [(gamma['metric']['relative'], 1e-8), (gamma['auxiliary_map_unitarity'], 5e-6)]
+    for row in rows:
+        values.extend([(row['overlap']['max_abs'], 1e-10),
+            (row['occupied']['relative'], 1e-6), (row['occupied']['unitarity'], 1e-6),
+            (row['occupied_energy_ry']['max_abs'], 1e-6),
+            (row['occupied_energy_commutator_ry'], 1e-6), (row['source']['relative'], 1e-6)])
+    if any(not math.isfinite(value) or value < 0 or value > limit for value, limit in values):
+        raise ValueError('Gamma source/occupied/auxiliary compatibility failed')
+    return dict(hamiltonian_origin='original_Gamma_at_target_k',
+        overlap_origin='original_Gamma_at_target_k', occupied_origin='original_Gamma_at_target_k',
+        regenerated_hamiltonian_admitted=False,
+        new_source_admission='pending_finite_q_spd_check',
+        gamma_full_operator_gate=gamma['gamma_operator_compatibility_gate'],
+        gamma_full_operator_failure_reasons=gamma['failure_reasons'])
+
+
+def source_extension_contract(iq, reference, reuse_path, gamma_path):
+    if iq != 22:
+        raise ValueError('source extension currently permits only the iq=22 pilot')
+    if (reuse_path is None or gamma_path is None
+            or sha(reuse_path) != REFERENCE_REUSE_SHA or sha(gamma_path) != GAMMA_SOURCE_AUDIT_SHA):
+        raise ValueError('source extension requires the two locked independent audits')
+    reuse, gamma = json.loads(reuse_path.read_text()), json.loads(gamma_path.read_text())
+    contract = validate_source_extension_evidence(reuse, gamma)
+    raw = Path(reuse['reference']).resolve()
+    if reference.resolve() not in raw.parents or raw.name != 'STERNHEIMER_BASIS_OPT_V1':
+        raise ValueError('original operator reference path mismatch')
+    for name, digest in reuse['reference_hashes'].items():
+        path = (raw/name).resolve()
+        if raw not in path.parents or sha(path) != digest:
+            raise ValueError('original operator archive hash mismatch: '+name)
+    contract.update(scope='finite_q_source_extension_original_operators_only', selected_iq=iq,
+        reference_reuse_audit=str(reuse_path.resolve()), reference_reuse_sha256=sha(reuse_path),
+        gamma_source_audit=str(gamma_path.resolve()), gamma_source_audit_sha256=sha(gamma_path),
+        original_operator_directory=str(raw), original_operator_hashes=reuse['reference_hashes'],
+        downstream_required_gate='finite_q_spd_source_compatibility')
+    return contract
+
+
+def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
+            source_extension_reference_reuse=None, source_extension_gamma_audit=None):
+    if source_extension_reference_reuse is not None or source_extension_gamma_audit is not None:
+        if gamma_acceptance is not None:
+            raise ValueError('operator and source-extension modes are mutually exclusive')
+        q_contract = source_extension_contract(iq, reference, source_extension_reference_reuse,
+                                             source_extension_gamma_audit)
+    else:
+        q_contract = export_q_contract(iq, gamma_acceptance)
     acceptance = json.loads((build_root/'result/BUILD_ACCEPTANCE.json').read_text())
     binary = build_root/'build/abacus_3p'
     if (acceptance['status'] != 'success'
@@ -173,5 +244,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--iq', type=int, default=1)
     parser.add_argument('--gamma-acceptance', type=Path)
+    parser.add_argument('--source-extension-reference-reuse', type=Path)
+    parser.add_argument('--source-extension-gamma-audit', type=Path)
     args = parser.parse_args()
-    prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance)
+    prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance,
+            args.source_extension_reference_reuse, args.source_extension_gamma_audit)
