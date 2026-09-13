@@ -45,6 +45,7 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
         condition_limit=condition_limit, capture_tolerance=capture_tolerance,
         selected_iq=dataset.selected_iq, q_weight=dataset.q_weight,
         metric='diagonal_normalized_overlap',
+        hamiltonian_projection='production_virtual_then_hermitian_part',
         response_convention='sum_k_half_plus_adjoint_no_q_or_frequency_weight',
         reference_snapshot_count=sum(int(r.reference_projection.numel() > 0)
                                      for r in dataset.kpoints),
@@ -80,11 +81,20 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
         _, virtual, captures = occupied_frames(occupied)
         if captures['minimum_capture'] < 1.-capture_tolerance:
             raise ValueError('available mother lost fixed occupied capture')
-        hamiltonian, _ = _hermitian(_array(record.hamiltonian_ha))
+        hamiltonian, raw_h_residual = _hermitian(_array(record.hamiltonian_ha))
+        horth = lowdin.conj().T@hamiltonian@lowdin
+        hvirtual = virtual.conj().T@horth@virtual
+        horth_residual = float(np.linalg.norm(horth-horth.conj().T)
+                              / max(np.linalg.norm(horth), 1e-300))
+        hvirtual_residual = float(np.linalg.norm(hvirtual-hvirtual.conj().T)
+                                 / max(np.linalg.norm(hvirtual), 1e-300))
+        # Production symmetrizes after virtual projection. Near-null overlap
+        # modes amplify roundoff here; keep the raw-input gate and report it.
+        hvirtual = .5*(hvirtual+hvirtual.conj().T)
         pi, spectral = galerkin_pi(
-            lowdin.conj().T@hamiltonian@lowdin, _array(record.source)@lowdin,
+            hvirtual, (_array(record.source)@lowdin)@virtual,
             _array(record.source_eigenvalue_ha), _array(record.occupation),
-            _array(dataset.frequency_ha), virtual, record.k_weight)
+            _array(dataset.frequency_ha), np.eye(virtual.shape[1]), record.k_weight)
         if pi.shape != total.shape:
             raise ValueError('available mother response/reference dimensions differ')
         total += pi
@@ -94,6 +104,9 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
                      overlap_condition=condition, metric_residual=metric_residual,
                      normalized_overlap_minimum=float(spectrum[0]),
                      normalized_overlap_maximum=float(spectrum[-1]),
+                     raw_h_antisymmetric_residual=raw_h_residual,
+                     orthogonal_h_antisymmetric_residual_before_symmetrization=horth_residual,
+                     virtual_h_antisymmetric_residual_before_symmetrization=hvirtual_residual,
                      raw_minimum_capture=float(raw_capture[0]),
                      raw_maximum_capture=float(raw_capture[-1]), **captures)
         entry.update(spectral)

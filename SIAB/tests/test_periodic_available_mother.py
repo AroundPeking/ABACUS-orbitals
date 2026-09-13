@@ -109,6 +109,42 @@ class AvailableMotherTest(unittest.TestCase):
         np.testing.assert_allclose(actual, expected.numpy(), rtol=2e-12, atol=1e-14)
         self.assertEqual(report['k_weight_sum'], 1.)
 
+    def test_ill_conditioned_transform_uses_production_virtual_hermitization(self):
+        dataset = self.fixture()
+        r = dataset.kpoints[0]
+        rng = np.random.default_rng(31)
+        n = 12
+        u, _ = np.linalg.qr(rng.normal(size=(n, n))+1j*rng.normal(size=(n, n)))
+        v, _ = np.linalg.qr(rng.normal(size=(n, n))+1j*rng.normal(size=(n, n)))
+        t = torch.from_numpy(u@np.diag(np.geomspace(1., 1e-5, n))@v.conj().T)
+        h = torch.diag(torch.linspace(.6, 2., n, dtype=torch.float64)).to(torch.complex128)
+        h[0, 0] = -.5
+        source = torch.zeros((1, 1, n), dtype=torch.complex128)
+        source[0, 0, 1:] = .1
+        occupied = torch.zeros((1, n), dtype=torch.complex128)
+        occupied[0, 0] = 1.
+        r = replace(r, overlap=t.T.conj()@t, hamiltonian_ha=t.T.conj()@h@t,
+                    source=source@t, occupied_projection=occupied@t,
+                    reference_projection=torch.zeros((2, 1, 1, n), dtype=torch.complex128))
+        dataset = replace(dataset, primitive_count=n, kpoints=(r,),
+                          frequency_ha=torch.tensor([.05, 10.], dtype=torch.float64),
+                          frequency_weights_ha=torch.tensor([.2, .8], dtype=torch.float64),
+                          reference_response=torch.zeros((2, 1, 1), dtype=torch.complex128))
+        expected = evaluate_periodic_galerkin_mother_response(dataset).response
+        actual, report = mother.available_mother_response(dataset)
+        np.testing.assert_allclose(actual, expected.numpy(), rtol=3e-5, atol=1e-10)
+        entry = report['k_records'][0]
+        self.assertGreater(entry['virtual_h_antisymmetric_residual_before_symmetrization'], 1e-10)
+        self.assertEqual(report['hamiltonian_projection'], 'production_virtual_then_hermitian_part')
+
+    def test_nonhermitian_raw_hamiltonian_is_not_hidden_by_projection(self):
+        dataset = self.fixture()
+        r = dataset.kpoints[0]
+        h = r.hamiltonian_ha.clone()
+        h[0, 1] = .01j
+        with self.assertRaisesRegex(ValueError, 'Hermitian'):
+            mother.available_mother_response(replace(dataset, kpoints=(replace(r, hamiltonian_ha=h),)))
+
 
 if __name__ == '__main__':
     unittest.main()
