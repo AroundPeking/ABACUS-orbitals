@@ -35,3 +35,30 @@ PYTHONPATH=SIAB/opt_orb_pytorch_dpsi python -m unittest discover -s SIAB/tests -
 The initial diagnostic was tested on one destination k sector of the frozen
 C Gamma data, twelve frequencies, in read-only DF job 3333617. Its production
 inputs and case-specific provenance remain separate from this reusable core.
+
+## Frozen-H observable diagnostic
+
+`response_galerkin.py` consumes an orthonormal-coordinate Hamiltonian, source
+bras, and fixed occupied projections. `occupied_frames` preserves that
+occupied span; `virtual_pod` orders the covariance within its complement.
+`galerkin_pi` solves the virtual reduced problem spectrally and applies k and
+occupation weights once. It does not include q or frequency quadrature weights
+and does not add a spin factor. Nonpositive virtual gaps fail explicitly.
+
+The total trial dimension is occupied rank plus virtual POD rank. This is
+different from the unconstrained response-rank diagnostic above. The helper
+does not convert those dimensions into an atom-centered NAO basis.
+
+`trace_log` checks positive I-Pi and evaluates Tr(log(I-Pi)+Pi). A single-k
+Pi must be compared with its same-k reference. If only total-q Pi is known,
+replacing a mother-space k contribution with a compressed k contribution
+defines a hypothetical sensitivity, not a physical full-q RPA error.
+
+DF read-only job 3333756 verified a 44-dimensional trial against the unchanged
+production Galerkin implementation at one frequency (relative Pi difference
+6.81e-15). The full retained 378-dimensional virtual complement is recovered
+at the end of the rank sweep (relative Pi difference 1.07e-14).
+
+```sh
+PYTHONPATH=SIAB/opt_orb_pytorch_dpsi python -m unittest discover -s SIAB/tests -p test_response_galerkin.py
+```
