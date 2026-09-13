@@ -10,6 +10,7 @@ reference=${2:?reference required}
 out=${3:?isolated output required}
 source_dir=${4:?immutable workflow source required}
 commit=${5:?source commit required}
+reader_source=${6:?frozen cache reader source required}
 mkdir "$out"
 cd "$out"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -30,6 +31,7 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 /usr/bin/time -v /data/home/df_iopcas_ghj/app/miniconda3/bin/python \
     "$source_dir/audit_c_jy_reference_reuse.py" --bundle "$bundle" --reference "$reference" \
-    --output "$out/result" --source-commit "$commit" > audit.out 2> audit.err
+    --output "$out/result" --source-commit "$commit" --reader-source "$reader_source" \
+    > audit.out 2> audit.err
 sha256sum result/RESULT.json > RESULT_SHA256
 status=success

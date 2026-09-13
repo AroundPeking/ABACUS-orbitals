@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+import tempfile
+import hashlib
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]/'example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow'
@@ -61,6 +63,18 @@ class ReferenceReuseTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.validate_routing([1, 2], [2, 1], [(0, .25, 0), (0, 0, 0)],
                                     {1: (0, 0, 0), 2: (.25, 0, 0)})
+
+    def test_cache_reader_binds_original_tree_not_current_audit_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root/'reader.py').write_text('original')
+            bindings = {'reader.py': hashlib.sha256(b'original').hexdigest()}
+            MODULE.validate_reader_tree(root, bindings)
+            (root/'reader.py').write_text('changed')
+            with self.assertRaises(ValueError):
+                MODULE.validate_reader_tree(root, bindings)
+            with self.assertRaises(ValueError):
+                MODULE.validate_reader_tree(root, {'../reader.py': bindings['reader.py']})
 
 
 if __name__ == '__main__':

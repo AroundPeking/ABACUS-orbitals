@@ -39,15 +39,19 @@ def validate_routing(sources, targets, coordinates, gamma):
             raise ValueError('destination k coordinate mismatch')
 
 
-def audit(bundle, reference, output, source_commit):
+def validate_reader_tree(root, bindings):
+    root = root.resolve()
+    for name, digest in bindings.items():
+        path = (root/name).resolve()
+        if root not in path.parents or not path.is_file() or sha(path) != digest:
+            raise ValueError('frozen cache reader source mismatch: '+name)
+
+
+def audit(bundle, reference, output, source_commit, reader_source):
     from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, INDICES, MULT,
                                          hashed, require, validate_cache_contract, within)
     from run_c_optimizer_comparison import BUNDLE_SHA
     repo = Path(__file__).resolve().parents[4]
-    sys.path.insert(0, str(repo/'SIAB/opt_orb_pytorch_dpsi'))
-    from periodic_galerkin_basis import read_periodic_optimizer_coefficients
-    from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
-
     start = time.perf_counter()
     src = json.loads((repo/'SOURCE_MANIFEST.json').read_text())
     require(src['commit'] == source_commit, 'immutable source commit mismatch')
@@ -56,8 +60,11 @@ def audit(bundle, reference, output, source_commit):
     manifest = json.loads(hashed(bundle/'BUNDLE.json', BUNDLE_SHA))
     for name, digest in manifest['files'].items():
         hashed(within(bundle, name), digest)
-    for name, digest in manifest['source_files'].items():
-        hashed(within(repo, name), digest)
+    # Cache identity belongs to its frozen reader, not later audit/test revisions.
+    validate_reader_tree(reader_source, manifest['source_files'])
+    sys.path.insert(0, str(reader_source/'SIAB/opt_orb_pytorch_dpsi'))
+    from periodic_galerkin_basis import read_periodic_optimizer_coefficients
+    from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     frozen = json.loads(hashed(bundle/'backoff_INPUT_FREEZE.json', FREEZE_SHA))
     index = json.loads(hashed(bundle/'backoff_ACTIVE_DATA_CACHE.json', INDEX_SHA))
     records = validate_cache_contract(frozen, index)
@@ -130,6 +137,7 @@ def audit(bundle, reference, output, source_commit):
     require(len(qrows) == 8 and sum(len(q['per_k']) for q in qrows) == 512, 'incomplete audit')
     result = dict(status='success', original_gamma_operator_reuse_gate='pass' if not failures else 'hold',
         failure_reasons=failures, bundle_sha256=BUNDLE_SHA, source_commit=source_commit,
+        reader_source=str(reader_source), reader_source_hashes=manifest['source_files'],
         reference=str(reference), reference_hashes=gamma.hashes, per_q=qrows,
         elapsed_seconds=time.perf_counter()-start, compared_space='existing_spd_subblocks_only',
         missing_finite_q_sources_admitted=False, regenerated_hamiltonian_admitted=False,
@@ -140,8 +148,8 @@ def audit(bundle, reference, output, source_commit):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('bundle', 'reference', 'output'):
+    for name in ('bundle', 'reference', 'output', 'reader-source'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--source-commit', required=True)
     args = parser.parse_args()
-    audit(args.bundle, args.reference, args.output, args.source_commit)
+    audit(args.bundle, args.reference, args.output, args.source_commit, args.reader_source)
