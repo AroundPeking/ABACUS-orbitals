@@ -14,7 +14,8 @@ from audit_c_jy_operator_restart import (OperatorFiles, difference, occupied_gau
                                         metric_signs, transform_source, sha)
 from audit_c_jy_reference_reuse import validate_reader_tree
 from prepare_c_jy_operator_restart import (REFERENCE_REUSE_SHA, GAMMA_SOURCE_AUDIT_SHA,
-                                          validate_source_extension_evidence)
+                                          validate_source_extension_evidence, FINITE_Q_SPECS,
+                                          Q2_SOURCE_AUDIT_SHA, validate_finite_q_pilot)
 
 
 def target_to_source(kpoints, count=64):
@@ -31,6 +32,14 @@ def restore_and_compare_source(old, new, source_gauge, auxiliary_map):
     return restored, result
 
 
+def finite_q_dataset_position(datasets, iq):
+    label = int(FINITE_Q_SPECS[iq][0][1:])
+    positions = [i for i, item in enumerate(datasets) if item['label'] == label]
+    if len(positions) != 1 or datasets[positions[0]]['selected_iq'] != iq:
+        raise ValueError('unique cache label and internal q index required')
+    return positions[0]
+
+
 def audit(run, bundle, reader_source, output, source_commit):
     from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, hashed, require,
                                          validate_cache_contract, within)
@@ -43,12 +52,19 @@ def audit(run, bundle, reader_source, output, source_commit):
         hashed(within(repo, name), digest)
     require((run/'STATUS').read_text().strip() == 'success', 'source export not successful')
     contract = json.loads((run/'CONTRACT.json').read_text())
+    iq = contract['selected_iq']
     require(contract['scope'] == 'finite_q_source_extension_original_operators_only'
-            and contract['selected_iq'] == 22
+            and iq in FINITE_Q_SPECS
             and contract['hamiltonian_origin'] == 'original_Gamma_at_target_k'
             and contract['regenerated_hamiltonian_admitted'] is False
             and contract['first_order_equations_allowed'] == 0,
-            'explicit original-operator source-pilot contract required')
+            'explicit original-operator source-extension contract required')
+    if iq != 22:
+        pilot = json.loads(hashed(Path(contract['source_extension_pilot_audit']), Q2_SOURCE_AUDIT_SHA))
+        validate_finite_q_pilot(pilot)
+        require(contract['source_extension_pilot_sha256'] == Q2_SOURCE_AUDIT_SHA
+                and contract['frozen_auxiliary']['metadata_sha256'] == FINITE_Q_SPECS[iq][2],
+                'remaining source extension lacks locked pilot or same-q auxiliary cache')
     reuse = json.loads(hashed(Path(contract['reference_reuse_audit']), REFERENCE_REUSE_SHA))
     gamma = json.loads(hashed(Path(contract['gamma_source_audit']), GAMMA_SOURCE_AUDIT_SHA))
     validate_source_extension_evidence(reuse, gamma)
@@ -70,13 +86,15 @@ def audit(run, bundle, reader_source, output, source_commit):
     records = validate_cache_contract(frozen, index)
     original = read_periodic_optimizer_coefficients(bundle/'backoff_ORIGINAL_COEFFICIENTS.txt',
         element='C', radial_rows=31, expected_nu=(3, 3, 2, 0, 0))
-    item, record = frozen['datasets'][1], records[1]
+    position = finite_q_dataset_position(frozen['datasets'], iq)
+    item, record = frozen['datasets'][position], records[position]
     dataset = read_periodic_galerkin_dataset_cache(
         within(bundle, manifest['cache_paths'][str(item['label'])]),
         cache_sha256=record['complete_sha256'], active_coefficients=original, **record['binding'])
-    require(dataset.selected_iq == 22 and dataset.q_count == 64 and dataset.q_weight == 8/64
+    require(dataset.selected_iq == iq and dataset.q_count == 64
+            and dataset.q_weight == FINITE_Q_SPECS[iq][1]/64
             and len(dataset.kpoints) == 64 and dataset.primitive_count == 558,
-            'wrong frozen q2 cache')
+            'wrong frozen finite-q cache')
     new = OperatorFiles(run/('OUT.'+contract['suffix'])/'STERNHEIMER_BASIS_OPERATORS_V1', True)
     require(new.scalar['frozen_charge_sha256'] == contract['density_sha256']
             and new.scalar['executable_sha256'] == contract['binary_sha256']
@@ -146,7 +164,7 @@ def audit(run, bundle, reader_source, output, source_commit):
         np.savez(stream, auxiliary_map=t, raw_auxiliary_signs=signs,
                  **{'occupied_at_k%d' % k: a for k, a in gauges.items()})
     result = dict(status='success', finite_q_spd_source_compatibility='pass' if not failures else 'hold',
-        failure_reasons=failures, selected_iq=22, compared_primitive_count=558,
+        failure_reasons=failures, selected_iq=iq, compared_primitive_count=558,
         full_source_primitive_count=1550, per_k=rows, metric=metric, auxiliary_map_unitarity=unitary,
         source_commit=source_commit, run=str(run), contract_sha256=sha(run/'CONTRACT.json'),
         bundle_sha256=BUNDLE_SHA, cache_sha256=record['complete_sha256'], cache_binding=record['binding'],

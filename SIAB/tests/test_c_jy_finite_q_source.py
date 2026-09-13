@@ -15,6 +15,17 @@ if PATH.exists():
 
 
 class FiniteQSourceTest(unittest.TestCase):
+    def test_numeric_cache_label_and_internal_q_are_both_required(self):
+        rows = [dict(label=label, selected_iq=iq) for label, iq in
+                ((1, 1), (2, 22), (3, 43), (6, 6), (7, 27), (8, 23), (11, 11), (28, 55))]
+        for index, row in enumerate(rows[1:], 1):
+            self.assertEqual(MODULE.finite_q_dataset_position(rows, row['selected_iq']), index)
+        rows[2]['selected_iq'] = 22
+        with self.assertRaises(ValueError):
+            MODULE.finite_q_dataset_position(rows, 43)
+        with self.assertRaises(ValueError):
+            MODULE.finite_q_dataset_position(rows + [rows[1]], 22)
+
     def test_source_k_gauge_not_target_k_gauge(self):
         self.assertIsNotNone(MODULE, 'finite-q source audit not implemented')
         from audit_c_jy_operator_restart import transform_source

@@ -11,6 +11,16 @@ REFERENCE_REUSE_SHA = '0bc101cdfdd6b2fb3b279a0f24404f49e182c917c0efd7de574bfb366
 GAMMA_SOURCE_AUDIT_SHA = '98c59af6cafcde09ffdc9807fa042bc1279b6e32b9ca0f0f69c490ec83d4e9b5'
 FROZEN_AUXILIARY_COMMIT = '0613452ee9e176e5fb34364cfe296cccca706e77'
 Q2_CACHE_METADATA_SHA = 'd7935a428448db3b75c52ed639487a4b5677685ef90a2ca8a14ba53944c21454'
+Q2_SOURCE_AUDIT_SHA = 'b533da627f0e5d159f8b1a030f6fa0093ef8cd8f488176ee73d8d2df8935c55e'
+FINITE_Q_SPECS = {
+    22: ('q2', 8, Q2_CACHE_METADATA_SHA),
+    43: ('q3', 4, '5760ac9dadfb49caa60c82b5fea5259f1170e46fb86223d60e0e3cc3f0280d1a'),
+    6: ('q6', 6, 'f66e207b1aab6f87e0cd9845f1f8dbc94f3873bdb96b6fdf99cfcb156627398f'),
+    27: ('q7', 24, '347163525f82df8c2198008d641ed6a094567d9803e0dbc8617cb6cf4c92a079'),
+    23: ('q8', 12, '3dc24457f9453724aecf41c5bb0a7eb8398d9742361a6cd0f3449e75b7ad4c05'),
+    11: ('q11', 3, 'e9195f42c35429aeaaf52529527f6132305db3bc249dc07ef800e28ddc9051af'),
+    55: ('q28', 6, '1946a7a2b8ab02ae9bf0b5ef352d58af6b9ffaaa4ed25bfcdfa78774ef3994a0'),
+}
 
 
 def gamma_coulomb_files(reference):
@@ -188,9 +198,41 @@ def validate_source_extension_evidence(reuse, gamma):
         gamma_full_operator_failure_reasons=gamma['failure_reasons'])
 
 
-def source_extension_contract(iq, reference, reuse_path, gamma_path):
-    if iq != 22:
-        raise ValueError('source extension currently permits only the iq=22 pilot')
+def validate_finite_q_pilot(result):
+    rows = result.get('per_k', [])
+    if (result.get('status') != 'success'
+            or result.get('finite_q_spd_source_compatibility') != 'pass'
+            or result.get('failure_reasons') != [] or result.get('selected_iq') != 22
+            or result.get('compared_primitive_count') != 558
+            or result.get('full_source_primitive_count') != 1550
+            or result.get('regenerated_hamiltonian_read') is not False
+            or result.get('regenerated_hamiltonian_admitted') is not False
+            or len(rows) != 64 or not all(r.get('pass_gate') is True for r in rows)
+            or sorted(r['source_ik'] for r in rows) != list(range(1, 65))
+            or sorted(r['target_ik'] for r in rows) != list(range(1, 65))):
+        raise ValueError('complete accepted q2 source pilot required')
+    values = [(result['metric']['relative'], 1e-8), (result['auxiliary_map_unitarity'], 5e-6)]
+    for row in rows:
+        values.extend([(row['source']['relative'], 1e-6), (row['overlap']['max_abs'], 1e-10),
+            (row['occupied']['relative'], 1e-6), (row['occupied']['unitarity'], 1e-6),
+            (row['source_eigenvalue_ha']['max_abs'], 5e-7),
+            (row['occupied_energy_commutator_ha'], 5e-7)])
+    if any(not math.isfinite(v) or not 0 <= v <= limit for v, limit in values):
+        raise ValueError('q2 source pilot numerical gate failed')
+    return dict(full_q_admitted=False, regenerated_hamiltonian_admitted=False)
+
+
+def source_extension_contract(iq, reference, reuse_path, gamma_path, pilot_path=None):
+    if iq not in FINITE_Q_SPECS:
+        raise ValueError('source extension requires a canonical finite q')
+    pilot_contract = {}
+    if iq != 22 or pilot_path is not None:
+        if pilot_path is None or sha(pilot_path) != Q2_SOURCE_AUDIT_SHA:
+            raise ValueError('remaining finite-q source extension requires locked q2 pilot')
+        pilot = json.loads(pilot_path.read_text())
+        validate_finite_q_pilot(pilot)
+        pilot_contract = dict(source_extension_pilot_audit=str(pilot_path.resolve()),
+                              source_extension_pilot_sha256=Q2_SOURCE_AUDIT_SHA)
     if (reuse_path is None or gamma_path is None
             or sha(reuse_path) != REFERENCE_REUSE_SHA or sha(gamma_path) != GAMMA_SOURCE_AUDIT_SHA):
         raise ValueError('source extension requires the two locked independent audits')
@@ -203,6 +245,7 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path):
         path = (raw/name).resolve()
         if raw not in path.parents or sha(path) != digest:
             raise ValueError('original operator archive hash mismatch: '+name)
+    contract.update(pilot_contract)
     contract.update(scope='finite_q_source_extension_original_operators_only', selected_iq=iq,
         reference_reuse_audit=str(reuse_path.resolve()), reference_reuse_sha256=sha(reuse_path),
         gamma_source_audit=str(gamma_path.resolve()), gamma_source_audit_sha256=sha(gamma_path),
@@ -213,15 +256,19 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path):
 
 def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
             source_extension_reference_reuse=None, source_extension_gamma_audit=None,
-            frozen_auxiliary_cache=None):
-    if frozen_auxiliary_cache is not None and (iq != 22 or source_extension_reference_reuse is None
+            frozen_auxiliary_cache=None, source_extension_pilot_audit=None):
+    if source_extension_pilot_audit is not None and frozen_auxiliary_cache is None:
+        raise ValueError('post-pilot exports require frozen auxiliary inputs')
+    if frozen_auxiliary_cache is not None and (iq not in FINITE_Q_SPECS or source_extension_reference_reuse is None
                                               or source_extension_gamma_audit is None):
-        raise ValueError('frozen auxiliary mode requires the admitted iq=22 source-extension contract')
+        raise ValueError('frozen auxiliary mode requires the admitted source-extension contract')
+    if iq != 22 and source_extension_reference_reuse is not None and frozen_auxiliary_cache is None:
+        raise ValueError('remaining source-extension exports require frozen auxiliary inputs')
     if source_extension_reference_reuse is not None or source_extension_gamma_audit is not None:
         if gamma_acceptance is not None:
             raise ValueError('operator and source-extension modes are mutually exclusive')
         q_contract = source_extension_contract(iq, reference, source_extension_reference_reuse,
-                                             source_extension_gamma_audit)
+                                             source_extension_gamma_audit, source_extension_pilot_audit)
     else:
         q_contract = export_q_contract(iq, gamma_acceptance)
     acceptance = json.loads((build_root/'result/BUILD_ACCEPTANCE.json').read_text())
@@ -276,7 +323,7 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
     (output/'FREQUENCY_GRID.dat').write_text(frequencies)
     if frozen_auxiliary_cache is not None:
         q_contract['frozen_auxiliary'] = freeze_auxiliary_cache(
-            frozen_auxiliary_cache, output/'frozen-auxiliary', iq, Q2_CACHE_METADATA_SHA)
+            frozen_auxiliary_cache, output/'frozen-auxiliary', iq, FINITE_Q_SPECS[iq][2])
     inputs = {str(p.relative_to(output)): sha(p) for p in output.rglob('*') if p.is_file()}
     contract = dict(q_contract,
         reference=str(reference), reference_manifest_sha256=sha(manifest),
@@ -302,7 +349,8 @@ if __name__ == '__main__':
     parser.add_argument('--source-extension-reference-reuse', type=Path)
     parser.add_argument('--source-extension-gamma-audit', type=Path)
     parser.add_argument('--frozen-auxiliary-cache', type=Path)
+    parser.add_argument('--source-extension-pilot-audit', type=Path)
     args = parser.parse_args()
     prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance,
             args.source_extension_reference_reuse, args.source_extension_gamma_audit,
-            args.frozen_auxiliary_cache)
+            args.frozen_auxiliary_cache, args.source_extension_pilot_audit)
