@@ -58,6 +58,33 @@ def occupied_embedding_from_record(record, relative_rank_tolerance):
                            overlap_condition=condition)
 
 
+def consume_compatible_target(args, consume_current_target, records_by_source_ik,
+                              relative_rank_tolerance):
+    """Bridge frozen four-argument and current five-argument target callbacks."""
+    require(len(args) in (4, 5), 'unsupported response-target callback contract')
+    if len(args) == 5:
+        covariance, occupied_embedding, embedding, target_pi, metadata = args
+        require(np.isfinite(occupied_embedding).all()
+                and occupied_embedding.ndim == 2
+                and occupied_embedding.shape[0] == metadata['occupied_rank']
+                and occupied_embedding.shape[1] == embedding.shape[1],
+                'invalid provided occupied embedding')
+        metadata.update(occupied_embedding_adapter='provided_by_response_target')
+    else:
+        covariance, embedding, target_pi, metadata = args
+        occupied_embedding, occupied = occupied_embedding_from_record(
+            records_by_source_ik[metadata['source_ik']], relative_rank_tolerance)
+        require(occupied['retained_rank'] == embedding.shape[1]
+                and occupied['occupied_rank'] == metadata['occupied_rank'],
+                'occupied/virtual retained-frame mismatch')
+        metadata.update(
+            occupied_embedding_definition='O_dagger_Lowdin_dagger_S',
+            occupied_embedding_adapter='rebuilt_from_frozen_reader_metric',
+            occupied_embedding_minimum_capture=occupied['minimum_capture'])
+    consume_current_target(covariance, occupied_embedding, embedding,
+                           target_pi, metadata)
+
+
 def run(contract_path, output):
     c = json.loads(contract_path.read_text())
     require(os.environ.get('C_EXECUTION_HOST') == 'df_iopcas_ghj'
@@ -201,18 +228,9 @@ def run(contract_path, output):
                             covariance_maximum=float(values[-1]),
                             file=array_file.name, file_sha256=sha(array_file)))
 
-                    def consume_legacy_target(covariance, embedding, target_pi, metadata):
-                        occupied_embedding, occupied = occupied_embedding_from_record(
-                            records_by_source_ik[metadata['source_ik']], 1e-10)
-                        require(occupied['retained_rank'] == embedding.shape[1]
-                                and occupied['occupied_rank'] == metadata['occupied_rank'],
-                                'occupied/virtual retained-frame mismatch')
-                        metadata.update(
-                            occupied_embedding_definition='O_dagger_Lowdin_dagger_S',
-                            occupied_embedding_adapter='frozen_reader_same_metric',
-                            occupied_embedding_minimum_capture=occupied['minimum_capture'])
-                        consume_current_target(covariance, occupied_embedding, embedding,
-                                               target_pi, metadata)
+                    def consume_legacy_target(*args):
+                        consume_compatible_target(args, consume_current_target,
+                                                  records_by_source_ik, 1e-10)
 
                     pi, detail = build_legacy_response_targets(
                         view, consume_legacy_target,

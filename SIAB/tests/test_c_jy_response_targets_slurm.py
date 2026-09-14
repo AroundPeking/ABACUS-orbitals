@@ -1,5 +1,8 @@
 import unittest
+from unittest import mock
 from pathlib import Path
+
+import numpy as np
 
 
 SCRIPT = (Path(__file__).resolve().parents[1] / 'example_C_sternheimer'
@@ -33,6 +36,54 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
         self.assertIn('def consume_legacy_target(', runner)
         self.assertIn('build_legacy_response_targets(', runner)
         self.assertIn('occupied_embedding=occupied_embedding', runner)
+
+    def test_finite_q_callback_accepts_current_five_argument_contract(self):
+        import sys
+
+        workflow = SCRIPT.parent
+        optimizer = workflow.parents[2] / 'opt_orb_pytorch_dpsi'
+        sys.path[:0] = [str(workflow), str(optimizer)]
+        from run_c_jy_joined_ladder import consume_compatible_target
+
+        covariance = np.eye(2)
+        occupied = np.ones((1, 2))
+        embedding = np.eye(2)
+        target_pi = np.zeros((1, 1, 1))
+        metadata = {'source_ik': 4, 'occupied_rank': 1}
+        received = []
+
+        consume_compatible_target(
+            (covariance, occupied, embedding, target_pi, metadata),
+            lambda *args: received.append(args), {}, 1e-10)
+
+        self.assertEqual(len(received), 1)
+        self.assertIs(received[0][1], occupied)
+        self.assertEqual(received[0][4]['occupied_embedding_adapter'],
+                         'provided_by_response_target')
+
+    def test_finite_q_callback_rebuilds_only_legacy_four_argument_contract(self):
+        import sys
+
+        workflow = SCRIPT.parent
+        optimizer = workflow.parents[2] / 'opt_orb_pytorch_dpsi'
+        sys.path[:0] = [str(workflow), str(optimizer)]
+        import run_c_jy_joined_ladder as runner
+
+        occupied = np.ones((1, 2))
+        metadata = {'source_ik': 4, 'occupied_rank': 1}
+        received = []
+        report = {'retained_rank': 2, 'occupied_rank': 1,
+                  'minimum_capture': .999999}
+        with mock.patch.object(runner, 'occupied_embedding_from_record',
+                               return_value=(occupied, report)) as rebuild:
+            runner.consume_compatible_target(
+                (np.eye(2), np.eye(2), np.zeros((1, 1, 1)), metadata),
+                lambda *args: received.append(args), {4: object()}, 1e-10)
+
+        rebuild.assert_called_once()
+        self.assertIs(received[0][1], occupied)
+        self.assertEqual(received[0][4]['occupied_embedding_adapter'],
+                         'rebuilt_from_frozen_reader_metric')
 
 
 if __name__ == '__main__':
