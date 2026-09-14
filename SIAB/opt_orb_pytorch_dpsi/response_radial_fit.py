@@ -72,15 +72,22 @@ def shared_radial_fit_loss(coefficients, sectors, *, relative_singular_tolerance
         basis = build_primitive_to_candidate(sector.primitive_blocks,
                                              sector.embedding.shape[1], coefficients)
         y = sector.embedding@basis.transform
-        values = torch.linalg.svdvals(y).detach()
+        # The occupied projection gives y exact null columns.  Differentiating
+        # torch.linalg.pinv through those zero singular values is undefined.
+        # A detached right-singular basis selects a locally full-rank set of
+        # column combinations without changing span(y); the projector and its
+        # derivative can then be evaluated with an ordinary Gram solve.
+        _, values, right_adjoint = torch.linalg.svd(y.detach(), full_matrices=False)
         keep = values > relative_singular_tolerance*values[0]
         rank = int(keep.sum())
         if not rank:
             raise ValueError('candidate has no represented virtual direction')
-        # A pseudoinverse handles the exact null columns introduced by the
-        # occupied projection without squaring Y's condition number.
-        inverse = torch.linalg.pinv(y, rcond=relative_singular_tolerance)
-        captured = torch.trace(inverse@sector.covariance@y).real
+        independent = right_adjoint[keep].conj().T
+        reduced = y@independent
+        gram_virtual = reduced.conj().T@reduced
+        covariance_virtual = reduced.conj().T@sector.covariance@reduced
+        captured = torch.trace(torch.linalg.solve(
+            gram_virtual, covariance_virtual)).real
         residual = sector.target_norm2-captured
         if not bool(torch.isfinite(residual)) or float(residual.detach()) < -1e-8*target_norm2:
             raise ValueError('invalid projected response residual')
@@ -91,14 +98,14 @@ def shared_radial_fit_loss(coefficients, sectors, *, relative_singular_tolerance
             occupied_y = sector.occupied_embedding@basis.transform
             full_y = torch.cat((occupied_y, y), dim=0)
             gram = full_y.conj().T@full_y
-            values_full, vectors_full = torch.linalg.eigh(gram)
+            values_full = torch.linalg.eigvalsh(gram.detach())
             maximum_full = values_full[-1].real
             keep_full = values_full.real > relative_singular_tolerance*maximum_full
             if int(keep_full.sum()) != gram.shape[0]:
                 raise ValueError('candidate is rank deficient in retained mother metric')
-            lowdin = vectors_full[:, keep_full]/torch.sqrt(values_full[keep_full].real)[None, :]
-            occupied_coordinates = occupied_y@lowdin
-            capture_matrix = occupied_coordinates@occupied_coordinates.conj().T
+            capture_matrix = occupied_y@torch.linalg.solve(
+                gram, occupied_y.conj().T)
+            capture_matrix = 0.5*(capture_matrix+capture_matrix.conj().T)
             capture_values = torch.linalg.eigvalsh(capture_matrix).real
             minimum_capture = float(capture_values[0].detach())
             occupied_residual = (sector.occupied_rank-torch.trace(capture_matrix).real)

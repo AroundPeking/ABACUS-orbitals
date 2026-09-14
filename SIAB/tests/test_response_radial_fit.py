@@ -83,6 +83,20 @@ class RadialFitTests(unittest.TestCase):
         self.assertEqual(diagnostics['virtual_rank_signature'], [1])
         self.assertAlmostEqual(loss.item(), 5/6)
 
+    def test_degenerate_augmented_metric_has_finite_occupied_gradient(self):
+        block = (PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 4, 0),)
+        c = torch.tensor([[1., 0.], [0., 1.], [0., 0.], [0., 0.]],
+                         dtype=torch.float64, requires_grad=True)
+        sector = ResponseFitSector(
+            'degenerate-occupied', block, np.eye(4)[1:], np.diag([1., 2., 3.]),
+            occupied_rank=1, occupied_embedding=np.eye(4)[:1])
+        loss, diagnostics = shared_radial_fit_loss(
+            {'C': (c,)}, [sector], occupied_weight=1.)
+        loss.backward()
+        self.assertTrue(torch.isfinite(c.grad).all().item())
+        self.assertAlmostEqual(diagnostics['minimum_occupied_capture'], 1., places=12)
+        self.assertAlmostEqual(diagnostics['occupied_residual'], 0., places=12)
+
     def test_unitary_coordinates_and_radial_rescaling_leave_loss_invariant(self):
         coefficients, sectors, data = self.case()
         value, _ = shared_radial_fit_loss(coefficients, sectors)
