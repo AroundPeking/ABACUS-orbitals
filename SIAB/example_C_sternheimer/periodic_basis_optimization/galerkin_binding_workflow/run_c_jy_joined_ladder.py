@@ -19,6 +19,7 @@ from audit_c_jy_reference_reuse import validate_reader_tree, validate_reference_
 from c_jy_joined_operators import join_operator_record, validate_source_audit
 from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, INDICES, MULT,
     hashed, require, within, validate_cache_contract)
+from c_jy_response_targets import validate_target_manifest
 from prepare_c_jy_operator_restart import REFERENCE_REUSE_SHA
 from run_c_optimizer_comparison import BUNDLE_SHA
 
@@ -132,7 +133,55 @@ def run(contract_path, output):
                     row = dict(lmax=lmax,seconds=time.perf_counter()-start,**row)
                     stream.write(json.dumps(row,allow_nan=False)+'\n'); stream.flush()
                     print(json.dumps(row,allow_nan=False),flush=True)
-                pi, detail = available_mother_response(view,relative_rank_tolerance=1e-10,progress=log)
+                target_dir = None
+                if c.get('target_lmax') == lmax:
+                    from response_target import build_available_response_targets
+                    target_dir = Path(c['target_dir'])
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_rows = []
+
+                    def consume(covariance, embedding, target_pi, metadata):
+                        values = np.linalg.eigvalsh(covariance)
+                        require(np.isfinite(embedding).all() and values[-1] > 0
+                            and values[0] >= -1e-10*values[-1],
+                            'invalid jY response target spectrum')
+                        array_file = target_dir/('k%04d.npz' % metadata['source_ik'])
+                        with array_file.open('xb') as stream:
+                            np.savez(stream, covariance=covariance, embedding=embedding)
+                        target_rows.append(dict(metadata,
+                            q_slot=slot, target_kind='response_covariance_embedding',
+                            assembled_pi=False, lmax=lmax,
+                            selected_iq=full.selected_iq,
+                            frequency_count=int(full.frequency_ha.numel()),
+                            primitive_count=view.primitive_count,
+                            covariance_dimension=int(covariance.shape[0]),
+                            embedding_rows=int(embedding.shape[0]),
+                            embedding_columns=int(embedding.shape[1]),
+                            target_norm2=float(np.trace(covariance).real),
+                            covariance_minimum=float(values[0]),
+                            covariance_maximum=float(values[-1]),
+                            file=array_file.name, file_sha256=sha(array_file)))
+
+                    pi, detail = build_available_response_targets(
+                        view, consume, relative_rank_tolerance=1e-10, progress=log)
+                    require(len(target_rows) == 64, 'complete jY target sector set required')
+                    target_manifest = dict(status='success',
+                        target_kind='response_covariance_embedding', assembled_pi=False,
+                        lmax=lmax, q_slot=slot, selected_iq=full.selected_iq,
+                        q_weight=full.q_weight, frequency_count=int(full.frequency_ha.numel()),
+                        frequency_ha=full.frequency_ha.tolist(),
+                        frequency_weights_ha=full.frequency_weights_ha.tolist(),
+                        k_record_count=len(target_rows), primitive_count=view.primitive_count,
+                        sectors=target_rows, physical_release_gate='hold')
+                    validate_target_manifest(target_manifest, lmax=lmax,
+                        frequency_count=int(full.frequency_ha.numel()),
+                        k_record_count=64, primitive_count=view.primitive_count,
+                        q_slots=(slot,))
+                    write(target_dir/'TARGETS.json', target_manifest)
+                    np.save(target_dir/'PI_DIAGNOSTIC.npy', pi, allow_pickle=False)
+                else:
+                    pi, detail = available_mother_response(
+                        view, relative_rank_tolerance=1e-10, progress=log)
             energy = energy_summary(view,pi)
             if lmax == 2:
                 previous = np.load(Path(c['baseline_result']).parent/'PI.npy',allow_pickle=False)
