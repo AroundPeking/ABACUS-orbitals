@@ -30,6 +30,27 @@ def write(path, data):
         stream.write('\n')
 
 
+def load_current_periodic_basis(repo):
+    """Load the contraction cache from this deployment, not the cache reader."""
+    name = 'periodic_galerkin_basis'
+    path = Path(repo)/'SIAB/opt_orb_pytorch_dpsi'/f'{name}.py'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_current_periodic_optimization(repo):
+    name = 'periodic_galerkin_optimization'
+    path = Path(repo)/'SIAB/opt_orb_pytorch_dpsi'/f'{name}.py'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def occupied_embedding_from_record(record, relative_rank_tolerance):
     """Rebuild the occupied rows missing from the frozen cache adapter.
 
@@ -112,13 +133,16 @@ def run(contract_path, output):
     # Preserve the original cache reader identity, then import the new adapter.
     sys.path.insert(0,str(reader/'SIAB/opt_orb_pytorch_dpsi'))
     import torch
-    from periodic_galerkin_basis import (
-        prepare_periodic_block_contraction_record,
-        read_periodic_optimizer_coefficients,
-    )
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
-    from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
+    current_basis = load_current_periodic_basis(repo)
+    current_optimization = load_current_periodic_optimization(repo)
+    prepare_periodic_block_contraction_record = (
+        current_basis.prepare_periodic_block_contraction_record)
+    read_periodic_optimizer_coefficients = (
+        current_basis.read_periodic_optimizer_coefficients)
+    evaluate_periodic_galerkin_coefficient_response = (
+        current_optimization.evaluate_periodic_galerkin_coefficient_response)
     from run_c_jy_angular_ladder import candidate_evaluation_view, energy_summary
     from periodic_available_mother import available_mother_response
     compressed_spec = importlib.util.spec_from_file_location(

@@ -1,6 +1,8 @@
 import unittest
 from unittest import mock
 from pathlib import Path
+import tempfile
+import types
 
 import numpy as np
 
@@ -29,6 +31,26 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
         runner = (SCRIPT.parent / 'run_c_jy_joined_ladder.py').read_text()
         self.assertIn('spec_from_file_location', runner)
         self.assertIn("repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py'", runner)
+
+    def test_finite_q_runner_loads_current_contraction_cache_despite_legacy_shadow(self):
+        import sys
+
+        workflow = SCRIPT.parent
+        optimizer = workflow.parents[2] / 'opt_orb_pytorch_dpsi'
+        sys.path[:0] = [str(workflow), str(optimizer)]
+        from run_c_jy_joined_ladder import load_current_periodic_basis
+
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            module_path = repo / 'SIAB/opt_orb_pytorch_dpsi/periodic_galerkin_basis.py'
+            module_path.parent.mkdir(parents=True)
+            module_path.write_text("SOURCE = 'current-deployment'\n", encoding='ascii')
+            legacy = types.ModuleType('periodic_galerkin_basis')
+            legacy.SOURCE = 'legacy-reader'
+            with mock.patch.dict(sys.modules, {'periodic_galerkin_basis': legacy}):
+                module = load_current_periodic_basis(repo)
+
+        self.assertEqual(module.SOURCE, 'current-deployment')
 
     def test_finite_q_runner_adapts_legacy_cache_targets_to_occupied_targets(self):
         runner = (SCRIPT.parent / 'run_c_jy_joined_ladder.py').read_text()
