@@ -1,8 +1,8 @@
 """Bounded shared-radial initialization on a fixed response target, not RPA.
 
-All supplied radial subspaces are free. QR only removes within-l coefficient
-gauge; it does not freeze a radial prefix or impose PBE. The first bounded
-experiment deliberately keeps the effective virtual rank fixed.
+QR removes within-l coefficient gauge. An optional frozen prefix preserves
+the span of trusted occupied/low-energy radial functions while only the added
+radials move; this remains a response fit and does not impose PBE or RPA.
 """
 import math
 import time
