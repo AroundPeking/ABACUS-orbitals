@@ -27,6 +27,13 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
         self.assertIn('spec_from_file_location', runner)
         self.assertIn("repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py'", runner)
 
+    def test_finite_q_runner_adapts_legacy_cache_targets_to_occupied_targets(self):
+        runner = (SCRIPT.parent / 'run_c_jy_joined_ladder.py').read_text()
+        self.assertIn('def occupied_embedding_from_record(', runner)
+        self.assertIn('def consume_legacy_target(', runner)
+        self.assertIn('build_legacy_response_targets(', runner)
+        self.assertIn('occupied_embedding=occupied_embedding', runner)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -30,6 +30,34 @@ def write(path, data):
         stream.write('\n')
 
 
+def occupied_embedding_from_record(record, relative_rank_tolerance):
+    """Rebuild the occupied rows missing from the frozen cache adapter.
+
+    The finite-q reader remains frozen for cache compatibility.  This helper
+    uses that reader's production Lowdin and occupied-frame routines, so the
+    added rows use exactly the same retained mother coordinates as its virtual
+    embedding.
+    """
+    import torch
+    from periodic_galerkin_sternheimer import _mother_overlap_orthogonalizer
+    from response_galerkin import occupied_frames
+
+    with torch.no_grad():
+        lowdin, rank, condition = _mother_overlap_orthogonalizer(
+            record.overlap, relative_rank_tolerance)
+    to_numpy = lambda value: value.detach().cpu().numpy()
+    lowdin = to_numpy(lowdin)
+    overlap = to_numpy(record.overlap)
+    occupied = to_numpy(record.occupied_projection) @ lowdin
+    if record.occupied_projection_normalization is not None:
+        occupied = to_numpy(record.occupied_projection_normalization) @ occupied
+    occupied_frame, _, captures = occupied_frames(occupied)
+    embedding = occupied_frame.conj().T @ lowdin.conj().T @ overlap
+    require(np.isfinite(embedding).all(), 'nonfinite occupied embedding')
+    return embedding, dict(captures, retained_rank=rank,
+                           overlap_condition=condition)
+
+
 def run(contract_path, output):
     c = json.loads(contract_path.read_text())
     require(os.environ.get('C_EXECUTION_HOST') == 'df_iopcas_ghj'
@@ -140,12 +168,16 @@ def run(contract_path, output):
                     print(json.dumps(row,allow_nan=False),flush=True)
                 target_dir = None
                 if c.get('target_lmax') == lmax:
-                    from response_target import build_available_response_targets
+                    from response_target import (
+                        build_available_response_targets as build_legacy_response_targets)
                     target_dir = Path(c['target_dir'])
                     target_dir.mkdir(parents=True, exist_ok=True)
                     target_rows = []
+                    records_by_source_ik = {record.source_ik: record
+                                            for record in view.kpoints}
 
-                    def consume(covariance, occupied_embedding, embedding, target_pi, metadata):
+                    def consume_current_target(covariance, occupied_embedding, embedding,
+                                               target_pi, metadata):
                         values = np.linalg.eigvalsh(covariance)
                         require(np.isfinite(embedding).all() and values[-1] > 0
                             and values[0] >= -1e-10*values[-1],
@@ -169,8 +201,22 @@ def run(contract_path, output):
                             covariance_maximum=float(values[-1]),
                             file=array_file.name, file_sha256=sha(array_file)))
 
-                    pi, detail = build_available_response_targets(
-                        view, consume, relative_rank_tolerance=1e-10, progress=log)
+                    def consume_legacy_target(covariance, embedding, target_pi, metadata):
+                        occupied_embedding, occupied = occupied_embedding_from_record(
+                            records_by_source_ik[metadata['source_ik']], 1e-10)
+                        require(occupied['retained_rank'] == embedding.shape[1]
+                                and occupied['occupied_rank'] == metadata['occupied_rank'],
+                                'occupied/virtual retained-frame mismatch')
+                        metadata.update(
+                            occupied_embedding_definition='O_dagger_Lowdin_dagger_S',
+                            occupied_embedding_adapter='frozen_reader_same_metric',
+                            occupied_embedding_minimum_capture=occupied['minimum_capture'])
+                        consume_current_target(covariance, occupied_embedding, embedding,
+                                               target_pi, metadata)
+
+                    pi, detail = build_legacy_response_targets(
+                        view, consume_legacy_target,
+                        relative_rank_tolerance=1e-10, progress=log)
                     require(len(target_rows) == 64, 'complete jY target sector set required')
                     target_manifest = dict(status='success',
                         target_kind='response_covariance_embedding', assembled_pi=False,
