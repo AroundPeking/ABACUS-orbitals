@@ -67,12 +67,11 @@ def run(args):
     summary_expected = args.collection_summary_sha256
     require(sha(summary_path) == summary_expected, 'target collection summary hash mismatch')
     collection = json.loads(summary_path.read_text(encoding='ascii'))
-    primitive_blocks = [
-        PeriodicGalerkinPrimitiveBlock(**row) for row in collection['primitive_blocks']]
+    primitive_block_rows = collection['primitive_blocks']
     require(collection['primitive_count'] == 992 and collection['lmax'] == 3,
             'unexpected jY target mother contract')
     checked = collect_target_collection(
-        target_root / 'collection-30d4390e', primitive_blocks,
+        target_root / 'collection-30d4390e', primitive_block_rows,
         q_slots=tuple(range(8)), k_record_count=64, frequency_count=12,
         primitive_count=992, lmax=3)
     require(checked['status'] == 'success' and checked['target_completeness_gate'] == 'pass',
@@ -83,7 +82,8 @@ def run(args):
         manifest_q = json.loads((target_root / ('q%02d/targets/TARGETS.json' % q_slot)).read_text())
         for row in manifest_q['sectors']:
             sector_metadata[(q_slot, row['file'])] = row
-    primitive_block_tuple = tuple(primitive_blocks)
+    primitive_block_tuple = tuple(
+        PeriodicGalerkinPrimitiveBlock(**row) for row in primitive_block_rows)
     sectors = []
     for row in checked['target_files']:
         q_slot = int(row['q_slot'])
