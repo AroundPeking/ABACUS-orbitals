@@ -45,6 +45,36 @@ class ResponseFitIterationTest(unittest.TestCase):
         self.assertEqual(report['stopping_reason'], 'evaluation_budget')
         self.assertEqual(fitted['C'][1].shape, (4, 0))
 
+    def test_frozen_prefix_span_is_preserved_while_added_radial_improves(self):
+        blocks = (PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 4, 0),)
+        sector = ResponseFitSector('toy', blocks, np.eye(4),
+            np.diag([1., 2., 5., 9.]), occupied_rank=0)
+        initial = {'C': (torch.tensor([[1., 0.], [0., 1.], [0., 1.], [0., 0.]],
+                                       dtype=torch.float64),)}
+        prefix = initial['C'][0][:, :1].clone()
+        fitted, report = iteration.fit_shared_response_radials(
+            initial, [sector], frozen_prefix={'C': (1,)},
+            max_steps=3, max_evaluations=12, radius=.1)
+        before = torch.linalg.qr(prefix, mode='reduced')[0]
+        after = fitted['C'][0][:, :1]
+        torch.testing.assert_close(after @ after.T, before @ before.T)
+        self.assertFalse(torch.equal(fitted['C'][0][:, 1:], initial['C'][0][:, 1:]))
+        self.assertEqual(report['frozen_radial_count'], 1)
+        self.assertEqual(report['free_radial_count'], 1)
+        self.assertTrue(report['old_radial_prefix_frozen'])
+        self.assertLess(report['final_loss'], report['initial_loss'])
+
+    def test_frozen_prefix_contract_rejects_dependent_or_invalid_counts(self):
+        initial, sectors = self.case()
+        with self.assertRaisesRegex(ValueError, 'frozen prefix'):
+            iteration.fit_shared_response_radials(
+                initial, sectors, frozen_prefix={'C': (3,)})
+        initial['C'] = (torch.tensor([[1., 2.], [0., 0.], [0., 0.], [0., 0.]],
+                                     dtype=torch.float64),)
+        with self.assertRaisesRegex(ValueError, 'rank'):
+            iteration.fit_shared_response_radials(
+                initial, sectors, frozen_prefix={'C': (2,)})
+
     def test_invalid_controls_and_dependent_radials_rejected(self):
         initial, sectors = self.case()
         for controls in ({'max_steps': 0}, {'max_evaluations': 0}, {'radius': 0}, {'radius': float('nan')}):

@@ -12,32 +12,73 @@ import torch
 from response_radial_fit import shared_radial_fit_loss
 
 
-def _retract(coefficients):
+def _validate_frozen_prefix(coefficients, frozen_prefix):
+    if frozen_prefix is None:
+        return {element: tuple(0 for _ in channels)
+                for element, channels in coefficients.items()}
+    if not isinstance(frozen_prefix, dict) or set(frozen_prefix) != set(coefficients):
+        raise ValueError('frozen prefix contract must cover every element')
+    result = {}
+    for element, channels in coefficients.items():
+        counts = frozen_prefix[element]
+        if not isinstance(counts, (list, tuple)) or len(counts) != len(channels):
+            raise ValueError('frozen prefix counts have the wrong shape')
+        normalized = []
+        for count, channel in zip(counts, channels):
+            if (type(count) is not int or count < 0 or count > channel.shape[1]):
+                raise ValueError('invalid frozen prefix count')
+            if count:
+                prefix = channel[:, :count].detach()
+                singular = torch.linalg.svdvals(prefix)
+                if singular.numel() == 0 or float(singular[-1]) <= 1e-12 * float(singular[0]):
+                    raise ValueError('frozen prefix radial rank is deficient')
+            normalized.append(count)
+        result[element] = tuple(normalized)
+    return result
+
+
+def _retract(coefficients, frozen_counts=None):
     result = {}
     for element, channels in coefficients.items():
         output = []
-        for c in channels:
+        element_counts = ((0,) * len(channels) if frozen_counts is None
+                          else frozen_counts[element])
+        for c, frozen_count in zip(channels, element_counts):
             c = c.detach().clone()
             if c.ndim != 2 or c.dtype != torch.float64 or not torch.isfinite(c).all():
                 raise ValueError('finite real float64 radial coefficients required')
             if c.shape[1]:
-                values = torch.linalg.svdvals(c)
-                if c.shape[1] > c.shape[0] or values[-1] <= 1e-12*values[0]:
+                if c.shape[1] > c.shape[0]:
                     raise ValueError('initial radial rank is deficient')
-                c = torch.linalg.qr(c, mode='reduced')[0]
+                if frozen_count:
+                    prefix = torch.linalg.qr(c[:, :frozen_count], mode='reduced')[0]
+                    identity = torch.eye(c.shape[0], dtype=torch.float64)
+                    remainder = (identity-prefix@prefix.T)@c[:, frozen_count:]
+                    if remainder.shape[1]:
+                        values = torch.linalg.svdvals(remainder)
+                        if values[-1] <= 1e-12*values[0]:
+                            raise ValueError('free radial rank is deficient after prefix projection')
+                        remainder = torch.linalg.qr(remainder, mode='reduced')[0]
+                    c = torch.cat((prefix, remainder), dim=1)
+                else:
+                    values = torch.linalg.svdvals(c)
+                    if values[-1] <= 1e-12*values[0]:
+                        raise ValueError('initial radial rank is deficient')
+                    c = torch.linalg.qr(c, mode='reduced')[0]
             output.append(c.requires_grad_(True))
         result[element] = tuple(output)
     return result
 
 
 def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluations=15,
-                                radius=.05, progress=None):
+                                radius=.05, progress=None, frozen_prefix=None):
     if (type(max_steps) is not int or max_steps <= 0
             or type(max_evaluations) is not int or max_evaluations <= 0
             or not math.isfinite(radius) or radius <= 0):
         raise ValueError('invalid bounded response fit controls')
     start = time.perf_counter()
-    current = _retract(initial)
+    frozen_counts = _validate_frozen_prefix(initial, frozen_prefix)
+    current = _retract(initial, frozen_counts)
     evaluations = 0
     history = []
 
@@ -45,9 +86,23 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
         nonlocal evaluations
         evaluations += 1
         value, details = shared_radial_fit_loss(coefficients, sectors)
-        parameters = [c for channels in coefficients.values() for c in channels if c.shape[1]]
+        parameter_meta = [(element, l, c)
+                          for element, channels in coefficients.items()
+                          for l, c in enumerate(channels) if c.shape[1]]
+        parameters = [c for _, _, c in parameter_meta]
         gradients = torch.autograd.grad(value, parameters)
-        horizontal = [(g-c@(c.T@g)).detach() for c, g in zip(parameters, gradients)]
+        horizontal = []
+        for (element, l, c), g in zip(parameter_meta, gradients):
+            frozen_count = frozen_counts[element][l]
+            if frozen_count:
+                direction = torch.zeros_like(g)
+                if frozen_count < c.shape[1]:
+                    free = g[:, frozen_count:]
+                    prefix = c[:, :frozen_count]
+                    direction[:, frozen_count:] = free-prefix@(prefix.T@free)
+                horizontal.append(direction.detach())
+            else:
+                horizontal.append((g-c@(c.T@g)).detach())
         if not all(bool(torch.isfinite(g).all()) for g in horizontal):
             raise ValueError('nonfinite radial gradient')
         norm = math.sqrt(math.fsum(float(torch.sum(g*g)) for g in horizontal))
@@ -78,7 +133,7 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
             trial = {element: tuple(c.detach()-step_radius*next(direction)/norm
                                     if c.shape[1] else c.detach() for c in channels)
                      for element, channels in current.items()}
-            trial = _retract(trial)
+            trial = _retract(trial, frozen_counts)
             candidate_loss, candidate_details, candidate_gradient, candidate_norm = evaluate(trial)
             same_rank = candidate_details['virtual_rank_signature'] == rank_signature
             accepted = same_rank and candidate_loss <= loss-1e-4*step_radius*norm
@@ -98,7 +153,13 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
     return fitted, dict(status='success', stage='bounded_snapshot_fit_not_RPA_acceptance',
         physical_release_gate='hold', initial_loss=initial_loss, final_loss=loss,
         accepted_steps=accepted_steps, evaluations=evaluations, stopping_reason=stopping,
-        free_radial_count=sum(c.shape[1] for channels in current.values() for c in channels),
-        old_radial_prefix_frozen=False, pbe_iteration_constraint=False,
+        free_radial_count=sum(c.shape[1]-frozen_counts[element][l]
+                              for element, channels in current.items()
+                              for l, c in enumerate(channels)),
+        frozen_radial_count=sum(frozen_counts[element][l]
+                               for element, channels in current.items()
+                               for l, c in enumerate(channels)),
+        old_radial_prefix_frozen=any(frozen_counts[element]
+                                     for element in current), pbe_iteration_constraint=False,
         gradient_norm=norm, initial_radius=radius, virtual_rank_signature=rank_signature,
         final_dimensions=details, elapsed_seconds=time.perf_counter()-start, history=history)
