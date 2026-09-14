@@ -164,9 +164,16 @@ def collect_target_collection(root, primitive_blocks, *, q_slots=tuple(range(8))
             with np.load(path, allow_pickle=False) as arrays:
                 covariance = arrays['covariance']
                 embedding = arrays['embedding']
+                if 'occupied_embedding' not in arrays:
+                    raise ValueError('occupied embedding array is required')
+                occupied_embedding = arrays['occupied_embedding']
                 if (covariance.shape != (sector['covariance_dimension'],)*2
                         or embedding.shape != (sector['embedding_rows'], sector['embedding_columns'])
-                        or not np.isfinite(covariance).all() or not np.isfinite(embedding).all()):
+                        or occupied_embedding.shape != (sector['occupied_embedding_rows'],
+                                                        sector['embedding_columns'])
+                        or not np.isfinite(covariance).all()
+                        or not np.isfinite(embedding).all()
+                        or not np.isfinite(occupied_embedding).all()):
                     raise ValueError('sector array shape or finite-value mismatch')
                 norm2 = float(np.trace(covariance).real)
             if not math.isclose(norm2, float(sector['target_norm2']), rel_tol=1e-11, abs_tol=1e-14):
@@ -209,5 +216,6 @@ def collect_target_collection(root, primitive_blocks, *, q_slots=tuple(range(8))
         k_record_count_per_q=k_record_count,
         target_sector_count=len(q_slots)*k_record_count,
         target_norm2=total_norm2, target_files=target_files, per_q=per_q,
+        occupied_constraints_complete=True,
         coordinate_merge='none_per_q_source_target_record',
         target_completeness_gate='pass', physical_release_gate='hold')

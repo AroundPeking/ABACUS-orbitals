@@ -145,17 +145,19 @@ def run(bundle, output, q_slot, source_commit, *, relative_rank_tolerance=1e-12,
                     dataset, relative_rank_tolerance=relative_rank_tolerance, progress=log)
             else:
                 from response_target import build_available_response_targets
-                def consume(covariance, embedding, pi, metadata):
+                def consume(covariance, occupied_embedding, embedding, pi, metadata):
                     values = np.linalg.eigvalsh(covariance)
                     require(np.isfinite(embedding).all() and values[-1] > 0
                             and values[0] >= -1e-10*values[-1], 'invalid fixed target spectrum')
                     stem = 'k%04d' % metadata['source_ik']
                     array_file = target/(stem+'.npz')
                     with array_file.open('xb') as stream:
-                        np.savez(stream, covariance=covariance, embedding=embedding)
+                        np.savez(stream, covariance=covariance, embedding=embedding,
+                                 occupied_embedding=occupied_embedding)
                     row = dict(metadata, file=array_file.name,
                         sha256=hashlib.sha256(array_file.read_bytes()).hexdigest(),
                         covariance_dimension=len(covariance), primitive_count=embedding.shape[1],
+                        occupied_embedding_rows=occupied_embedding.shape[0],
                         covariance_minimum=float(values[0]), covariance_maximum=float(values[-1]),
                         source_kpoint=list(dataset.kpoints[len(target_rows)].source_kpoint),
                         target_kpoint=list(dataset.kpoints[len(target_rows)].target_kpoint))

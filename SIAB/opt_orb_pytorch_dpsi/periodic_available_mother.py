@@ -78,7 +78,7 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
         occupied = raw_occupied
         if record.occupied_projection_normalization is not None:
             occupied = _array(record.occupied_projection_normalization)@occupied
-        _, virtual, captures = occupied_frames(occupied)
+        occupied_frame, virtual, captures = occupied_frames(occupied)
         if captures['minimum_capture'] < 1.-capture_tolerance:
             raise ValueError('available mother lost fixed occupied capture')
         hamiltonian, raw_h_residual = _hermitian(_array(record.hamiltonian_ha))
@@ -114,6 +114,7 @@ def available_mother_response(dataset, *, relative_rank_tolerance=1e-12,
             # A read-only target builder can consume this exact retained frame.
             # No coordinate alignment across q/k records is assumed.
             target_consumer(record, hvirtual, (_array(record.source)@lowdin)@virtual,
+                            occupied_frame.conj().T@lowdin.conj().T@overlap,
                             virtual.conj().T@lowdin.conj().T@overlap, pi, dict(entry))
         report['k_records'].append(entry)
         report['k_weight_sum'] += record.k_weight

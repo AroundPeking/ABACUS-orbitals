@@ -145,14 +145,15 @@ def run(contract_path, output):
                     target_dir.mkdir(parents=True, exist_ok=True)
                     target_rows = []
 
-                    def consume(covariance, embedding, target_pi, metadata):
+                    def consume(covariance, occupied_embedding, embedding, target_pi, metadata):
                         values = np.linalg.eigvalsh(covariance)
                         require(np.isfinite(embedding).all() and values[-1] > 0
                             and values[0] >= -1e-10*values[-1],
                             'invalid jY response target spectrum')
                         array_file = target_dir/('k%04d.npz' % metadata['source_ik'])
                         with array_file.open('xb') as stream:
-                            np.savez(stream, covariance=covariance, embedding=embedding)
+                            np.savez(stream, covariance=covariance, embedding=embedding,
+                                     occupied_embedding=occupied_embedding)
                         target_rows.append(dict(metadata,
                             q_slot=slot, target_kind='response_covariance_embedding',
                             assembled_pi=False, lmax=lmax,
@@ -162,6 +163,7 @@ def run(contract_path, output):
                             covariance_dimension=int(covariance.shape[0]),
                             embedding_rows=int(embedding.shape[0]),
                             embedding_columns=int(embedding.shape[1]),
+                            occupied_embedding_rows=int(occupied_embedding.shape[0]),
                             target_norm2=float(np.trace(covariance).real),
                             covariance_minimum=float(values[0]),
                             covariance_maximum=float(values[-1]),

@@ -16,7 +16,8 @@ from response_metric import _hermitian
 
 
 class ResponseFitSector:
-    def __init__(self, label, primitive_blocks, virtual_embedding, covariance, *, occupied_rank):
+    def __init__(self, label, primitive_blocks, virtual_embedding, covariance, *,
+                 occupied_rank, occupied_embedding=None):
         embedding = np.asarray(virtual_embedding, dtype=np.complex128)
         cov, _ = _hermitian(covariance)
         if (not isinstance(label, str) or not label or embedding.ndim != 2
@@ -24,33 +25,44 @@ class ResponseFitSector:
                 or type(occupied_rank) is not int or occupied_rank < 0
                 or embedding.shape[0]+occupied_rank > embedding.shape[1]):
             raise ValueError('invalid fixed response sector')
+        occupied = None
+        if occupied_embedding is not None:
+            occupied = np.asarray(occupied_embedding, dtype=np.complex128)
+            if (occupied.ndim != 2 or occupied.shape != (occupied_rank, embedding.shape[1])
+                    or not np.isfinite(occupied).all()):
+                raise ValueError('invalid occupied embedding')
         eigenvalues = np.linalg.eigvalsh(cov)
         if eigenvalues[0] < -1e-10*max(float(eigenvalues[-1]), 1e-300):
             raise ValueError('response covariance is materially indefinite')
         self.label = label
         self.primitive_blocks = primitive_blocks
         self.embedding = torch.tensor(embedding, dtype=torch.complex128)
+        self.occupied_embedding = (None if occupied is None else
+                                   torch.tensor(occupied, dtype=torch.complex128))
         self.covariance = torch.tensor(cov, dtype=torch.complex128)
         self.target_norm2 = float(np.trace(cov).real)
         self.occupied_rank = occupied_rank
 
 
-def shared_radial_fit_loss(coefficients, sectors, *, relative_singular_tolerance=1e-10):
+def shared_radial_fit_loss(coefficients, sectors, *, relative_singular_tolerance=1e-10,
+                           occupied_weight=0.):
     """Return normalized snapshot residual and explicit per-sector rank reports.
 
     The *same* element/l radial tensors generate all atom/m columns in every
-    sector through the existing SIAB mapper. Occupied directions are external
-    to this virtual fit and are counted separately, never called free NAOs.
-    q/k/occupation/frequency weights belong in the fixed covariance, once.
+    sector through the existing SIAB mapper.  When present, occupied and
+    virtual embeddings share one retained mother metric and provide an explicit
+    occupied-capture residual. q/k/occupation/frequency weights belong in the
+    fixed covariance, once.
     """
     if (not math.isfinite(relative_singular_tolerance)
             or not 0 < relative_singular_tolerance < 1
+            or not math.isfinite(occupied_weight) or occupied_weight < 0
             or not sectors or len({s.label for s in sectors}) != len(sectors)):
         raise ValueError('invalid shared fit sectors or singular tolerance')
     target_norm2 = math.fsum(s.target_norm2 for s in sectors)
     if not math.isfinite(target_norm2) or target_norm2 <= 0:
         raise ValueError('response fit requires nonzero total target norm')
-    residuals, records = [], []
+    residuals, occupied_residuals, occupied_captures, records = [], [], [], []
     for sector in sectors:
         available = {(block.element, block.l) for block in sector.primitive_blocks}
         requested = {(element, l) for element, channels in coefficients.items()
@@ -73,15 +85,50 @@ def shared_radial_fit_loss(coefficients, sectors, *, relative_singular_tolerance
         if not bool(torch.isfinite(residual)) or float(residual.detach()) < -1e-8*target_norm2:
             raise ValueError('invalid projected response residual')
         residuals.append(residual)
+        minimum_capture = None
+        occupied_residual = None
+        if sector.occupied_embedding is not None:
+            occupied_y = sector.occupied_embedding@basis.transform
+            full_y = torch.cat((occupied_y, y), dim=0)
+            gram = full_y.conj().T@full_y
+            values_full, vectors_full = torch.linalg.eigh(gram)
+            maximum_full = values_full[-1].real
+            keep_full = values_full.real > relative_singular_tolerance*maximum_full
+            if int(keep_full.sum()) != gram.shape[0]:
+                raise ValueError('candidate is rank deficient in retained mother metric')
+            lowdin = vectors_full[:, keep_full]/torch.sqrt(values_full[keep_full].real)[None, :]
+            occupied_coordinates = occupied_y@lowdin
+            capture_matrix = occupied_coordinates@occupied_coordinates.conj().T
+            capture_values = torch.linalg.eigvalsh(capture_matrix).real
+            minimum_capture = float(capture_values[0].detach())
+            occupied_residual = (sector.occupied_rank-torch.trace(capture_matrix).real)
+            if (not bool(torch.isfinite(occupied_residual))
+                    or float(occupied_residual.detach()) < -1e-8*max(sector.occupied_rank, 1)):
+                raise ValueError('invalid occupied capture residual')
+            occupied_residuals.append(torch.clamp(occupied_residual, min=0.))
+            occupied_captures.append(minimum_capture)
         records.append(dict(label=sector.label, nominal_cell_ao=len(basis.columns),
             retained_virtual_rank=rank, occupied_rank=sector.occupied_rank,
             augmented_total_rank=rank+sector.occupied_rank,
             retained_singular_condition=float(values[0]/values[keep][-1]),
             discarded_virtual_columns=len(basis.columns)-rank,
+            minimum_occupied_capture=minimum_capture,
+            occupied_residual=(None if occupied_residual is None else
+                               float(occupied_residual.detach())),
             residual_norm2=float(residual.detach()), target_norm2=sector.target_norm2))
-    loss = torch.stack(residuals).sum()/target_norm2
+    response_loss = torch.stack(residuals).sum()/target_norm2
+    occupied_rank_total = sum(s.occupied_rank for s in sectors
+                              if s.occupied_embedding is not None)
+    occupied_loss = (torch.stack(occupied_residuals).sum()/occupied_rank_total
+                     if occupied_residuals else response_loss.new_zeros(()))
+    loss = response_loss+occupied_weight*occupied_loss
     return loss, dict(stage='shared_radial_snapshot_fit_not_RPA_acceptance',
         physical_release_gate='hold', target_norm2=target_norm2,
+        response_loss=float(response_loss.detach()),
+        occupied_weight=occupied_weight,
+        occupied_constraint_sector_count=len(occupied_residuals),
+        occupied_residual=float(occupied_loss.detach()),
+        minimum_occupied_capture=(min(occupied_captures) if occupied_captures else None),
         relative_singular_tolerance=relative_singular_tolerance,
         radial_orbital_count=sum(c.shape[1] for channels in coefficients.values() for c in channels),
         nominal_ao_per_element={element: sum((2*l+1)*c.shape[1] for l, c in enumerate(channels))

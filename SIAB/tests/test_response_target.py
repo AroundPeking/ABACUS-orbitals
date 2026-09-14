@@ -80,20 +80,26 @@ class ResponseTargetTest(unittest.TestCase):
         target.build_available_response_targets(dataset, lambda *args: pieces.append(args),
                                                  relative_rank_tolerance=1e-10)
         self.assertEqual(len(pieces), 1)
-        cov, embedding, pi, metadata = pieces[0]
+        cov, occupied_embedding, embedding, pi, metadata = pieces[0]
         expected, _ = mother.available_mother_response(dataset, relative_rank_tolerance=1e-10)
         np.testing.assert_allclose(pi, expected, rtol=2e-13, atol=1e-14)
         self.assertEqual(metadata['target_ik'], 3)
         self.assertEqual(metadata['reciprocal_shift'], [1, 0, 0])
         self.assertEqual(metadata['q_weight'], .125)
         self.assertEqual(metadata['coordinate_merge'], 'none_per_q_source_target_record')
+        self.assertEqual(occupied_embedding.shape, (1, 3))
+        combined = np.concatenate((occupied_embedding, embedding), axis=0)
+        np.testing.assert_allclose(combined.conj().T@combined,
+                                   r.overlap.numpy(), rtol=2e-13, atol=2e-13)
         # An uncontracted primitive set spans the entire virtual target.
         block = PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 3, 0)
-        sector = ResponseFitSector('q22-k1-k3', (block,), embedding, cov, occupied_rank=1)
+        sector = ResponseFitSector('q22-k1-k3', (block,), embedding, cov,
+                                   occupied_embedding=occupied_embedding, occupied_rank=1)
         coefficients = {'C': [torch.eye(3, dtype=torch.float64).requires_grad_()]}
         loss, report = shared_radial_fit_loss(coefficients, [sector])
         self.assertLess(abs(float(loss.detach())), 1e-12)
         self.assertEqual(report['augmented_total_rank_by_sector'], [3])
+        self.assertAlmostEqual(report['minimum_occupied_capture'], 1., places=12)
 
 
 if __name__ == '__main__':

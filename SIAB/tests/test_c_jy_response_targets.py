@@ -7,6 +7,7 @@ def sector(q_slot, index=1):
     return dict(q_slot=q_slot, target_kind='response_covariance_embedding',
                 assembled_pi=False, primitive_count=992,
                 covariance_dimension=4, embedding_rows=4, embedding_columns=992,
+                occupied_rank=2, occupied_embedding_rows=2,
                 target_norm2=1.0, source_ik=index)
 
 
@@ -41,6 +42,12 @@ class CjyResponseTargetContractTest(unittest.TestCase):
     def test_target_must_be_uncontracted(self):
         with self.assertRaisesRegex(ValueError, 'uncontracted'):
             validate_target_manifest(dict(self.manifest(), primitive_count=558))
+
+    def test_occupied_embedding_is_required_for_constrained_contraction(self):
+        bad = self.manifest()
+        del bad['sectors'][0]['occupied_embedding_rows']
+        with self.assertRaisesRegex(ValueError, 'occupied embedding'):
+            validate_target_manifest(bad)
 
 
 if __name__ == '__main__':

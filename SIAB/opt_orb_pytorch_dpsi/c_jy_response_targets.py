@@ -61,8 +61,15 @@ def validate_target_manifest(manifest, *, lmax=3, frequency_count=12,
         for key in ('covariance_dimension', 'embedding_rows', 'embedding_columns'):
             if not isinstance(sector.get(key), int) or sector[key] <= 0:
                 raise ValueError('invalid target sector dimensions')
+        for key in ('occupied_rank', 'occupied_embedding_rows'):
+            if not isinstance(sector.get(key), int) or sector[key] <= 0:
+                raise ValueError('invalid occupied embedding dimensions')
         if sector['covariance_dimension'] != sector['embedding_rows']:
             raise ValueError('covariance/embedding frame mismatch')
+        if sector['occupied_embedding_rows'] != sector['occupied_rank']:
+            raise ValueError('occupied embedding/rank mismatch')
+        if sector['embedding_rows']+sector['occupied_embedding_rows'] > sector['embedding_columns']:
+            raise ValueError('occupied embedding exceeds retained mother dimension')
         if not math.isfinite(float(sector.get('target_norm2', float('nan')))):
             raise ValueError('nonfinite target norm')
     if q_seen != {slot: k_record_count for slot in q_slots}:

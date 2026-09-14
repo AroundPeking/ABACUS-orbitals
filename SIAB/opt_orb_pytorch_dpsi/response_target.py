@@ -68,7 +68,8 @@ def build_available_response_targets(dataset, consume, *, relative_rank_toleranc
     summing their losses after a valid within-target-k coordinate alignment.
     No target truncation or POD rank cap is introduced.
     """
-    def target_consumer(record, h, source, embedding, expected_pi, metadata):
+    def target_consumer(record, h, source, occupied_embedding, embedding,
+                        expected_pi, metadata):
         covariance, pi, details = spectral_response_target(h, source,
             _array(record.source_eigenvalue_ha), _array(record.occupation),
             _array(dataset.frequency_ha), _array(dataset.frequency_weights_ha),
@@ -78,10 +79,11 @@ def build_available_response_targets(dataset, consume, *, relative_rank_toleranc
             raise ValueError('response target does not reproduce available-mother Pi')
         metadata.update(details, selected_iq=dataset.selected_iq, q_weight=dataset.q_weight,
             coordinate_merge='none_per_q_source_target_record',
+            occupied_embedding_definition='O_dagger_Lowdin_dagger_S',
             embedding_definition='V_dagger_Lowdin_dagger_S',
             pi_reconstruction_relative_error=error,
             response_equation='(H_virtual-eps_n+i*sign*omega)X=-source_virtual_dagger')
-        consume(covariance, embedding, pi, metadata)
+        consume(covariance, occupied_embedding, embedding, pi, metadata)
 
     return available_mother_response(dataset, relative_rank_tolerance=relative_rank_tolerance,
                                     progress=progress, target_consumer=target_consumer)

@@ -1,8 +1,8 @@
 """Bounded shared-radial initialization on a fixed response target, not RPA.
 
-QR removes within-l coefficient gauge. An optional frozen prefix preserves
-the span of trusted occupied/low-energy radial functions while only the added
-radials move; this remains a response fit and does not impose PBE or RPA.
+QR removes within-l coefficient gauge.  An optional occupied-embedding penalty
+guides all-channel motion, while a hard capture floor rejects infeasible trial
+steps.  A frozen prefix remains available only for explicit ablations.
 """
 import math
 import time
@@ -71,10 +71,15 @@ def _retract(coefficients, frozen_counts=None):
 
 
 def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluations=15,
-                                radius=.05, progress=None, frozen_prefix=None):
+                                radius=.05, progress=None, frozen_prefix=None,
+                                occupied_weight=0., occupied_capture_floor=None):
     if (type(max_steps) is not int or max_steps <= 0
             or type(max_evaluations) is not int or max_evaluations <= 0
-            or not math.isfinite(radius) or radius <= 0):
+            or not math.isfinite(radius) or radius <= 0
+            or not math.isfinite(occupied_weight) or occupied_weight < 0
+            or (occupied_capture_floor is not None
+                and (not math.isfinite(occupied_capture_floor)
+                     or not 0 <= occupied_capture_floor <= 1))):
         raise ValueError('invalid bounded response fit controls')
     start = time.perf_counter()
     frozen_counts = _validate_frozen_prefix(initial, frozen_prefix)
@@ -85,7 +90,11 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
     def evaluate(coefficients):
         nonlocal evaluations
         evaluations += 1
-        value, details = shared_radial_fit_loss(coefficients, sectors)
+        value, details = shared_radial_fit_loss(
+            coefficients, sectors, occupied_weight=occupied_weight)
+        if (occupied_capture_floor is not None
+                and details['minimum_occupied_capture'] is None):
+            raise ValueError('occupied capture constraint data are unavailable')
         parameter_meta = [(element, l, c)
                           for element, channels in coefficients.items()
                           for l, c in enumerate(channels) if c.shape[1]]
@@ -108,9 +117,12 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
         norm = math.sqrt(math.fsum(float(torch.sum(g*g)) for g in horizontal))
         return float(value.detach()), details, [g.detach() for g in horizontal], norm
 
-    def record(value, accepted, step, step_radius, norm, reason):
+    def record(value, accepted, step, step_radius, norm, reason, details):
         row = dict(evaluation=evaluations, step=step, loss=value, accepted=accepted,
             radius=step_radius, gradient_norm=norm, reason=reason,
+            response_loss=details['response_loss'],
+            occupied_residual=details['occupied_residual'],
+            minimum_occupied_capture=details['minimum_occupied_capture'],
             elapsed_seconds=time.perf_counter()-start)
         history.append(row)
         if progress is not None:
@@ -118,8 +130,12 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
 
     loss, details, gradient, norm = evaluate(current)
     initial_loss = loss
+    if (occupied_capture_floor is not None
+            and details['minimum_occupied_capture'] < occupied_capture_floor):
+        raise ValueError('initial candidate is below occupied capture floor')
     rank_signature = details['virtual_rank_signature']
-    record(loss, True, 0, 0., norm, 'initial')
+    initial_details = details
+    record(loss, True, 0, 0., norm, 'initial', details)
     accepted_steps = 0
     stopping = 'evaluation_budget'
     while accepted_steps < max_steps and evaluations < max_evaluations:
@@ -136,9 +152,16 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
             trial = _retract(trial, frozen_counts)
             candidate_loss, candidate_details, candidate_gradient, candidate_norm = evaluate(trial)
             same_rank = candidate_details['virtual_rank_signature'] == rank_signature
-            accepted = same_rank and candidate_loss <= loss-1e-4*step_radius*norm
-            reason = 'accepted' if accepted else ('rank_changed' if not same_rank else 'insufficient_decrease')
-            record(candidate_loss, accepted, accepted_steps+1, step_radius, candidate_norm, reason)
+            capture_ok = (occupied_capture_floor is None
+                          or candidate_details['minimum_occupied_capture'] >= occupied_capture_floor)
+            accepted = (same_rank and capture_ok
+                        and candidate_loss <= loss-1e-4*step_radius*norm)
+            reason = ('accepted' if accepted else
+                      ('rank_changed' if not same_rank else
+                       ('occupied_capture_below_floor' if not capture_ok else
+                        'insufficient_decrease')))
+            record(candidate_loss, accepted, accepted_steps+1, step_radius,
+                   candidate_norm, reason, candidate_details)
             if accepted:
                 current, loss, details, gradient, norm = trial, candidate_loss, candidate_details, candidate_gradient, candidate_norm
                 accepted_steps += 1
@@ -152,6 +175,13 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
     fitted = {e: tuple(c.detach().clone() for c in channels) for e, channels in current.items()}
     return fitted, dict(status='success', stage='bounded_snapshot_fit_not_RPA_acceptance',
         physical_release_gate='hold', initial_loss=initial_loss, final_loss=loss,
+        initial_response_loss=initial_details['response_loss'],
+        final_response_loss=details['response_loss'],
+        initial_occupied_residual=initial_details['occupied_residual'],
+        final_occupied_residual=details['occupied_residual'],
+        initial_minimum_occupied_capture=initial_details['minimum_occupied_capture'],
+        final_minimum_occupied_capture=details['minimum_occupied_capture'],
+        occupied_weight=occupied_weight, occupied_capture_floor=occupied_capture_floor,
         accepted_steps=accepted_steps, evaluations=evaluations, stopping_reason=stopping,
         free_radial_count=sum(c.shape[1]-frozen_counts[element][l]
                               for element, channels in current.items()
@@ -159,7 +189,7 @@ def fit_shared_response_radials(initial, sectors, *, max_steps=5, max_evaluation
         frozen_radial_count=sum(frozen_counts[element][l]
                                for element, channels in current.items()
                                for l, c in enumerate(channels)),
-        old_radial_prefix_frozen=any(frozen_counts[element]
+        old_radial_prefix_frozen=any(any(count > 0 for count in frozen_counts[element])
                                      for element in current), pbe_iteration_constraint=False,
         gradient_norm=norm, initial_radius=radius, virtual_rank_signature=rank_signature,
         final_dimensions=details, elapsed_seconds=time.perf_counter()-start, history=history)

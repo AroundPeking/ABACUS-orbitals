@@ -112,6 +112,30 @@ class RadialFitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing primitive blocks'):
             shared_radial_fit_loss(unsupported, sectors)
 
+    def test_occupied_embedding_penalizes_lost_fixed_manifold(self):
+        block = (PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 3, 0),)
+        occupied = np.array([[1., 0., 0.]])
+        virtual = np.array([[0., 1., 0.], [0., 0., 1.]])
+        sector = ResponseFitSector('occupied', block, virtual, np.eye(2),
+                                   occupied_embedding=occupied, occupied_rank=1)
+        good = {'C': (torch.tensor([[1., 0.], [0., 1.], [0., 0.]],
+                                   dtype=torch.float64, requires_grad=True),)}
+        bad = {'C': (torch.tensor([[0., 0.], [1., 0.], [0., 1.]],
+                                  dtype=torch.float64, requires_grad=True),)}
+        good_loss, good_report = shared_radial_fit_loss(good, [sector], occupied_weight=2.)
+        bad_loss, bad_report = shared_radial_fit_loss(bad, [sector], occupied_weight=2.)
+        self.assertAlmostEqual(good_report['minimum_occupied_capture'], 1., places=12)
+        self.assertAlmostEqual(good_report['occupied_residual'], 0., places=12)
+        self.assertAlmostEqual(bad_report['minimum_occupied_capture'], 0., places=12)
+        self.assertAlmostEqual(bad_report['occupied_residual'], 1., places=12)
+        self.assertGreater(bad_loss.item(), good_loss.item())
+
+    def test_occupied_embedding_contract_is_explicit(self):
+        block = (PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 3, 0),)
+        with self.assertRaisesRegex(ValueError, 'occupied embedding'):
+            ResponseFitSector('bad-occ', block, np.eye(2, 3), np.eye(2),
+                              occupied_embedding=np.eye(2, 3), occupied_rank=1)
+
 
 if __name__ == '__main__':
     unittest.main()

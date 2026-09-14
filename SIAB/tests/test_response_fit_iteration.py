@@ -84,6 +84,21 @@ class ResponseFitIterationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'radial rank'):
             iteration.fit_shared_response_radials(initial, sectors)
 
+    def test_line_search_rejects_trial_below_occupied_capture_floor(self):
+        blocks = (PeriodicGalerkinPrimitiveBlock('C', 0, 0, 0, 3, 0),)
+        sector = ResponseFitSector('occupied', blocks,
+            np.array([[0., 1., 0.], [0., 0., 1.]]), np.diag([1., 20.]),
+            occupied_embedding=np.array([[1., 0., 0.]]), occupied_rank=1)
+        initial = {'C': (torch.tensor([[1.], [1.], [1.]], dtype=torch.float64),)}
+        fitted, report = iteration.fit_shared_response_radials(
+            initial, [sector], max_steps=2, max_evaluations=10, radius=.7,
+            occupied_weight=.1, occupied_capture_floor=.32)
+        self.assertGreaterEqual(report['final_minimum_occupied_capture'], .32)
+        self.assertTrue(any(row['reason'] == 'occupied_capture_below_floor'
+                            for row in report['history']))
+        self.assertFalse(report['old_radial_prefix_frozen'])
+        self.assertTrue(torch.isfinite(fitted['C'][0]).all())
+
 
 if __name__ == '__main__':
     unittest.main()

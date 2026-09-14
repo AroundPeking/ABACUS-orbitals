@@ -39,8 +39,10 @@ class CjYResponseTargetCollectionTest(unittest.TestCase):
             target.mkdir(parents=True)
             covariance = np.diag([1., 2.]).astype(np.complex128)
             embedding = np.array([[1., 0., .5], [0., 1., .25]], dtype=np.complex128)
+            occupied_embedding = np.array([[0., 0., 1.]], dtype=np.complex128)
             with (target/'k0001.npz').open('wb') as stream:
-                np.savez(stream, covariance=covariance, embedding=embedding)
+                np.savez(stream, covariance=covariance, embedding=embedding,
+                         occupied_embedding=occupied_embedding)
             pi = np.arange(8, dtype=float).reshape(2, 2, 2)
             np.save(target/'PI_DIAGNOSTIC.npy', pi, allow_pickle=False)
             np.save(result/'lmax3/PI.npy', pi, allow_pickle=False)
@@ -53,7 +55,8 @@ class CjYResponseTargetCollectionTest(unittest.TestCase):
                     assembled_pi=False, lmax=3, selected_iq=selected_iq,
                     source_ik=1, target_ik=1, frequency_count=2, primitive_count=3,
                     occupied_rank=1, covariance_dimension=2, embedding_rows=2,
-                    embedding_columns=3, target_norm2=3., file='k0001.npz',
+                    embedding_columns=3, occupied_embedding_rows=1,
+                    target_norm2=3., file='k0001.npz',
                     file_sha256=sha(target/'k0001.npz'))])
             (target/'TARGETS.json').write_text(json.dumps(manifest))
             result_payload = dict(status='success', q_slot=slot, selected_iq=selected_iq)
@@ -89,6 +92,19 @@ class CjYResponseTargetCollectionTest(unittest.TestCase):
         self.assertEqual(len(result['target_files']), 2)
         self.assertFalse(result['assembled_pi'])
         self.assertEqual(result['physical_release_gate'], 'hold')
+        self.assertTrue(result['occupied_constraints_complete'])
+
+    def test_rejects_sector_without_occupied_array(self):
+        path = self.root/'q01/targets/k0001.npz'
+        with np.load(path, allow_pickle=False) as arrays:
+            covariance, embedding = arrays['covariance'], arrays['embedding']
+        with path.open('wb') as stream:
+            np.savez(stream, covariance=covariance, embedding=embedding)
+        manifest = json.loads((self.root/'q01/targets/TARGETS.json').read_text())
+        manifest['sectors'][0]['file_sha256'] = sha(path)
+        (self.root/'q01/targets/TARGETS.json').write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, 'occupied embedding'):
+            self.collect()
 
     def test_rejects_changed_sector_file(self):
         path = self.root/'q01/targets/k0001.npz'

@@ -94,9 +94,11 @@ def run(args):
         with np.load(array_path, allow_pickle=False) as arrays:
             covariance = arrays['covariance']
             embedding = arrays['embedding']
+            occupied_embedding = arrays['occupied_embedding']
         sectors.append(ResponseFitSector(
             'q%02d/%s' % (q_slot, file_name), primitive_block_tuple, embedding, covariance,
-            occupied_rank=int(metadata['occupied_rank'])))
+            occupied_rank=int(metadata['occupied_rank']),
+            occupied_embedding=occupied_embedding))
     require(len(sectors) == 512, 'complete 512-sector fit is required')
 
     original = read_periodic_optimizer_coefficients(
