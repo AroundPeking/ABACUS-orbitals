@@ -31,7 +31,7 @@ PYTHONPATH="$SOURCE/SIAB/opt_orb_pytorch_dpsi:$SOURCE/SIAB/example_C_sternheimer
   /data/home/df_iopcas_ghj/app/miniconda3/bin/python \
   "$SOURCE/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_jy_frozen_spd_f_fit.py" \
   --source "$SOURCE" \
-  --source-commit 28e6867dfrozen-source \
+  --source-commit e49f0052frozen-source \
   --target-root "$TARGET_ROOT" \
   --bundle "$BUNDLE" \
   --rank-root "$RANK_ROOT" \
