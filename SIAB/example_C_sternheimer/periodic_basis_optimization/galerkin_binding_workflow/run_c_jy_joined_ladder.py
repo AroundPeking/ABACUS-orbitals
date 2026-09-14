@@ -5,6 +5,7 @@ No ABACUS, reference solve, production SOS, or GW is invoked.
 """
 import argparse
 from dataclasses import replace
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -51,12 +52,16 @@ def run(contract_path, output):
     # Preserve the original cache reader identity, then import the new adapter.
     sys.path.insert(0,str(reader/'SIAB/opt_orb_pytorch_dpsi'))
     import torch
-    from c_jy_response_targets import validate_target_manifest
     from periodic_galerkin_basis import read_periodic_optimizer_coefficients
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
     from run_c_jy_angular_ladder import angular_view, energy_summary
     from periodic_available_mother import available_mother_response
+    spec = importlib.util.spec_from_file_location(
+        '_c_jy_response_targets_contract', repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
+    target_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(target_module)
+    validate_target_manifest = target_module.validate_target_manifest
     torch.set_num_threads(int(os.environ['SLURM_CPUS_PER_TASK']))
     freeze = json.loads(hashed(bundle/'backoff_INPUT_FREEZE.json',FREEZE_SHA))
     index = json.loads(hashed(bundle/'backoff_ACTIVE_DATA_CACHE.json',INDEX_SHA))

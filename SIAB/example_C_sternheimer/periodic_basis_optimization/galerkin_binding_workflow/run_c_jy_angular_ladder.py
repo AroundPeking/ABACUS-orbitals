@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import asdict
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,12 @@ from periodic_galerkin_data import read_periodic_galerkin_dataset
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 from periodic_galerkin_rpa import periodic_rpa_objective
-from c_jy_response_targets import validate_target_manifest
+
+_target_spec = importlib.util.spec_from_file_location(
+    '_c_jy_response_targets_contract', REPO/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
+_target_module = importlib.util.module_from_spec(_target_spec)
+_target_spec.loader.exec_module(_target_module)
+validate_target_manifest = _target_module.validate_target_manifest
 
 
 def sha(path):
