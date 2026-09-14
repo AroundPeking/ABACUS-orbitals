@@ -20,6 +20,7 @@ from periodic_galerkin_data import read_periodic_galerkin_dataset
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 from periodic_galerkin_rpa import periodic_rpa_objective
+from c_jy_response_targets import validate_target_manifest
 
 
 def sha(path):
@@ -113,8 +114,58 @@ def run(contract_path, output):
                     progress.write(json.dumps(record, allow_nan=False)+'\n')
                     progress.flush()
                     print(json.dumps(record, allow_nan=False), flush=True)
-                response, detail = available_mother_response(view,
-                    relative_rank_tolerance=contract['relative_rank_tolerance'], progress=log)
+                if contract.get('target_lmax') == lmax:
+                    from response_target import build_available_response_targets
+                    target_dir = Path(contract['target_dir'])
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    target_rows = []
+
+                    def consume(covariance, embedding, target_pi, metadata):
+                        values = np.linalg.eigvalsh(covariance)
+                        if (not np.isfinite(embedding).all() or values[-1] <= 0
+                                or values[0] < -1e-10*values[-1]):
+                            raise ValueError('invalid Gamma jY response target spectrum')
+                        array_file = target_dir/('k%04d.npz' % metadata['source_ik'])
+                        with array_file.open('xb') as stream:
+                            np.savez(stream, covariance=covariance, embedding=embedding)
+                        target_rows.append(dict(metadata,
+                            q_slot=0, target_kind='response_covariance_embedding',
+                            assembled_pi=False, lmax=lmax,
+                            selected_iq=dataset.selected_iq,
+                            frequency_count=int(dataset.frequency_ha.numel()),
+                            primitive_count=view.primitive_count,
+                            covariance_dimension=int(covariance.shape[0]),
+                            embedding_rows=int(embedding.shape[0]),
+                            embedding_columns=int(embedding.shape[1]),
+                            target_norm2=float(np.trace(covariance).real),
+                            covariance_minimum=float(values[0]),
+                            covariance_maximum=float(values[-1]),
+                            file=array_file.name, file_sha256=sha(array_file)))
+
+                    response, detail = build_available_response_targets(
+                        view, consume,
+                        relative_rank_tolerance=contract['relative_rank_tolerance'],
+                        progress=log)
+                    if len(target_rows) != 64:
+                        raise ValueError('complete Gamma target sector set required')
+                    target_manifest = dict(status='success',
+                        target_kind='response_covariance_embedding', assembled_pi=False,
+                        lmax=lmax, q_slot=0, selected_iq=dataset.selected_iq,
+                        q_weight=dataset.q_weight,
+                        frequency_count=int(dataset.frequency_ha.numel()),
+                        frequency_ha=dataset.frequency_ha.tolist(),
+                        frequency_weights_ha=dataset.frequency_weights_ha.tolist(),
+                        k_record_count=len(target_rows), primitive_count=view.primitive_count,
+                        sectors=target_rows, physical_release_gate='hold')
+                    validate_target_manifest(target_manifest, lmax=lmax,
+                        frequency_count=int(dataset.frequency_ha.numel()),
+                        k_record_count=64, primitive_count=view.primitive_count,
+                        q_slots=(0,))
+                    write(target_dir/'TARGETS.json', target_manifest)
+                    np.save(target_dir/'PI_DIAGNOSTIC.npy', response, allow_pickle=False)
+                else:
+                    response, detail = available_mother_response(view,
+                        relative_rank_tolerance=contract['relative_rank_tolerance'], progress=log)
             summary = energy_summary(view, response)
             if lmax == 2:
                 delta = abs(summary['candidate_energy_ha']-baseline['candidate_energy_ha'])
