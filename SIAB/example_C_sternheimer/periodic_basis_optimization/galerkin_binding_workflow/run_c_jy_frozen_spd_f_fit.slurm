@@ -20,7 +20,7 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
 BASE=/data/home/df_iopcas_ghj/app/siab/c-solid-rpa-continuation-20260912
-SOURCE="$BASE/source-e49f0052"
+SOURCE="$BASE/source-806d09d7"
 TARGET_ROOT="$BASE/jy-spdf-response-targets-c91e23a8"
 BUNDLE="$BASE/bundle"
 RANK_ROOT="$BASE/jy-spdf-radial-rank-ladder-30d4390e"
@@ -31,7 +31,7 @@ PYTHONPATH="$SOURCE/SIAB/opt_orb_pytorch_dpsi:$SOURCE/SIAB/example_C_sternheimer
   /data/home/df_iopcas_ghj/app/miniconda3/bin/python \
   "$SOURCE/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_jy_frozen_spd_f_fit.py" \
   --source "$SOURCE" \
-  --source-commit e49f0052frozen-source \
+  --source-commit 806d09d7frozen-source \
   --target-root "$TARGET_ROOT" \
   --bundle "$BUNDLE" \
   --rank-root "$RANK_ROOT" \
