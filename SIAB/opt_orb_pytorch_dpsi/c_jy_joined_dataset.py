@@ -123,5 +123,7 @@ def collect_compressed_rank_ladder(records, *, reference_energy_ha=-.51448427799
                                        for q in profile_rows),
             q_count=len(profile_rows)))
     return dict(status='success', scope='compressed_shared_radial_full_q_body_RPA',
-        physical_release_gate='hold', mother_energy_ha=float(spdf_mother_energy_ha),
+        full_q_admitted=True, ordinary_sos_validated=False,
+        qavg_headwing_validated=False, physical_release_gate='hold',
+        mother_energy_ha=float(spdf_mother_energy_ha),
         reference_energy_ha=float(reference_energy_ha), per_profile=result_rows)

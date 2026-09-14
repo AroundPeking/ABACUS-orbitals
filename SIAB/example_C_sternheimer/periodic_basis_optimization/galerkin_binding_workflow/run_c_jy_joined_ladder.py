@@ -87,11 +87,16 @@ def consume_compatible_target(args, consume_current_target, records_by_source_ik
 
 def run(contract_path, output):
     c = json.loads(contract_path.read_text())
+    compressed = (c.get('scope') ==
+                  'compressed_shared_radial_full_q_body_RPA')
     require(os.environ.get('C_EXECUTION_HOST') == 'df_iopcas_ghj'
         and os.environ.get('SLURM_JOB_ID') == c['job_id']
         and os.environ.get('SLURM_JOB_NUM_NODES') == '1', 'registered DF job required')
-    require(c['relative_rank_tolerance'] == 1e-10 and c['lmax_values'] == [2,3,4],
-            'initial joined ladder must use accepted 1e-10 control')
+    compressed_contract = compressed and c['lmax_values'] == [3]
+    ladder_contract = not compressed and c['lmax_values'] == [2,3,4]
+    require(c['relative_rank_tolerance'] == 1e-10
+            and (compressed_contract or ladder_contract),
+            'joined ladder must use its accepted 1e-10 control')
     repo = Path(__file__).resolve().parents[4]
     manifest = json.loads((repo/'SOURCE_MANIFEST.json').read_text())
     require(manifest['commit'] == c['source_commit'], 'immutable source mismatch')
@@ -110,8 +115,20 @@ def run(contract_path, output):
     from periodic_galerkin_basis import read_periodic_optimizer_coefficients
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
+    from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
     from run_c_jy_angular_ladder import angular_view, energy_summary
     from periodic_available_mother import available_mother_response
+    compressed_spec = importlib.util.spec_from_file_location(
+        '_c_jy_compressed_evaluation_contract',
+        repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_compressed_evaluation.py')
+    compressed_module = importlib.util.module_from_spec(compressed_spec)
+    compressed_spec.loader.exec_module(compressed_module)
+    evaluate_compressed_profiles = compressed_module.evaluate_compressed_profiles
+    validate_profile_input_hashes = compressed_module.validate_profile_input_hashes
+    validate_profile_specs = compressed_module.validate_profile_specs
+    if compressed:
+        validate_profile_specs(c.get('candidate_profiles'))
+        validate_profile_input_hashes(c['candidate_profiles'], c.get('inputs'))
     spec = importlib.util.spec_from_file_location(
         '_c_jy_response_targets_contract', repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
     target_module = importlib.util.module_from_spec(spec)
@@ -179,15 +196,39 @@ def run(contract_path, output):
         write(output/'JOIN.json',dict(status='success',per_k=checks,
             original_hashes=gamma.hashes,source_hashes=source.hashes,
             gauge_maps_sha256=sha(maps_path),regenerated_hamiltonian_read=False))
-        baseline = json.loads(Path(c['baseline_result']).read_text())
-        require(baseline['selected_iq'] == full.selected_iq
-            and baseline['relative_rank_tolerance'] == 1e-10
-            and baseline['cache_complete_sha256'] == record['complete_sha256'], 'baseline mismatch')
+        baseline = None
+        if not compressed:
+            baseline = json.loads(Path(c['baseline_result']).read_text())
+            require(baseline['selected_iq'] == full.selected_iq
+                and baseline['relative_rank_tolerance'] == 1e-10
+                and baseline['cache_complete_sha256'] == record['complete_sha256'],
+                'baseline mismatch')
         rows = []
         for lmax in c['lmax_values']:
             view = angular_view(full,lmax)
             stage = output/('lmax%d'%lmax)
             stage.mkdir()
+            if compressed:
+                profiles = evaluate_compressed_profiles(
+                    view, c['candidate_profiles'],
+                    read_coefficients=read_periodic_optimizer_coefficients,
+                    evaluate_response=evaluate_periodic_galerkin_coefficient_response,
+                    summarize_energy=energy_summary,
+                    relative_rank_tolerance=c['relative_rank_tolerance'],
+                    occupied_capture_floor=c['occupied_capture_floor'])
+                row = dict(status='success', lmax=lmax,
+                    selected_iq=full.selected_iq, label=item['label'],
+                    multiplicity=MULT[slot], q_weight=full.q_weight,
+                    frequencies=full.frequency_ha.tolist(),
+                    weights=full.frequency_weights_ha.tolist(),
+                    relative_rank_tolerance=c['relative_rank_tolerance'],
+                    primitive_count=view.primitive_count, k_record_count=64,
+                    source_commit=c['source_commit'], per_profile=profiles,
+                    full_q_admitted=False, physical_release_gate='hold')
+                write(stage/'RESULT.json', row)
+                rows.append(row)
+                del view, profiles
+                continue
             with (stage/'K_PROGRESS.jsonl').open('x') as stream:
                 def log(row):
                     row = dict(lmax=lmax,seconds=time.perf_counter()-start,**row)
@@ -270,10 +311,17 @@ def run(contract_path, output):
             write(stage/'RESULT.json',dict(row,numerical_diagnostics=detail))
             rows.append(row)
             del view, pi, detail
-        write(output/'RESULT.json',dict(status='success',per_lmax=rows,selected_iq=full.selected_iq,
-            q_slot=slot,elapsed_seconds=time.perf_counter()-start,
-            max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
-            full_q_admitted=False,physical_release_gate='hold'))
+        if compressed:
+            final = dict(rows[0], q_slot=slot,
+                scope='compressed_shared_radial_full_q_body_RPA',
+                elapsed_seconds=time.perf_counter()-start,
+                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        else:
+            final = dict(status='success',per_lmax=rows,selected_iq=full.selected_iq,
+                q_slot=slot,elapsed_seconds=time.perf_counter()-start,
+                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                full_q_admitted=False,physical_release_gate='hold')
+        write(output/'RESULT.json', final)
         write(output/'PROVENANCE.json',dict(status='success',job_id=c['job_id'],
             source_commit=c['source_commit'],contract_sha256=sha(contract_path),
             files={str(p.relative_to(output)):sha(p) for p in output.rglob('*') if p.is_file()},

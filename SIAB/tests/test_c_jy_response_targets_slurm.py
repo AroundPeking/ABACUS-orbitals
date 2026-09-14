@@ -37,6 +37,13 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
         self.assertIn('build_legacy_response_targets(', runner)
         self.assertIn('occupied_embedding=occupied_embedding', runner)
 
+    def test_q_runners_support_direct_compressed_rank_rpa_evaluation(self):
+        for name in ('run_c_jy_angular_ladder.py', 'run_c_jy_joined_ladder.py'):
+            runner = (SCRIPT.parent / name).read_text()
+            self.assertIn("compressed_shared_radial_full_q_body_RPA", runner)
+            self.assertIn('evaluate_compressed_profiles(', runner)
+            self.assertIn("['lmax_values'] == [3]", runner)
+
     def test_finite_q_callback_accepts_current_five_argument_contract(self):
         import sys
 

@@ -50,6 +50,8 @@ class JoinedDatasetContractTest(unittest.TestCase):
         self.assertAlmostEqual(final['total_error_ev_per_C'],
                                (-.509-reference)*27.211386245988/2)
         self.assertTrue(final['energy_gate'])
+        self.assertTrue(result['full_q_admitted'])
+        self.assertFalse(result['ordinary_sos_validated'])
         self.assertEqual(result['physical_release_gate'], 'hold')
 
     def test_compressed_rank_collector_rejects_cross_q_candidate_mixing(self):

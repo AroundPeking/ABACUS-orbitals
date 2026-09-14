@@ -17,7 +17,12 @@ import torch
 REPO = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO/'SIAB/opt_orb_pytorch_dpsi'))
 from periodic_available_mother import available_mother_response
+from c_jy_compressed_evaluation import (
+    evaluate_compressed_profiles, validate_profile_input_hashes,
+    validate_profile_specs)
+from periodic_galerkin_basis import read_periodic_optimizer_coefficients
 from periodic_galerkin_data import read_periodic_galerkin_dataset
+from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 from periodic_galerkin_rpa import periodic_rpa_objective
@@ -77,12 +82,21 @@ def energy_summary(dataset, response):
 
 def run(contract_path, output):
     contract = json.loads(contract_path.read_text())
+    compressed = (contract.get('scope') ==
+                  'compressed_shared_radial_full_q_body_RPA')
     if (os.environ.get('C_EXECUTION_HOST') != 'df_iopcas_ghj'
             or os.environ.get('SLURM_JOB_NUM_NODES') != '1'
             or os.environ.get('SLURM_JOB_ID') != contract['job_id']):
         raise ValueError('registered single-node DF job required')
-    if contract['relative_rank_tolerance'] != 1e-10 or contract['lmax_values'] != [2, 3, 4]:
+    compressed_contract = compressed and contract['lmax_values'] == [3]
+    ladder_contract = not compressed and contract['lmax_values'] == [2, 3, 4]
+    if contract['relative_rank_tolerance'] != 1e-10 or not (
+            compressed_contract or ladder_contract):
         raise ValueError('frozen cutoff and nested angular ladder required')
+    if compressed:
+        validate_profile_specs(contract.get('candidate_profiles'))
+        validate_profile_input_hashes(contract['candidate_profiles'],
+                                      contract.get('inputs'))
     for name, expected in contract['inputs'].items():
         if sha(name) != expected:
             raise ValueError('input hash mismatch: '+name)
@@ -109,11 +123,32 @@ def run(contract_path, output):
         dataset = prepare_periodic_occupied_reference(dataset)
         load_seconds = time.perf_counter()-start
         print(json.dumps(dict(stage='loaded', seconds=load_seconds)), flush=True)
-        baseline = json.loads(Path(contract['accepted_spd_q_result']).read_text())
+        baseline = (None if compressed else
+                    json.loads(Path(contract['accepted_spd_q_result']).read_text()))
         for lmax in contract['lmax_values']:
             view = angular_view(dataset, lmax)
             stage = output/('lmax%d' % lmax)
             stage.mkdir()
+            if compressed:
+                profiles = evaluate_compressed_profiles(
+                    view, contract['candidate_profiles'],
+                    read_coefficients=read_periodic_optimizer_coefficients,
+                    evaluate_response=evaluate_periodic_galerkin_coefficient_response,
+                    summarize_energy=energy_summary,
+                    relative_rank_tolerance=contract['relative_rank_tolerance'],
+                    occupied_capture_floor=contract['occupied_capture_floor'])
+                row = dict(status='success', q_slot=0, label=1, selected_iq=1,
+                    multiplicity=1, q_weight=dataset.q_weight, lmax=lmax,
+                    frequencies=dataset.frequency_ha.tolist(),
+                    weights=dataset.frequency_weights_ha.tolist(),
+                    relative_rank_tolerance=contract['relative_rank_tolerance'],
+                    primitive_count=view.primitive_count, k_record_count=64,
+                    source_commit=contract['source_commit'], per_profile=profiles,
+                    full_q_admitted=False, physical_release_gate='hold')
+                write(stage/'RESULT.json', row)
+                rows.append(row)
+                del view, profiles
+                continue
             with (stage/'K_PROGRESS.jsonl').open('x') as progress:
                 def log(row):
                     record = dict(lmax=lmax, elapsed_seconds=time.perf_counter()-start, **row)
@@ -189,10 +224,16 @@ def run(contract_path, output):
             write(stage/'RESULT.json', dict(**summary, numerical_diagnostics=detail))
             rows.append(summary)
             del view, response, detail
-        write(output/'RESULT.json', dict(status='success', scope='Gamma_only_angular_diagnostic',
-            full_q_admitted=False, physical_release_gate='hold', per_lmax=rows,
-            elapsed_seconds=time.perf_counter()-start, load_seconds=load_seconds,
-            max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
+        if compressed:
+            final = dict(rows[0], scope='compressed_shared_radial_full_q_body_RPA',
+                elapsed_seconds=time.perf_counter()-start, load_seconds=load_seconds,
+                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        else:
+            final = dict(status='success', scope='Gamma_only_angular_diagnostic',
+                full_q_admitted=False, physical_release_gate='hold', per_lmax=rows,
+                elapsed_seconds=time.perf_counter()-start, load_seconds=load_seconds,
+                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        write(output/'RESULT.json', final)
         write(output/'PROVENANCE.json', dict(status='success', source_commit=manifest['commit'],
             job_id=contract['job_id'], contract_sha256=sha(contract_path),
             files={str(p.relative_to(output)): sha(p) for p in output.rglob('*') if p.is_file()},
