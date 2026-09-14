@@ -20,7 +20,7 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
 BASE=/data/home/df_iopcas_ghj/app/siab/c-solid-rpa-continuation-20260912
-SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../" && pwd)"
+: "${SOURCE:?SOURCE must be exported at submission}"
 SOURCE_COMMIT="$(/data/home/df_iopcas_ghj/app/miniconda3/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$SOURCE/SOURCE_MANIFEST.json")"
 TARGET_ROOT="$BASE/jy-spdf-response-targets-c91e23a8"
 BUNDLE="$BASE/bundle"
