@@ -144,6 +144,12 @@ def run(contract_path, output):
             stage = output/('lmax%d' % lmax)
             stage.mkdir()
             if compressed:
+                def checkpoint_profile(profile):
+                    write(stage/('profile-%03d.json' % profile['ao_per_C']), dict(
+                        status='success', q_slot=0, selected_iq=1,
+                        q_weight=dataset.q_weight, lmax=lmax,
+                        source_commit=contract['source_commit'], result=profile))
+
                 profiles = evaluate_compressed_profiles(
                     view, contract['candidate_profiles'],
                     read_coefficients=read_periodic_optimizer_coefficients,
@@ -151,7 +157,8 @@ def run(contract_path, output):
                     summarize_energy=energy_summary,
                     relative_rank_tolerance=contract['relative_rank_tolerance'],
                     occupied_capture_floor=contract['occupied_capture_floor'],
-                    prepare_block_cache=prepare_periodic_block_contraction_record)
+                    prepare_block_cache=prepare_periodic_block_contraction_record,
+                    profile_callback=checkpoint_profile)
                 row = dict(status='success', q_slot=0, label=1, selected_iq=1,
                     multiplicity=1, q_weight=dataset.q_weight, lmax=lmax,
                     frequencies=dataset.frequency_ha.tolist(),

@@ -36,6 +36,7 @@ class CompressedEvaluationTest(unittest.TestCase):
 
     def test_profiles_are_evaluated_with_fixed_physical_controls(self):
         calls = []
+        checkpoints = []
         dataset = types.SimpleNamespace(frequency_ha=torch.arange(12))
 
         def read(path, *, element, radial_rows, expected_nu):
@@ -59,7 +60,8 @@ class CompressedEvaluationTest(unittest.TestCase):
         rows = evaluation.evaluate_compressed_profiles(
             dataset, self.specs(), read_coefficients=read,
             evaluate_response=evaluate, summarize_energy=summarize,
-            relative_rank_tolerance=1e-10, occupied_capture_floor=.99999)
+            relative_rank_tolerance=1e-10, occupied_capture_floor=.99999,
+            profile_callback=checkpoints.append)
         self.assertEqual([row['ao_per_C'] for row in rows], [29, 45, 61, 77])
         self.assertEqual([row['candidate_energy_ha'] for row in rows],
                          [-.01, -.02, -.03, -.04])
@@ -69,6 +71,10 @@ class CompressedEvaluationTest(unittest.TestCase):
             self.assertEqual(controls['condition_limit'], 1e12)
             self.assertAlmostEqual(controls['occupied_capture_tolerance'], 1e-5)
             self.assertEqual(controls['frequency_batch_size'], 12)
+        self.assertEqual(
+            [row['ao_per_C'] for row in checkpoints],
+            [29, 45, 61, 77],
+        )
         self.assertTrue(all(row['physical_release_gate'] == 'hold' for row in rows))
 
     def test_block_cache_is_prepared_once_before_all_rank_evaluations(self):

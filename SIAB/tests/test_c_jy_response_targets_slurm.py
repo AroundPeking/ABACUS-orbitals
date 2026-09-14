@@ -46,6 +46,7 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
                 'prepare_block_cache=prepare_periodic_block_contraction_record',
                 runner,
             )
+            self.assertIn('profile_callback=checkpoint_profile', runner)
             self.assertIn("['lmax_values'] == [3]", runner)
 
     def test_finite_q_callback_accepts_current_five_argument_contract(self):

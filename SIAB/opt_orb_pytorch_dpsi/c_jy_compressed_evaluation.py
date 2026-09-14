@@ -47,13 +47,16 @@ def validate_profile_input_hashes(specs, inputs):
 def evaluate_compressed_profiles(
         dataset, specs, *, read_coefficients, evaluate_response,
         summarize_energy, relative_rank_tolerance=1e-10,
-        occupied_capture_floor=.999999, prepare_block_cache=None):
+        occupied_capture_floor=.999999, prepare_block_cache=None,
+        profile_callback=None):
     """Evaluate each compact rank in the same q dataset and RPA functional."""
     if (not math.isfinite(relative_rank_tolerance)
             or relative_rank_tolerance <= 0
             or not math.isfinite(occupied_capture_floor)
             or not 0 < occupied_capture_floor <= 1):
         raise ValueError('invalid compressed evaluation controls')
+    if profile_callback is not None and not callable(profile_callback):
+        raise ValueError('profile callback must be callable')
     specs = validate_profile_specs(specs)
     frequency_count = int(dataset.frequency_ha.numel())
     if frequency_count != 12:
@@ -97,4 +100,6 @@ def evaluate_compressed_profiles(
                    occupied_capture_floor=occupied_capture_floor,
                    physical_release_gate='hold')
         rows.append(row)
+        if profile_callback is not None:
+            profile_callback(dict(row))
     return rows
