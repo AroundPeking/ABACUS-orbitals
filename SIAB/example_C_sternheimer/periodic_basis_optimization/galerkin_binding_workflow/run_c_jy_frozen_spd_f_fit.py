@@ -71,7 +71,7 @@ def run(args):
     require(collection['primitive_count'] == 992 and collection['lmax'] == 3,
             'unexpected jY target mother contract')
     checked = collect_target_collection(
-        target_root / 'collection-30d4390e', primitive_block_rows,
+        target_root, primitive_block_rows,
         q_slots=tuple(range(8)), k_record_count=64, frequency_count=12,
         primitive_count=992, lmax=3)
     require(checked['status'] == 'success' and checked['target_completeness_gate'] == 'pass',
@@ -90,7 +90,7 @@ def run(args):
         relative = row['file']
         file_name = Path(relative).name
         metadata = sector_metadata[(q_slot, file_name)]
-        array_path = target_root / 'collection-30d4390e' / relative
+        array_path = target_root / relative
         with np.load(array_path, allow_pickle=False) as arrays:
             covariance = arrays['covariance']
             embedding = arrays['embedding']
