@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import types
 import unittest
 
@@ -69,6 +70,58 @@ class CompressedEvaluationTest(unittest.TestCase):
             self.assertAlmostEqual(controls['occupied_capture_tolerance'], 1e-5)
             self.assertEqual(controls['frequency_batch_size'], 12)
         self.assertTrue(all(row['physical_release_gate'] == 'hold' for row in rows))
+
+    def test_block_cache_is_prepared_once_before_all_rank_evaluations(self):
+        @dataclass(frozen=True)
+        class Dataset:
+            frequency_ha: torch.Tensor
+            primitive_blocks: tuple
+            kpoints: tuple
+
+        dataset = Dataset(
+            frequency_ha=torch.arange(12),
+            primitive_blocks=('blocks',),
+            kpoints=('k1', 'k2'),
+        )
+
+        def read(path, *, element, radial_rows, expected_nu):
+            return dict(path=path, profile=expected_nu)
+
+        prepared = []
+
+        def prepare(record, blocks, coefficients):
+            self.assertEqual(blocks, dataset.primitive_blocks)
+            self.assertEqual(coefficients['profile'], (3, 3, 2, 1, 0))
+            prepared.append(record)
+            return 'prepared-' + record
+
+        def evaluate(current_dataset, coefficients, **controls):
+            self.assertEqual(
+                current_dataset.kpoints,
+                ('prepared-k1', 'prepared-k2'),
+            )
+            return types.SimpleNamespace(
+                response=torch.ones((1, 1, 1)),
+                minimum_occupied_capture=.9999995,
+                maximum_overlap_condition=11.,
+                minimum_candidate_rank=29,
+            )
+
+        rows = evaluation.evaluate_compressed_profiles(
+            dataset,
+            self.specs(),
+            read_coefficients=read,
+            evaluate_response=evaluate,
+            summarize_energy=lambda current, response: dict(
+                candidate_energy_ha=-.1,
+                reference_energy_ha=-.2,
+                q_weight=.125,
+            ),
+            prepare_block_cache=prepare,
+        )
+
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(prepared, ['k1', 'k2'])
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 """Direct full-q RPA evaluation of shared-radial jY contractions."""
 
+from dataclasses import replace
 import math
 
 
@@ -46,7 +47,7 @@ def validate_profile_input_hashes(specs, inputs):
 def evaluate_compressed_profiles(
         dataset, specs, *, read_coefficients, evaluate_response,
         summarize_energy, relative_rank_tolerance=1e-10,
-        occupied_capture_floor=.999999):
+        occupied_capture_floor=.999999, prepare_block_cache=None):
     """Evaluate each compact rank in the same q dataset and RPA functional."""
     if (not math.isfinite(relative_rank_tolerance)
             or relative_rank_tolerance <= 0
@@ -58,12 +59,19 @@ def evaluate_compressed_profiles(
     if frequency_count != 12:
         raise ValueError('fixed 12-frequency evaluation required')
     occupied_capture_tolerance = max(1e-15, 1.-occupied_capture_floor)
-    rows = []
+    loaded = []
     for spec in specs:
         profile = tuple(spec['profile'])
-        coefficients = read_coefficients(
+        loaded.append((spec, read_coefficients(
             spec['coefficients_path'], element='C', radial_rows=31,
-            expected_nu=profile)
+            expected_nu=profile)))
+    if prepare_block_cache is not None:
+        dataset = replace(dataset, kpoints=tuple(
+            prepare_block_cache(record, dataset.primitive_blocks, loaded[0][1])
+            for record in dataset.kpoints))
+    rows = []
+    for spec, coefficients in loaded:
+        profile = tuple(spec['profile'])
         response = evaluate_response(
             dataset, coefficients, contraction_backend='block',
             relative_rank_tolerance=relative_rank_tolerance,

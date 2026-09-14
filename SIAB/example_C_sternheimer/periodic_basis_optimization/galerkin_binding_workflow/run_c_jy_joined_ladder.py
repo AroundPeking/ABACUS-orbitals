@@ -112,7 +112,10 @@ def run(contract_path, output):
     # Preserve the original cache reader identity, then import the new adapter.
     sys.path.insert(0,str(reader/'SIAB/opt_orb_pytorch_dpsi'))
     import torch
-    from periodic_galerkin_basis import read_periodic_optimizer_coefficients
+    from periodic_galerkin_basis import (
+        prepare_periodic_block_contraction_record,
+        read_periodic_optimizer_coefficients,
+    )
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
     from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
@@ -216,7 +219,8 @@ def run(contract_path, output):
                     evaluate_response=evaluate_periodic_galerkin_coefficient_response,
                     summarize_energy=energy_summary,
                     relative_rank_tolerance=c['relative_rank_tolerance'],
-                    occupied_capture_floor=c['occupied_capture_floor'])
+                    occupied_capture_floor=c['occupied_capture_floor'],
+                    prepare_block_cache=prepare_periodic_block_contraction_record)
                 row = dict(status='success', lmax=lmax,
                     selected_iq=full.selected_iq, label=item['label'],
                     multiplicity=MULT[slot], q_weight=full.q_weight,

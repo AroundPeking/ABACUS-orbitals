@@ -42,6 +42,10 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
             runner = (SCRIPT.parent / name).read_text()
             self.assertIn("compressed_shared_radial_full_q_body_RPA", runner)
             self.assertIn('evaluate_compressed_profiles(', runner)
+            self.assertIn(
+                'prepare_block_cache=prepare_periodic_block_contraction_record',
+                runner,
+            )
             self.assertIn("['lmax_values'] == [3]", runner)
 
     def test_finite_q_callback_accepts_current_five_argument_contract(self):

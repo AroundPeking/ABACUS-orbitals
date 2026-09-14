@@ -39,7 +39,7 @@ class PeriodicGalerkinCandidateOperators:
 
 @dataclass(frozen=True)
 class PeriodicGalerkinBlockContractionCache:
-    coefficient_profile: tuple
+    support_profile: tuple
     groups: dict
     active: tuple
     overlap_blocks: dict
@@ -298,6 +298,16 @@ def _coefficient_profile(coefficients):
     )
 
 
+def _block_cache_profile(coefficients):
+    """Describe primitive block support independently of candidate rank."""
+    return tuple(
+        (element, l, int(channel.shape[0]))
+        for element in sorted(coefficients)
+        for l, channel in enumerate(coefficients[element])
+        if int(channel.shape[1]) > 0
+    )
+
+
 def _stack_operator_blocks(operator, row_blocks, column_blocks):
     return torch.stack(
         tuple(
@@ -335,9 +345,9 @@ def prepare_periodic_block_contraction_record(
     """Cache coefficient-independent primitive slices for one k point."""
     if not isinstance(record, PeriodicGalerkinKPoint):
         raise ValueError("record must be a PeriodicGalerkinKPoint")
-    profile = _coefficient_profile(coefficients)
+    profile = _block_cache_profile(coefficients)
     if record.block_contraction_cache is not None:
-        if record.block_contraction_cache.coefficient_profile != profile:
+        if record.block_contraction_cache.support_profile != profile:
             raise ValueError("block contraction cache coefficient profile mismatch")
         return record
     groups, active = _active_groups(primitive_blocks, coefficients)
@@ -361,7 +371,7 @@ def prepare_periodic_block_contraction_record(
                 column_blocks,
             )
     cache = PeriodicGalerkinBlockContractionCache(
-        coefficient_profile=profile,
+        support_profile=profile,
         groups=groups,
         active=active,
         overlap_blocks=overlap_blocks,
@@ -462,7 +472,7 @@ def contract_periodic_candidate_operators(record, primitive_blocks, coefficients
     else:
         if not isinstance(cache, PeriodicGalerkinBlockContractionCache):
             raise ValueError("record has an invalid block contraction cache")
-        if cache.coefficient_profile != _coefficient_profile(coefficients):
+        if cache.support_profile != _block_cache_profile(coefficients):
             raise ValueError("block contraction cache coefficient profile mismatch")
         groups = cache.groups
         active = cache.active

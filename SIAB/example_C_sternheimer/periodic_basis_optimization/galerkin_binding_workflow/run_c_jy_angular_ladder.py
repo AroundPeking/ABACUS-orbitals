@@ -20,7 +20,10 @@ from periodic_available_mother import available_mother_response
 from c_jy_compressed_evaluation import (
     evaluate_compressed_profiles, validate_profile_input_hashes,
     validate_profile_specs)
-from periodic_galerkin_basis import read_periodic_optimizer_coefficients
+from periodic_galerkin_basis import (
+    prepare_periodic_block_contraction_record,
+    read_periodic_optimizer_coefficients,
+)
 from periodic_galerkin_data import read_periodic_galerkin_dataset
 from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
@@ -147,7 +150,8 @@ def run(contract_path, output):
                     evaluate_response=evaluate_periodic_galerkin_coefficient_response,
                     summarize_energy=energy_summary,
                     relative_rank_tolerance=contract['relative_rank_tolerance'],
-                    occupied_capture_floor=contract['occupied_capture_floor'])
+                    occupied_capture_floor=contract['occupied_capture_floor'],
+                    prepare_block_cache=prepare_periodic_block_contraction_record)
                 row = dict(status='success', q_slot=0, label=1, selected_iq=1,
                     multiplicity=1, q_weight=dataset.q_weight, lmax=lmax,
                     frequencies=dataset.frequency_ha.tolist(),
