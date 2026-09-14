@@ -68,6 +68,16 @@ def angular_view(dataset, lmax):
     return reduce_periodic_active_primitives(dataset, coefficients)
 
 
+def candidate_evaluation_view(dataset, lmax, *, compressed):
+    """Keep compact coefficients on the unreduced mother operator.
+
+    A reduced dataset caches the coefficient profile used for that reduction.
+    Compact candidates deliberately change that profile, so their zero-column
+    angular exclusions must be applied directly to the unreduced operator.
+    """
+    return dataset if compressed else angular_view(dataset, lmax)
+
+
 def energy_summary(dataset, response):
     result = periodic_rpa_objective((dataset,), (torch.from_numpy(response),))
     row = {key: value.tolist() if isinstance(value, torch.Tensor) else value
@@ -126,7 +136,8 @@ def run(contract_path, output):
         baseline = (None if compressed else
                     json.loads(Path(contract['accepted_spd_q_result']).read_text()))
         for lmax in contract['lmax_values']:
-            view = angular_view(dataset, lmax)
+            view = candidate_evaluation_view(dataset, lmax,
+                                             compressed=compressed)
             stage = output/('lmax%d' % lmax)
             stage.mkdir()
             if compressed:

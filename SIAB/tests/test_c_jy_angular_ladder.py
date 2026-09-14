@@ -64,6 +64,14 @@ class JyAngularLadderTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing'):
             ladder.angular_view(d, 3)
 
+    def test_compressed_candidates_keep_the_unreduced_mother_operator(self):
+        d = self.fixture()
+        compressed = ladder.candidate_evaluation_view(d, 2, compressed=True)
+        self.assertIs(compressed, d)
+        self.assertIsNone(compressed.active_primitive_reduction)
+        reduced = ladder.candidate_evaluation_view(d, 1, compressed=False)
+        self.assertIsNotNone(reduced.active_primitive_reduction)
+
     def test_subset_never_claims_full_q_acceptance(self):
         d = self.fixture()
         pi, _ = available_mother_response(d)

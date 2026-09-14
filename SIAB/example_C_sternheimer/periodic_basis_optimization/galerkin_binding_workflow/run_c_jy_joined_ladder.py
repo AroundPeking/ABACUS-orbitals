@@ -116,7 +116,7 @@ def run(contract_path, output):
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
     from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
-    from run_c_jy_angular_ladder import angular_view, energy_summary
+    from run_c_jy_angular_ladder import candidate_evaluation_view, energy_summary
     from periodic_available_mother import available_mother_response
     compressed_spec = importlib.util.spec_from_file_location(
         '_c_jy_compressed_evaluation_contract',
@@ -205,7 +205,8 @@ def run(contract_path, output):
                 'baseline mismatch')
         rows = []
         for lmax in c['lmax_values']:
-            view = angular_view(full,lmax)
+            view = candidate_evaluation_view(full, lmax,
+                                             compressed=compressed)
             stage = output/('lmax%d'%lmax)
             stage.mkdir()
             if compressed:
