@@ -20,7 +20,8 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
 BASE=/data/home/df_iopcas_ghj/app/siab/c-solid-rpa-continuation-20260912
-SOURCE="$BASE/source-b3583176"
+SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../" && pwd)"
+SOURCE_COMMIT="$(/data/home/df_iopcas_ghj/app/miniconda3/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$SOURCE/SOURCE_MANIFEST.json")"
 TARGET_ROOT="$BASE/jy-spdf-response-targets-c91e23a8"
 BUNDLE="$BASE/bundle"
 RANK_ROOT="$BASE/jy-spdf-radial-rank-ladder-30d4390e"
@@ -31,7 +32,7 @@ PYTHONPATH="$SOURCE/SIAB/opt_orb_pytorch_dpsi:$SOURCE/SIAB/example_C_sternheimer
   /data/home/df_iopcas_ghj/app/miniconda3/bin/python \
   "$SOURCE/SIAB/example_C_sternheimer/periodic_basis_optimization/galerkin_binding_workflow/run_c_jy_frozen_spd_f_fit.py" \
   --source "$SOURCE" \
-  --source-commit b3583176frozen-source \
+  --source-commit "$SOURCE_COMMIT" \
   --target-root "$TARGET_ROOT" \
   --bundle "$BUNDLE" \
   --rank-root "$RANK_ROOT" \
