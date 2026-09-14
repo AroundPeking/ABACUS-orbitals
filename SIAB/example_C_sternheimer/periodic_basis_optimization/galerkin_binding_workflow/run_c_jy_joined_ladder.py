@@ -19,7 +19,6 @@ from audit_c_jy_reference_reuse import validate_reader_tree, validate_reference_
 from c_jy_joined_operators import join_operator_record, validate_source_audit
 from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, INDICES, MULT,
     hashed, require, within, validate_cache_contract)
-from c_jy_response_targets import validate_target_manifest
 from prepare_c_jy_operator_restart import REFERENCE_REUSE_SHA
 from run_c_optimizer_comparison import BUNDLE_SHA
 
@@ -52,6 +51,7 @@ def run(contract_path, output):
     # Preserve the original cache reader identity, then import the new adapter.
     sys.path.insert(0,str(reader/'SIAB/opt_orb_pytorch_dpsi'))
     import torch
+    from c_jy_response_targets import validate_target_manifest
     from periodic_galerkin_basis import read_periodic_optimizer_coefficients
     from periodic_galerkin_dataset_cache import read_periodic_galerkin_dataset_cache
     from periodic_galerkin_data import _read_primitive_blocks
