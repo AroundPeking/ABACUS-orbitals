@@ -20,7 +20,7 @@ export OMP_PROC_BIND=spread
 export OMP_PLACES=cores
 
 BASE=/data/home/df_iopcas_ghj/app/siab/c-solid-rpa-continuation-20260912
-SOURCE="$BASE/source-28e6867d"
+SOURCE="$BASE/source-e49f0052"
 TARGET_ROOT="$BASE/jy-spdf-response-targets-c91e23a8"
 BUNDLE="$BASE/bundle"
 RANK_ROOT="$BASE/jy-spdf-radial-rank-ladder-30d4390e"
