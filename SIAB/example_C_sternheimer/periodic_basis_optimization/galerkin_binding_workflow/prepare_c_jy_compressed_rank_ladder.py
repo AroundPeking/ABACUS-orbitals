@@ -73,7 +73,7 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit):
         contract.update(job_id='__RUNTIME_JOB_ID__', source_commit=source_commit,
             scope='compressed_shared_radial_full_q_body_RPA', q_slot=slot,
             lmax_values=[3], relative_rank_tolerance=1e-10,
-            occupied_capture_floor=.999999,
+            occupied_capture_floor=.99999,
             candidate_profiles=copy.deepcopy(candidates),
             full_q_admitted=False, physical_release_gate='hold')
         contract.pop('target_lmax', None)

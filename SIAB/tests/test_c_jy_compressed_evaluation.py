@@ -58,14 +58,16 @@ class CompressedEvaluationTest(unittest.TestCase):
         rows = evaluation.evaluate_compressed_profiles(
             dataset, self.specs(), read_coefficients=read,
             evaluate_response=evaluate, summarize_energy=summarize,
-            relative_rank_tolerance=1e-10, occupied_capture_floor=.999999)
+            relative_rank_tolerance=1e-10, occupied_capture_floor=.99999)
         self.assertEqual([row['ao_per_C'] for row in rows], [29, 45, 61, 77])
         self.assertEqual([row['candidate_energy_ha'] for row in rows],
                          [-.01, -.02, -.03, -.04])
-        self.assertTrue(all(call[2] == dict(
-            contraction_backend='block', relative_rank_tolerance=1e-10,
-            condition_limit=1e12, occupied_capture_tolerance=1e-6,
-            frequency_batch_size=12) for call in calls))
+        for _, _, controls in calls:
+            self.assertEqual(controls['contraction_backend'], 'block')
+            self.assertEqual(controls['relative_rank_tolerance'], 1e-10)
+            self.assertEqual(controls['condition_limit'], 1e12)
+            self.assertAlmostEqual(controls['occupied_capture_tolerance'], 1e-5)
+            self.assertEqual(controls['frequency_batch_size'], 12)
         self.assertTrue(all(row['physical_release_gate'] == 'hold' for row in rows))
 
 

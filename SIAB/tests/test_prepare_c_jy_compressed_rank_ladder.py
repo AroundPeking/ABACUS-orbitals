@@ -55,7 +55,7 @@ class PrepareCjYCompressedRankLadderTest(unittest.TestCase):
                 self.assertEqual(contract['q_slot'], slot)
                 self.assertEqual(contract['source_commit'], 'b'*40)
                 self.assertEqual(contract['lmax_values'], [3])
-                self.assertEqual(contract['occupied_capture_floor'], .999999)
+                self.assertEqual(contract['occupied_capture_floor'], .99999)
                 self.assertEqual(contract['scope'],
                                  'compressed_shared_radial_full_q_body_RPA')
                 self.assertEqual(len(contract['candidate_profiles']), 4)

@@ -57,6 +57,7 @@ def evaluate_compressed_profiles(
     frequency_count = int(dataset.frequency_ha.numel())
     if frequency_count != 12:
         raise ValueError('fixed 12-frequency evaluation required')
+    occupied_capture_tolerance = max(1e-15, 1.-occupied_capture_floor)
     rows = []
     for spec in specs:
         profile = tuple(spec['profile'])
@@ -66,7 +67,8 @@ def evaluate_compressed_profiles(
         response = evaluate_response(
             dataset, coefficients, contraction_backend='block',
             relative_rank_tolerance=relative_rank_tolerance,
-            condition_limit=1e12, occupied_capture_tolerance=1e-6,
+            condition_limit=1e12,
+            occupied_capture_tolerance=occupied_capture_tolerance,
             frequency_batch_size=frequency_count)
         summary = summarize_energy(
             dataset, response.response.detach().cpu().numpy())
@@ -84,6 +86,7 @@ def evaluate_compressed_profiles(
                    minimum_occupied_capture=response.minimum_occupied_capture,
                    maximum_overlap_condition=response.maximum_overlap_condition,
                    minimum_candidate_rank=response.minimum_candidate_rank,
+                   occupied_capture_floor=occupied_capture_floor,
                    physical_release_gate='hold')
         rows.append(row)
     return rows
