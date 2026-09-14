@@ -67,8 +67,8 @@ def run(args):
     summary_expected = args.collection_summary_sha256
     require(sha(summary_path) == summary_expected, 'target collection summary hash mismatch')
     collection = json.loads(summary_path.read_text(encoding='ascii'))
-    primitive_blocks = tuple(
-        PeriodicGalerkinPrimitiveBlock(**row) for row in collection['primitive_blocks'])
+    primitive_blocks = [
+        PeriodicGalerkinPrimitiveBlock(**row) for row in collection['primitive_blocks']]
     require(collection['primitive_count'] == 992 and collection['lmax'] == 3,
             'unexpected jY target mother contract')
     checked = collect_target_collection(
@@ -83,6 +83,7 @@ def run(args):
         manifest_q = json.loads((target_root / ('q%02d/targets/TARGETS.json' % q_slot)).read_text())
         for row in manifest_q['sectors']:
             sector_metadata[(q_slot, row['file'])] = row
+    primitive_block_tuple = tuple(primitive_blocks)
     sectors = []
     for row in checked['target_files']:
         q_slot = int(row['q_slot'])
@@ -94,7 +95,7 @@ def run(args):
             covariance = arrays['covariance']
             embedding = arrays['embedding']
         sectors.append(ResponseFitSector(
-            'q%02d/%s' % (q_slot, file_name), primitive_blocks, embedding, covariance,
+            'q%02d/%s' % (q_slot, file_name), primitive_block_tuple, embedding, covariance,
             occupied_rank=int(metadata['occupied_rank'])))
     require(len(sectors) == 512, 'complete 512-sector fit is required')
 
