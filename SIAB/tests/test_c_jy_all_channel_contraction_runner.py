@@ -48,6 +48,23 @@ class CjYAllChannelContractionRunnerTest(unittest.TestCase):
         self.assertIn("stage='all_channel_occupied_safe_response_contraction'", source)
         self.assertIn("physical_release_gate='hold'", source)
 
+    def test_profiles_can_be_partitioned_without_changing_the_ladder(self):
+        self.assertEqual(runner.select_profiles('3321,6654'),
+                         (runner.PROFILES[0], runner.PROFILES[-1]))
+        self.assertEqual(runner.select_profiles('all'), runner.PROFILES)
+        with self.assertRaises(ValueError):
+            runner.select_profiles('3321,3321')
+        with self.assertRaises(ValueError):
+            runner.select_profiles('9999')
+
+    def test_slurm_wrapper_runs_one_selected_profile_without_physics(self):
+        wrapper = RUNNER.with_suffix('.slurm').read_text(encoding='ascii')
+        self.assertIn('--profiles "$profile"', wrapper)
+        self.assertIn('run_c_jy_all_channel_contraction.py', wrapper)
+        self.assertNotIn('abacus_3p', wrapper)
+        self.assertNotIn('librpa.x', wrapper.lower())
+        self.assertIn('mkdir execution-once.lock', wrapper)
+
 
 if __name__ == '__main__':
     unittest.main()

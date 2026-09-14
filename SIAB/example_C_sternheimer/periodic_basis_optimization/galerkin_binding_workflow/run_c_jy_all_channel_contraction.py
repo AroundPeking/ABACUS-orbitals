@@ -49,6 +49,17 @@ def profile_name(profile):
     return ''.join(str(count) for count in profile[:4])
 
 
+def select_profiles(value):
+    if value == 'all':
+        return PROFILES
+    names = value.split(',') if isinstance(value, str) else []
+    lookup = {profile_name(profile): profile for profile in PROFILES}
+    if (not names or len(names) != len(set(names))
+            or any(name not in lookup for name in names)):
+        raise ValueError('profiles must be unique members of the fixed rank ladder')
+    return tuple(lookup[name] for name in names)
+
+
 def validate_collection(collection):
     require(collection.get('status') == 'success'
             and collection.get('target_completeness_gate') == 'pass',
@@ -148,7 +159,8 @@ def run(args):
 
     output.mkdir(parents=True)
     profile_results = []
-    for profile in PROFILES:
+    profiles = select_profiles(args.profiles)
+    for profile in profiles:
         name = profile_name(profile)
         stage = output/('profile-'+name)
         stage.mkdir()
@@ -192,6 +204,7 @@ def run(args):
         target_collection_summary_sha256=args.collection_summary_sha256,
         occupied_capture_floor=args.occupied_capture_floor,
         occupied_weight=args.occupied_weight, profile_results=profile_results,
+        selected_profiles=[profile_name(profile) for profile in profiles],
         elapsed_seconds=time.perf_counter()-start,
         max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
         torch_threads=torch.get_num_threads())
@@ -218,6 +231,7 @@ def parse_args(argv=None):
     parser.add_argument('--occupied-weight', type=float, default=1.)
     parser.add_argument('--occupied-capture-floor', type=float, default=.999999)
     parser.add_argument('--torch-threads', type=int, default=0)
+    parser.add_argument('--profiles', default='all')
     return parser.parse_args(argv)
 
 
