@@ -64,3 +64,64 @@ def collect_energies(records, reference=-.5144842779929139):
         scope='uncontracted_jY_full_q_body_RPA',full_q_admitted=True,
         physical_release_gate='hold',qavg_headwing_validated=False,contracted_NAO_validated=False,
         per_q=rows)
+
+
+def collect_compressed_rank_ladder(records, *, reference_energy_ha=-.5144842779929139,
+                                   spdf_mother_energy_ha=None, tolerance=1e-12):
+    """Combine weighted q-star energies for one shared-radial rank ladder.
+
+    The mother-space error is measured against the frozen Delta-ST body energy.
+    The compression error is measured against the accepted uncontracted spdf
+    mother energy, so a good fit is not mistaken for a good mother space.
+    Each profile must carry the same coefficient hash in every q record.
+    """
+    if spdf_mother_energy_ha is None:
+        raise ValueError('spdf mother energy is required')
+    if not math.isfinite(float(reference_energy_ha)) or not math.isfinite(float(spdf_mother_energy_ha)):
+        raise ValueError('finite reference and mother energies required')
+    rows = join_q_records(records)
+    profiles = None
+    result_rows = []
+    for row in rows:
+        current = row.get('per_profile')
+        if not isinstance(current, list) or not current:
+            raise ValueError('complete compressed profile records required')
+        signatures = [(tuple(p.get('profile', ())), p.get('coefficients_sha256'))
+                      for p in current]
+        if any(not profile or not isinstance(digest, str) or len(digest) != 64
+               for profile, digest in signatures):
+            raise ValueError('invalid coefficient hash')
+        if profiles is None:
+            profiles = signatures
+        elif signatures != profiles:
+            raise ValueError('coefficient profile/hash mismatch across q records')
+    for index, (profile, coefficients_sha256) in enumerate(profiles):
+        profile_rows = [row['per_profile'][index] for row in rows]
+        candidate = math.fsum(float(q['candidate_energy_ha']) for q in profile_rows)
+        mother_error = (float(spdf_mother_energy_ha) - float(reference_energy_ha)) \
+            * 27.211386245988 / 2
+        compression_error = (candidate - float(spdf_mother_energy_ha)) \
+            * 27.211386245988 / 2
+        total_error = (candidate - float(reference_energy_ha)) \
+            * 27.211386245988 / 2
+        result_rows.append(dict(
+            profile=list(profile),
+            ao_per_C=profile_rows[0]['ao_per_C'],
+            coefficients_sha256=coefficients_sha256,
+            candidate_energy_ha=candidate,
+            reference_energy_ha=float(reference_energy_ha),
+            mother_energy_ha=float(spdf_mother_energy_ha),
+            mother_error_ev_per_C=mother_error,
+            compression_error_ev_per_C=compression_error,
+            total_error_ev_per_C=total_error,
+            energy_gate=abs(total_error) < .1,
+            minimum_occupied_capture=min(float(q['minimum_occupied_capture'])
+                                         for q in profile_rows),
+            maximum_overlap_condition=max(float(q['maximum_overlap_condition'])
+                                          for q in profile_rows),
+            minimum_candidate_rank=min(int(q['minimum_candidate_rank'])
+                                       for q in profile_rows),
+            q_count=len(profile_rows)))
+    return dict(status='success', scope='compressed_shared_radial_full_q_body_RPA',
+        physical_release_gate='hold', mother_energy_ha=float(spdf_mother_energy_ha),
+        reference_energy_ha=float(reference_energy_ha), per_profile=result_rows)
