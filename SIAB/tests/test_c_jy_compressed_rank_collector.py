@@ -26,6 +26,7 @@ class CompressedRankCollectorTest(unittest.TestCase):
         for slot, (label, iq, multiplicity) in enumerate(qpoints):
             weight = multiplicity / 64
             rows.append(dict(status='success', q_slot=slot, label=label,
+                source_commit='a'*40,
                 selected_iq=iq, multiplicity=multiplicity, q_weight=weight,
                 lmax=3, relative_rank_tolerance=1e-10,
                 frequencies=np.arange(12, dtype=float),
@@ -64,6 +65,20 @@ class CompressedRankCollectorTest(unittest.TestCase):
         self.assertEqual(result['candidate_selection_gate'], 'fail')
         self.assertIsNone(result['selected_profile'])
         self.assertEqual(result['ordinary_sos_release_gate'], 'hold')
+
+    def test_exact_per_q_source_mapping_is_recorded(self):
+        rows = self.records()
+        rows[0]['source_commit'] = 'b'*40
+        expected = {'0': 'b'*40, **{str(slot): 'a'*40 for slot in range(1, 8)}}
+        actual = collector.validate_q_source_commits(rows, expected)
+        self.assertEqual(actual, expected)
+
+    def test_mismatched_q_source_is_rejected(self):
+        rows = self.records()
+        expected = {str(slot): 'a'*40 for slot in range(8)}
+        expected['3'] = 'b'*40
+        with self.assertRaisesRegex(ValueError, 'q source commit mismatch'):
+            collector.validate_q_source_commits(rows, expected)
 
 
 if __name__ == '__main__':

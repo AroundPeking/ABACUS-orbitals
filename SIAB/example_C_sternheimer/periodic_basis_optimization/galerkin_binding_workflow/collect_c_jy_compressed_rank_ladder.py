@@ -42,6 +42,23 @@ def finalize_collection(records, *, reference_energy_ha, spdf_mother_energy_ha):
     return result
 
 
+def validate_q_source_commits(records, expected):
+    if (not isinstance(expected, dict)
+            or set(expected) != {str(slot) for slot in range(8)}):
+        raise ValueError('exact per-q source commit mapping required')
+    actual = {}
+    for row in records:
+        slot = str(row.get('q_slot'))
+        commit = row.get('source_commit')
+        if (slot not in expected or not isinstance(commit, str)
+                or len(commit) != 40 or commit != expected[slot]):
+            raise ValueError('q source commit mismatch')
+        actual[slot] = commit
+    if set(actual) != set(expected):
+        raise ValueError('exact per-q source commit mapping required')
+    return actual
+
+
 def run(contract_path, output):
     contract = json.loads(Path(contract_path).read_text(encoding='ascii'))
     if (os.environ.get('C_EXECUTION_HOST') != 'df_iopcas_ghj'
@@ -62,17 +79,21 @@ def run(contract_path, output):
     records = [json.loads(path.read_text(encoding='ascii')) for path in paths]
     if [row.get('q_slot') for row in records] != list(range(8)):
         raise ValueError('ordered complete q slots required')
+    q_source_commits = validate_q_source_commits(
+        records, contract.get('q_source_commits'))
     output.mkdir()
     try:
         result = finalize_collection(
             records, reference_energy_ha=contract['reference_energy_ha'],
             spdf_mother_energy_ha=contract['spdf_mother_energy_ha'])
         result.update(source_commit=contract['source_commit'],
+                      q_source_commits=q_source_commits,
                       input_result_sha256={str(path): sha(path) for path in paths})
         write_new(output/'RESULT.json', result)
         write_new(output/'PROVENANCE.json', dict(
             status='success', job_id=contract['job_id'],
             source_commit=contract['source_commit'],
+            q_source_commits=q_source_commits,
             contract_sha256=sha(contract_path), result_sha256=sha(output/'RESULT.json'),
             max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
         (output/'STATUS').write_text('success\n', encoding='ascii')
