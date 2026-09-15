@@ -77,8 +77,15 @@ class JoinedOperatorTest(unittest.TestCase):
         np.testing.assert_allclose(result['hamiltonian_ha'], h)
         self.assertEqual(calls, [(1, 2), (6, 2), (7, 2)])
         self.assertTrue(checks['pass_gate'])
+        self.assertEqual(checks['hamiltonian_subblock_gate'],
+                         'required_and_pass')
         with self.assertRaisesRegex(ValueError, 'subblock'):
             module.join_operator_record(dict(old, source=old['source']*2), original, new,
+                dict(occupied_at_k1=a, auxiliary_map=t), (0,1,2), 5)
+        with self.assertRaisesRegex(ValueError, 'subblock'):
+            module.join_operator_record(old,
+                lambda kind, ik: (2*h + 2e-7*np.eye(5)) if kind == 6
+                else original(kind, ik), new,
                 dict(occupied_at_k1=a, auxiliary_map=t), (0,1,2), 5)
 
     def test_nested_join_reproduces_baseline_on_all_old_primitive_columns(self):
@@ -131,6 +138,59 @@ class JoinedOperatorTest(unittest.TestCase):
         np.testing.assert_array_equal(result['source'][:, :, prefix], d)
         self.assertTrue(checks['anchor']['exact_old_mother_anchor'])
         self.assertTrue(checks['baseline']['pass_gate'])
+        self.assertTrue(checks['expanded']['pass_gate'])
+
+    def test_nested_join_only_diagnoses_expanded_h_before_exact_anchor(self):
+        self.assertIsNotNone(module, 'joined operator adapter missing')
+        old_size, new_size = 5, 8
+        prefix = (0, 1, 3, 4, 6)
+        active = (0, 1, 2)
+        expanded_active = tuple(prefix[index] for index in active)
+        s = np.eye(old_size, dtype=complex)
+        h = np.diag(np.arange(old_size, dtype=float)).astype(complex)
+        o = np.eye(2, old_size, dtype=complex)
+        d = np.arange(30, dtype=float).reshape(2, 3, old_size)
+        sn = np.eye(new_size, dtype=complex)
+        hn = np.diag(np.arange(new_size, dtype=float)).astype(complex)
+        on = np.zeros((2, new_size), dtype=complex)
+        dn = np.zeros((2, 3, new_size), dtype=complex)
+        sn[np.ix_(prefix, prefix)] = s
+        hn[np.ix_(prefix, prefix)] = h
+        hn[prefix[1], prefix[1]] += 2e-7
+        on[:, prefix] = o
+        dn[:, :, prefix] = d
+
+        def baseline_original(kind, ik):
+            return {1: s, 6: 2*h, 7: o}[kind]
+
+        def baseline_source(kind, ik):
+            return d.reshape(6, old_size)
+
+        def expanded_original(kind, ik):
+            return {1: sn, 6: 2*hn, 7: on}[kind]
+
+        def expanded_source(kind, ik):
+            return dn.reshape(6, new_size)
+
+        maps = dict(occupied_at_k1=np.eye(2), auxiliary_map=np.eye(3))
+        cache = dict(source_ik=1, target_ik=2, source=d[:, :, active],
+                     overlap=s[np.ix_(active, active)],
+                     hamiltonian_ha=h[np.ix_(active, active)],
+                     occupied_projection=o[:, active])
+        result, checks = module.join_nested_operator_record(
+            cache, baseline_original, baseline_source, maps,
+            expanded_original, expanded_source, maps,
+            baseline_indices=active, expanded_indices=expanded_active,
+            prefix_indices=prefix, baseline_size=old_size,
+            expanded_size=new_size)
+        np.testing.assert_array_equal(
+            result['hamiltonian_ha'][np.ix_(prefix, prefix)], h)
+        self.assertEqual(checks['baseline']['hamiltonian_subblock_gate'],
+                         'required_and_pass')
+        self.assertEqual(checks['expanded']['hamiltonian_subblock_gate'],
+                         'diagnostic_only_before_exact_anchor')
+        self.assertGreater(checks['expanded']['hamiltonian_ha']['max_abs'],
+                           1e-10)
         self.assertTrue(checks['expanded']['pass_gate'])
 
     def test_expanded_gamma_is_mapped_back_before_exact_anchor(self):
