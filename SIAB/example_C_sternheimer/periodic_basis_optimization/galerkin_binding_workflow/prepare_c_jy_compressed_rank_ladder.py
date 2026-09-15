@@ -1,4 +1,4 @@
-"""Prepare immutable contracts for the four-rank C jY compression ladder."""
+"""Prepare immutable contracts for C jY compact-rank evaluations."""
 
 import argparse
 import copy
@@ -31,12 +31,26 @@ def write_new(path, payload):
                     encoding='ascii')
 
 
-def normalize_candidates(candidates):
+def normalize_profiles(profiles):
+    try:
+        profiles = tuple(tuple(row) for row in profiles)
+    except TypeError as error:
+        raise ValueError('candidate profiles must be a nonempty sequence') from error
+    if (not profiles or len(set(profiles)) != len(profiles)
+            or any(len(row) != 5 or not any(row)
+                   or any(type(value) is not int or value < 0 for value in row)
+                   for row in profiles)):
+        raise ValueError('invalid candidate profiles')
+    return profiles
+
+
+def normalize_candidates(candidates, *, profiles=PROFILES):
+    profiles = normalize_profiles(profiles)
     if (not isinstance(candidates, (list, tuple))
-            or [tuple(row.get('profile', ())) for row in candidates] != list(PROFILES)):
+            or [tuple(row.get('profile', ())) for row in candidates] != list(profiles)):
         raise ValueError('candidate profile ladder is incomplete or out of order')
     normalized = []
-    for expected, row in zip(PROFILES, candidates):
+    for expected, row in zip(profiles, candidates):
         path = Path(row.get('coefficients_path', '')).resolve()
         if not path.is_file():
             raise ValueError('candidate coefficient file is missing')
@@ -51,7 +65,65 @@ def normalize_candidates(candidates):
     return normalized
 
 
-def prepare_contracts(template_root, output_root, candidates, *, source_commit):
+def accepted_artifact_files(audit_result, *, expected_run=None):
+    audit_result = Path(audit_result).resolve()
+    audit = json.loads(audit_result.read_text(encoding='ascii'))
+    if audit.get('status') != 'success':
+        raise ValueError('accepted audit result required')
+    source_run = audit.get('run', expected_run)
+    if source_run is None:
+        raise ValueError('audit source run is missing')
+    run = Path(source_run).resolve()
+    if expected_run is not None and run != Path(expected_run).resolve():
+        raise ValueError('audit source run mismatch')
+    audit_root = audit_result.parent.parent
+    paths = (audit_result, audit_result.parent/'GAUGE_MAPS.npz',
+             audit_result.parent/'STATUS', audit_root/'JOB_STATUS',
+             audit_root/'PROVENANCE', run/'CONTRACT.json', run/'STATUS',
+             run/'PROVENANCE')
+    if any(not path.is_file() for path in paths):
+        raise ValueError('expanded accepted artifact is incomplete')
+    return run, tuple(path.resolve() for path in paths)
+
+
+def normalize_expansion(radial_rows, primitive_expansion,
+                        expanded_gamma_run, expanded_gamma_audit_result,
+                        expanded_q_audit_results):
+    values = (primitive_expansion, expanded_gamma_run,
+              expanded_gamma_audit_result, expanded_q_audit_results)
+    if all(value is None for value in values):
+        if radial_rows != 31:
+            raise ValueError('nondefault radial rows require an expanded mother')
+        return None
+    if any(value is None for value in values):
+        raise ValueError('complete expanded mother inputs required')
+    expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                    source_primitive_count=1550,
+                    expanded_primitive_count=2400,
+                    expanded_spdf_primitive_count=1536)
+    if (radial_rows != 48
+            or any(primitive_expansion.get(key) != value
+                   for key, value in expected.items())):
+        raise ValueError('unexpected expanded mother contract')
+    if set(expanded_q_audit_results) != set(range(1, 8)):
+        raise ValueError('all seven finite-q expanded audits are required')
+    gamma_run, gamma_inputs = accepted_artifact_files(
+        expanded_gamma_audit_result, expected_run=expanded_gamma_run)
+    q_rows = {}
+    for slot, audit in expanded_q_audit_results.items():
+        _, paths = accepted_artifact_files(audit)
+        q_rows[slot] = dict(audit_result=Path(audit).resolve(), inputs=paths)
+    return dict(primitive_expansion=copy.deepcopy(primitive_expansion),
+                gamma_run=gamma_run,
+                gamma_audit_result=Path(expanded_gamma_audit_result).resolve(),
+                gamma_inputs=gamma_inputs, finite_q=q_rows)
+
+
+def prepare_contracts(template_root, output_root, candidates, *, source_commit,
+                      profiles=PROFILES, radial_rows=31,
+                      primitive_expansion=None, expanded_gamma_run=None,
+                      expanded_gamma_audit_result=None,
+                      expanded_q_audit_results=None):
     if (not isinstance(source_commit, str) or len(source_commit) != 40
             or any(character not in '0123456789abcdef' for character in source_commit)):
         raise ValueError('full lowercase source commit required')
@@ -59,7 +131,13 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit):
     output_root = Path(output_root).resolve()
     if output_root.exists():
         raise FileExistsError(output_root)
-    candidates = normalize_candidates(candidates)
+    profiles = normalize_profiles(profiles)
+    if type(radial_rows) is not int or radial_rows <= 0:
+        raise ValueError('radial_rows must be a positive integer')
+    candidates = normalize_candidates(candidates, profiles=profiles)
+    expansion = normalize_expansion(
+        radial_rows, primitive_expansion, expanded_gamma_run,
+        expanded_gamma_audit_result, expanded_q_audit_results)
     output_root.mkdir(parents=True)
     contract_hashes = {}
     for slot in range(8):
@@ -74,11 +152,31 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit):
             scope='compressed_shared_radial_full_q_body_RPA', q_slot=slot,
             lmax_values=[3], relative_rank_tolerance=1e-10,
             occupied_capture_floor=.99999,
+            radial_rows=radial_rows,
             candidate_profiles=copy.deepcopy(candidates),
             full_q_admitted=False, physical_release_gate='hold')
         contract.pop('target_lmax', None)
         contract.pop('target_dir', None)
         inputs = dict(contract.get('inputs', {}))
+        if expansion is not None:
+            contract.update(
+                primitive_expansion=copy.deepcopy(expansion['primitive_expansion']),
+                expanded_gamma_run=str(expansion['gamma_run']),
+                expanded_gamma_audit_result=str(expansion['gamma_audit_result']))
+            artifact_inputs = list(expansion['gamma_inputs'])
+            if slot:
+                if 'audit_result' not in template:
+                    raise ValueError('finite-q baseline audit is missing')
+                baseline = Path(template['audit_result']).resolve()
+                if not baseline.is_file():
+                    raise ValueError('finite-q baseline audit file is missing')
+                contract['baseline_audit_result'] = str(baseline)
+                contract['audit_result'] = str(
+                    expansion['finite_q'][slot]['audit_result'])
+                artifact_inputs.extend(expansion['finite_q'][slot]['inputs'])
+                artifact_inputs.append(baseline)
+            for path in artifact_inputs:
+                inputs[str(path)] = sha(path)
         for candidate in candidates:
             inputs[candidate['coefficients_path']] = candidate['coefficients_sha256']
         contract['inputs'] = inputs
@@ -90,8 +188,9 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit):
     result = dict(status='success',
         scope='compressed_shared_radial_full_q_body_RPA',
         source_commit=source_commit, q_slots=list(range(8)),
-        profiles=[list(row) for row in PROFILES],
-        ao_per_C=[ao_per_element(row) for row in PROFILES],
+        profiles=[list(row) for row in profiles],
+        ao_per_C=[ao_per_element(row) for row in profiles],
+        radial_rows=radial_rows,
         candidate_profiles=candidates, contract_sha256=contract_hashes,
         physical_release_gate='hold', ordinary_sos_validated=False)
     write_new(output_root/'PREPARATION.json', result)
@@ -109,6 +208,17 @@ def parse_candidate(value):
                 coefficients_path=path)
 
 
+def parse_slot_path(value):
+    try:
+        slot, path = value.split(':', 1)
+        slot = int(slot)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError('expanded q audit must be SLOT:PATH') from error
+    if slot not in range(1, 8) or not path:
+        raise argparse.ArgumentTypeError('expanded q audit slot must be 1..7')
+    return slot, path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--template-root', type=Path, required=True)
@@ -116,9 +226,26 @@ def main(argv=None):
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--candidate', action='append', type=parse_candidate,
                         required=True)
+    parser.add_argument('--radial-rows', type=int, default=31)
+    parser.add_argument('--expanded-gamma-run', type=Path)
+    parser.add_argument('--expanded-gamma-audit-result', type=Path)
+    parser.add_argument('--expanded-q-audit', action='append', type=parse_slot_path)
     args = parser.parse_args(argv)
+    profiles = tuple(tuple(row['profile']) for row in args.candidate)
+    expansion = None
+    q_audits = None
+    if args.expanded_gamma_run is not None:
+        gamma_contract = json.loads(
+            (args.expanded_gamma_run/'CONTRACT.json').read_text(encoding='ascii'))
+        expansion = gamma_contract.get('primitive_expansion')
+        q_audits = dict(args.expanded_q_audit or ())
     prepare_contracts(args.template_root, args.output_root, args.candidate,
-                      source_commit=args.source_commit)
+                      source_commit=args.source_commit, profiles=profiles,
+                      radial_rows=args.radial_rows,
+                      primitive_expansion=expansion,
+                      expanded_gamma_run=args.expanded_gamma_run,
+                      expanded_gamma_audit_result=args.expanded_gamma_audit_result,
+                      expanded_q_audit_results=q_audits)
 
 
 if __name__ == '__main__':
