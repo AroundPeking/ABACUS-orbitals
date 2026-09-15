@@ -38,6 +38,57 @@ def transform_source(source, occupied_map, auxiliary_map):
     return np.einsum('nm,hj,mjp->nhp', occupied_map, auxiliary_map.conj().T, source, optimize=True)
 
 
+def _primitive_blocks(text):
+    lines = text.splitlines()
+    if (not lines or lines[0] != 'ABACUS_STERNHEIMER_BASIS_OPT_PRIMITIVES_V1'):
+        raise ValueError('invalid primitive block header')
+    rows = []
+    for line in lines[1:]:
+        if not line or line.startswith('#'):
+            continue
+        fields = line.split()
+        if len(fields) != 6:
+            raise ValueError('invalid primitive block row')
+        element = fields[0]
+        try:
+            values = tuple(int(value) for value in fields[1:])
+        except ValueError as error:
+            raise ValueError('invalid primitive block integer') from error
+        rows.append((element,) + values)
+    return rows
+
+
+def validate_nested_primitive_blocks(old_text, new_text, *, source_rows,
+                                     target_rows, lmax, natom):
+    old, new = _primitive_blocks(old_text), _primitive_blocks(new_text)
+    expected_blocks = natom * (lmax + 1) ** 2
+    if len(old) != expected_blocks or len(new) != expected_blocks:
+        raise ValueError('expanded primitive blocks are incomplete')
+    indices = []
+    for block, (old_row, new_row) in enumerate(zip(old, new)):
+        element, atom, l, m, old_count, old_offset = old_row
+        expected = ('C', atom, l, m)
+        if (new_row[:4] != expected or old_row[:4] != expected
+                or old_count != source_rows or new_row[4] != target_rows
+                or old_offset != block * source_rows
+                or new_row[5] != block * target_rows):
+            raise ValueError('expanded primitive blocks are not a nested radial prefix')
+        indices.extend(range(new_row[5], new_row[5] + source_rows))
+    return tuple(indices)
+
+
+def nested_square_prefix(array, indices):
+    if array.ndim != 2 or array.shape[0] != array.shape[1]:
+        raise ValueError('square expanded operator required')
+    return array[np.ix_(indices, indices)]
+
+
+def nested_column_prefix(array, indices):
+    if array.ndim < 2 or array.shape[-1] <= max(indices):
+        raise ValueError('expanded operator columns are incomplete')
+    return array[..., indices]
+
+
 def metric_signs(old, new):
     if old.shape != new.shape or old.ndim != 2 or old.shape[0] != old.shape[1]:
         raise ValueError('square matched Coulomb metrics required')
@@ -137,13 +188,43 @@ def audit(run, output):
         raise ValueError('reference manifest changed')
     old = OperatorFiles(old_dir, False)
     new = OperatorFiles(run/('OUT.'+contract['suffix'])/'STERNHEIMER_BASIS_OPERATORS_V1', True)
+    expansion = contract.get('primitive_expansion')
+    prefix = None
+    if expansion is not None:
+        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                        source_primitive_count=1550,
+                        expanded_primitive_count=2400,
+                        expanded_spdf_primitive_count=1536)
+        if any(expansion.get(key) != value for key, value in expected.items()):
+            raise ValueError('unexpected expanded mother contract')
+        prefix = validate_nested_primitive_blocks(
+            (old.directory/'primitive_blocks.dat').read_text(),
+            (new.directory/'primitive_blocks.dat').read_text(),
+            source_rows=31, target_rows=48, lmax=4, natom=2)
+        if len(prefix) != 1550 or len(set(prefix)) != 1550:
+            raise ValueError('expanded primitive prefix mapping is incomplete')
+        prefix_sha = hashlib.sha256(
+            struct.pack('<%dI' % len(prefix), *prefix)).hexdigest()
+        if prefix_sha != expansion.get('source_prefix_indices_sha256'):
+            raise ValueError('expanded primitive prefix hash mismatch')
+        old.hashes['primitive_blocks.dat'] = sha(old.directory/'primitive_blocks.dat')
+        new.hashes['primitive_blocks.dat'] = sha(new.directory/'primitive_blocks.dat')
     if new.scalar['frozen_charge_sha256'] != contract['density_sha256']:
         raise ValueError('density provenance mismatch')
-    for key in ('orbital_sha256', 'pseudopotential_sha256', 'auxiliary_basis_source', 'auxiliary_basis_sha256',
-                'primitive_blocks_sha256', 'kernel', 'selected_iq', 'q_count', 'k_count', 'qpoint', 'q_weight',
-                'primitive_count', 'raw_auxiliary_dimension', 'whitened_auxiliary_rank'):
+    common_metadata = ('orbital_sha256', 'pseudopotential_sha256',
+        'auxiliary_basis_source', 'auxiliary_basis_sha256', 'kernel',
+        'selected_iq', 'q_count', 'k_count', 'qpoint', 'q_weight',
+        'raw_auxiliary_dimension', 'whitened_auxiliary_rank')
+    for key in common_metadata:
         if old.scalar[key] != new.scalar[key]:
             raise ValueError('incompatible operator metadata: '+key)
+    if prefix is None:
+        for key in ('primitive_blocks_sha256', 'primitive_count'):
+            if old.scalar[key] != new.scalar[key]:
+                raise ValueError('incompatible operator metadata: '+key)
+    elif (old.scalar['primitive_count'] != '1550'
+          or new.scalar['primitive_count'] != '2400'):
+        raise ValueError('expanded primitive count mismatch')
     if (new.scalar['selected_iq'] != '1' or new.scalar['k_count'] != '64'
             or len(new.frequencies) != 12 or new.frequencies != old.frequencies):
         raise ValueError('Gamma 64-k twelve-frequency compatibility check required')
@@ -161,16 +242,24 @@ def audit(run, output):
             raise ValueError('not Gamma k routing')
         if difference(old.kpoints[ik][1], new.kpoints[ik][1])['max_abs'] > 1e-12:
             raise ValueError('kpoint/weight/occupation contract mismatch')
-        s = difference(old.array(1, ik), new.array(1, ik))
-        h = difference(old.array(6, ik), new.array(6, ik))
-        a, occupied = occupied_gauge(old.array(7, ik), new.array(7, ik))
+        new_s, new_h, new_o = new.array(1, ik), new.array(6, ik), new.array(7, ik)
+        if prefix is not None:
+            new_s = nested_square_prefix(new_s, prefix)
+            new_h = nested_square_prefix(new_h, prefix)
+            new_o = nested_column_prefix(new_o, prefix)
+        s = difference(old.array(1, ik), new_s)
+        h = difference(old.array(6, ik), new_h)
+        a, occupied = occupied_gauge(old.array(7, ik), new_o)
         energies = difference(old.eigenvalues[ik], new.eigenvalues[ik])
         commutator = float(np.max(np.abs(new.eigenvalues[ik][:, None]*a-a*old.eigenvalues[ik][None, :])))
         nocc, naux = len(a), t.shape[0]
         source_old = old.array(2, ik).reshape(nocc, naux, -1)
         source_new = new.array(2, ik).reshape(nocc, naux, -1)
+        if prefix is not None:
+            source_new = nested_column_prefix(source_new, prefix)
         d = difference(source_new, transform_source(source_old, a, t))
-        passed = (s['max_abs'] <= 1e-10 and h['max_abs'] <= 1e-6
+        h_tolerance = 5e-6 if prefix is not None else 1e-6
+        passed = (s['max_abs'] <= 1e-10 and h['max_abs'] <= h_tolerance
             and energies['max_abs'] <= 1e-6 and commutator <= 1e-6
             and occupied['relative'] <= 1e-6 and occupied['unitarity'] <= 1e-6
             and d['relative'] <= 1e-6)
@@ -185,6 +274,12 @@ def audit(run, output):
         raw_auxiliary_signs=signs.tolist(), per_k=rows, elapsed_seconds=time.perf_counter()-start,
         hashes=dict(reference=old.hashes, operators=new.hashes, contract=sha(run/'CONTRACT.json')),
         full_q_admitted=False, physical_release_gate='hold')
+    if prefix is not None:
+        result.update(expanded_mother_prefix_gate='pass' if not failures else 'hold',
+                      primitive_expansion=expansion,
+                      prefix_index_count=len(prefix),
+                      anchored_old_subblock_required=True,
+                      regenerated_hamiltonian_admitted=False)
     output.mkdir()
     (output/'RESULT.json').write_text(json.dumps(result, indent=2, allow_nan=False)+'\n')
     (output/'STATUS').write_text('success\n')

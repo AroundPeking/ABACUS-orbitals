@@ -55,6 +55,41 @@ class OperatorCompatibilityTest(unittest.TestCase):
                 iq=1, rows=2, columns=2)}
             np.testing.assert_array_equal(reader.array(1, 1), values)
 
+    def test_expanded_blocks_preserve_each_nested_radial_prefix(self):
+        def block_text(rows):
+            lines = ['ABACUS_STERNHEIMER_BASIS_OPT_PRIMITIVES_V1',
+                     '# element atom_index l m n_primitive offset']
+            offset = 0
+            for atom in range(2):
+                for l in range(2):
+                    for m in range(-l, l + 1):
+                        lines.append('C %d %d %d %d %d' %
+                                     (atom, l, m, rows, offset))
+                        offset += rows
+            return '\n'.join(lines) + '\n'
+
+        indices = MODULE.validate_nested_primitive_blocks(
+            block_text(3), block_text(5), source_rows=3,
+            target_rows=5, lmax=1, natom=2)
+        self.assertEqual(indices, (0, 1, 2, 5, 6, 7, 10, 11, 12,
+                                   15, 16, 17, 20, 21, 22, 25, 26, 27,
+                                   30, 31, 32, 35, 36, 37))
+        changed = block_text(5).replace('C 1 1 1 5 35', 'C 1 1 1 4 35')
+        with self.assertRaisesRegex(ValueError, 'expanded primitive blocks'):
+            MODULE.validate_nested_primitive_blocks(
+                block_text(3), changed, source_rows=3,
+                target_rows=5, lmax=1, natom=2)
+
+    def test_expanded_prefix_selectors_preserve_old_shapes(self):
+        indices = (0, 1, 3, 4)
+        square = np.arange(36).reshape(6, 6)
+        columns = np.arange(18).reshape(3, 6)
+        np.testing.assert_array_equal(
+            MODULE.nested_square_prefix(square, indices),
+            square[np.ix_(indices, indices)])
+        np.testing.assert_array_equal(
+            MODULE.nested_column_prefix(columns, indices), columns[:, indices])
+
 
 if __name__ == '__main__':
     unittest.main()
