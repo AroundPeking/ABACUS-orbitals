@@ -23,6 +23,96 @@ FINITE_Q_SPECS = {
 }
 
 
+def radial_rows_from_bessel(ecut_ry, rcut_bohr):
+    """Return the exact SIAB spherical-Bessel row count."""
+    values = (ecut_ry, rcut_bohr)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value <= 0 for value in values):
+        raise ValueError('positive finite Bessel cutoff and radius required')
+    return int(math.sqrt(float(ecut_ry)) * float(rcut_bohr) / math.pi)
+
+
+def primitive_count(radial_rows, lmax, natom):
+    if (type(radial_rows) is not int or radial_rows <= 0
+            or type(lmax) is not int or lmax < 0
+            or type(natom) is not int or natom <= 0):
+        raise ValueError('positive primitive dimensions required')
+    return radial_rows * (lmax + 1) ** 2 * natom
+
+
+def primitive_prefix_indices(source_rows, target_rows, lmax, natom):
+    """Map a nested lower-cutoff Bessel mother into an expanded mother."""
+    primitive_count(source_rows, lmax, natom)
+    primitive_count(target_rows, lmax, natom)
+    if source_rows > target_rows:
+        raise ValueError('source rows exceed expanded mother')
+    return tuple(block * target_rows + row
+                 for block in range(natom * (lmax + 1) ** 2)
+                 for row in range(source_rows))
+
+
+def validate_bessel_contract(radial_rows, ecut_ry, rcut_bohr):
+    actual = radial_rows_from_bessel(ecut_ry, rcut_bohr)
+    if actual != radial_rows:
+        raise ValueError('Bessel cutoff does not produce requested radial rows: '
+                         '%d != %d' % (actual, radial_rows))
+    return actual
+
+
+def configure_expanded_mother(values, *, radial_rows, bessel_nao_ecut):
+    """Change only the nested Bessel mother size and return its dimensions."""
+    values = dict(values)
+    try:
+        source_ecut = float(values['bessel_nao_ecut'])
+        rcut = float(values['bessel_nao_rcut'])
+        lmax = int(values['sternheimer_siab_lmax'])
+    except (KeyError, ValueError) as error:
+        raise ValueError('complete Bessel mother controls required') from error
+    source_rows = radial_rows_from_bessel(source_ecut, rcut)
+    validate_bessel_contract(radial_rows, bessel_nao_ecut, rcut)
+    if radial_rows <= source_rows:
+        raise ValueError('expanded mother must add radial rows')
+    values['bessel_nao_ecut'] = format(float(bessel_nao_ecut), '.15g')
+    contract = dict(
+        nested_spherical_bessel_expansion=True,
+        source_bessel_nao_ecut_ry=source_ecut,
+        expanded_bessel_nao_ecut_ry=float(bessel_nao_ecut),
+        bessel_nao_rcut_bohr=rcut,
+        source_radial_rows=source_rows,
+        expanded_radial_rows=radial_rows,
+        source_primitive_count=primitive_count(source_rows, lmax, 2),
+        expanded_primitive_count=primitive_count(radial_rows, lmax, 2),
+        expanded_spdf_primitive_count=primitive_count(radial_rows, 3, 2),
+        source_prefix_indices_sha256=hashlib.sha256(
+            struct.pack('<%dI' % primitive_count(source_rows, lmax, 2),
+                        *primitive_prefix_indices(source_rows, radial_rows, lmax, 2))
+        ).hexdigest(),
+    )
+    return values, contract
+
+
+def zero_pad_radial_coefficients(coefficients, *, source_rows, target_rows):
+    """Embed a compact basis exactly in a larger nested Bessel mother."""
+    if not isinstance(coefficients, dict) or not coefficients or target_rows <= source_rows:
+        raise ValueError('nonempty coefficients and a larger target are required')
+    result = {}
+    for element, channels in coefficients.items():
+        padded_channels = []
+        for channel in channels:
+            if len(channel.shape) != 2 or channel.shape[0] != source_rows:
+                raise ValueError('coefficient radial row count mismatch')
+            shape = (target_rows, channel.shape[1])
+            if hasattr(channel, 'new_zeros'):
+                padded = channel.new_zeros(shape)
+            else:
+                import numpy as np
+                padded = np.zeros(shape, dtype=channel.dtype)
+            padded[:source_rows] = channel
+            padded_channels.append(padded)
+        result[element] = padded_channels
+    return result
+
+
 def gamma_coulomb_files(reference):
     """Validate the frozen reader blocks before renumbering only their filenames."""
     files = sorted(reference.glob('v1_coulomb_full_iq_1_rank*.dat'),
@@ -256,7 +346,8 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path, pilot_path=
 
 def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
             source_extension_reference_reuse=None, source_extension_gamma_audit=None,
-            frozen_auxiliary_cache=None, source_extension_pilot_audit=None):
+            frozen_auxiliary_cache=None, source_extension_pilot_audit=None,
+            bessel_radial_rows=None, bessel_nao_ecut=None):
     if source_extension_pilot_audit is not None and frozen_auxiliary_cache is None:
         raise ValueError('post-pilot exports require frozen auxiliary inputs')
     if frozen_auxiliary_cache is not None and (iq not in FINITE_Q_SPECS or source_extension_reference_reuse is None
@@ -285,6 +376,13 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
         sternheimer_q_index='1', exx_pca_threshold='1e-6', sternheimer_siab_lmax='4')
     if any(values.get(k) != v for k, v in expected.items()):
         raise ValueError('frozen Gamma INPUT mismatch')
+    expansion = None
+    if (bessel_radial_rows is None) != (bessel_nao_ecut is None):
+        raise ValueError('expanded mother requires both radial rows and cutoff')
+    if bessel_radial_rows is not None:
+        values, expansion = configure_expanded_mother(
+            values, radial_rows=bessel_radial_rows,
+            bessel_nao_ecut=bessel_nao_ecut)
     suffix = values['suffix']
     refout = reference/('OUT.' + suffix)
     manifest = refout/'STERNHEIMER_BASIS_OPT_V1/manifest.dat'
@@ -333,6 +431,8 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
         gamma_coulomb_reuse=coulomb_reuse,
         first_order_equations_allowed=0, self_consistency_allowed=False,
         full_q_admitted=False, physical_release_gate='hold')
+    if expansion is not None:
+        contract['primitive_expansion'] = expansion
     (output/'CONTRACT.json').write_text(json.dumps(contract, indent=2) + '\n')
     (output/'INPUT_SHA256SUMS').write_text(''.join(digest + '  ' + path + '\n'
         for path, digest in inputs.items()))
@@ -350,7 +450,10 @@ if __name__ == '__main__':
     parser.add_argument('--source-extension-gamma-audit', type=Path)
     parser.add_argument('--frozen-auxiliary-cache', type=Path)
     parser.add_argument('--source-extension-pilot-audit', type=Path)
+    parser.add_argument('--bessel-radial-rows', type=int)
+    parser.add_argument('--bessel-nao-ecut', type=float)
     args = parser.parse_args()
     prepare(args.reference, args.build_root, args.output, args.iq, args.gamma_acceptance,
             args.source_extension_reference_reuse, args.source_extension_gamma_audit,
-            args.frozen_auxiliary_cache, args.source_extension_pilot_audit)
+            args.frozen_auxiliary_cache, args.source_extension_pilot_audit,
+            args.bessel_radial_rows, args.bessel_nao_ecut)

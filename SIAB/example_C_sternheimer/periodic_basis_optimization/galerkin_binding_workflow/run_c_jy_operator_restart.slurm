@@ -51,6 +51,10 @@ grep -Fx 'response_solved no' "$dataset/status.dat"
 grep -Fx 'solved_equations 0' "$dataset/status.dat"
 grep -Fx 'ABACUS_STERNHEIMER_BASIS_OPERATORS_MANIFEST_V1' "$dataset/manifest.dat"
 grep -Fx 'entry_count 258' "$dataset/manifest.dat"
+expected_primitive_count=$($python -c 'import json; c=json.load(open("CONTRACT.json")); print(c.get("primitive_expansion", {}).get("expanded_primitive_count", ""))')
+if [ -n "$expected_primitive_count" ]; then
+    grep -Fx "primitive_count $expected_primitive_count" "$dataset/manifest.dat"
+fi
 if [ "$frozen" = 1 ]; then
     grep -Fx 'auxiliary_transform_origin frozen_reference' "$dataset/manifest.dat"
     grep -Fx "frozen_auxiliary_metric_sha256 $ABACUS_STERNHEIMER_FROZEN_AUXILIARY_METRIC_SHA256" "$dataset/manifest.dat"

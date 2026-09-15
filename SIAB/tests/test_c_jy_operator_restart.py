@@ -64,6 +64,23 @@ class OperatorRestartTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.frequency_rows(text.replace('BASIS_OPT', 'BASIS_OPERATORS'))
 
+    def test_expanded_mother_changes_only_the_bessel_size_controls(self):
+        values = dict(bessel_nao_ecut='100', bessel_nao_rcut='10',
+                      sternheimer_siab_lmax='4', unrelated='fixed')
+        configured, contract = MODULE.configure_expanded_mother(
+            values, radial_rows=48, bessel_nao_ecut=230.0)
+        self.assertEqual(configured['bessel_nao_ecut'], '230')
+        self.assertEqual(configured['bessel_nao_rcut'], '10')
+        self.assertEqual(configured['unrelated'], 'fixed')
+        self.assertEqual(contract['source_radial_rows'], 31)
+        self.assertEqual(contract['expanded_radial_rows'], 48)
+        self.assertEqual(contract['source_primitive_count'], 1550)
+        self.assertEqual(contract['expanded_primitive_count'], 2400)
+        self.assertEqual(contract['expanded_spdf_primitive_count'], 1536)
+        with self.assertRaisesRegex(ValueError, 'does not produce'):
+            MODULE.configure_expanded_mother(
+                values, radial_rows=48, bessel_nao_ecut=225.0)
+
 
 if __name__ == '__main__':
     unittest.main()
