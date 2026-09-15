@@ -236,7 +236,7 @@ def audit(run, output):
     failures = []
     if metric['relative'] > 1e-8 or unitary > 5e-6:
         failures.append('auxiliary_gauge')
-    rows = []
+    rows, occupied_maps = [], {}
     for ik in range(1, 65):
         if old.kpoints[ik][0] != ik or new.kpoints[ik][0] != ik:
             raise ValueError('not Gamma k routing')
@@ -250,6 +250,7 @@ def audit(run, output):
         s = difference(old.array(1, ik), new_s)
         h = difference(old.array(6, ik), new_h)
         a, occupied = occupied_gauge(old.array(7, ik), new_o)
+        occupied_maps[ik] = a
         energies = difference(old.eigenvalues[ik], new.eigenvalues[ik])
         commutator = float(np.max(np.abs(new.eigenvalues[ik][:, None]*a-a*old.eigenvalues[ik][None, :])))
         nocc, naux = len(a), t.shape[0]
@@ -281,6 +282,13 @@ def audit(run, output):
                       anchored_old_subblock_required=True,
                       regenerated_hamiltonian_admitted=False)
     output.mkdir()
+    if prefix is not None:
+        map_path = output/'GAUGE_MAPS.npz'
+        with map_path.open('xb') as stream:
+            np.savez(stream, auxiliary_map=t, raw_auxiliary_signs=signs,
+                     **{'occupied_at_k%d' % ik: value
+                        for ik, value in occupied_maps.items()})
+        result['gauge_maps_sha256'] = sha(map_path)
     (output/'RESULT.json').write_text(json.dumps(result, indent=2, allow_nan=False)+'\n')
     (output/'STATUS').write_text('success\n')
 
