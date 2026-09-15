@@ -17,7 +17,8 @@ from audit_c_jy_operator_restart import (OperatorFiles, difference,
 from audit_c_jy_reference_reuse import validate_reader_tree
 from prepare_c_jy_operator_restart import (REFERENCE_REUSE_SHA, GAMMA_SOURCE_AUDIT_SHA,
                                           validate_source_extension_evidence, FINITE_Q_SPECS,
-                                          Q2_SOURCE_AUDIT_SHA, validate_finite_q_pilot)
+                                          q2_source_audit_sha256,
+                                          validate_finite_q_pilot)
 
 
 def target_to_source(kpoints, count=64):
@@ -85,9 +86,15 @@ def audit(run, bundle, reader_source, output, source_commit):
             and contract['first_order_equations_allowed'] == 0,
             'explicit original-operator source-extension contract required')
     if iq != 22:
-        pilot = json.loads(hashed(Path(contract['source_extension_pilot_audit']), Q2_SOURCE_AUDIT_SHA))
-        validate_finite_q_pilot(pilot)
-        require(contract['source_extension_pilot_sha256'] == Q2_SOURCE_AUDIT_SHA
+        pilot_path = Path(contract['source_extension_pilot_audit'])
+        pilot = json.loads(pilot_path.read_text())
+        pilot_validation = validate_finite_q_pilot(pilot)
+        pilot_sha = q2_source_audit_sha256(
+            pilot_validation['full_source_primitive_count'])
+        hashed(pilot_path, pilot_sha)
+        require(contract['source_extension_pilot_sha256'] == pilot_sha
+                and contract['source_extension_pilot_full_source_primitive_count']
+                    == pilot_validation['full_source_primitive_count']
                 and contract['frozen_auxiliary']['metadata_sha256'] == FINITE_Q_SPECS[iq][2],
                 'remaining source extension lacks locked pilot or same-q auxiliary cache')
     reuse = json.loads(hashed(Path(contract['reference_reuse_audit']), REFERENCE_REUSE_SHA))

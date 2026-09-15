@@ -12,6 +12,11 @@ GAMMA_SOURCE_AUDIT_SHA = '98c59af6cafcde09ffdc9807fa042bc1279b6e32b9ca0f0f69c490
 FROZEN_AUXILIARY_COMMIT = '0613452ee9e176e5fb34364cfe296cccca706e77'
 Q2_CACHE_METADATA_SHA = 'd7935a428448db3b75c52ed639487a4b5677685ef90a2ca8a14ba53944c21454'
 Q2_SOURCE_AUDIT_SHA = 'b533da627f0e5d159f8b1a030f6fa0093ef8cd8f488176ee73d8d2df8935c55e'
+EXPANDED_Q2_SOURCE_AUDIT_SHA = '4feab1c2c36eee1e5ac8ab297c72b96851c53fe4d6c52be480c4c4095f2ae271'
+Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT = {
+    1550: Q2_SOURCE_AUDIT_SHA,
+    2400: EXPANDED_Q2_SOURCE_AUDIT_SHA,
+}
 FINITE_Q_SPECS = {
     22: ('q2', 8, Q2_CACHE_METADATA_SHA),
     43: ('q3', 4, '5760ac9dadfb49caa60c82b5fea5259f1170e46fb86223d60e0e3cc3f0280d1a'),
@@ -288,28 +293,49 @@ def validate_source_extension_evidence(reuse, gamma):
         gamma_full_operator_failure_reasons=gamma['failure_reasons'])
 
 
+def q2_source_audit_sha256(full_source_primitive_count):
+    try:
+        return Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT[full_source_primitive_count]
+    except KeyError as error:
+        raise ValueError('unsupported q2 source pilot mother size') from error
+
+
 def validate_finite_q_pilot(result):
     rows = result.get('per_k', [])
+    full_count = result.get('full_source_primitive_count')
     if (result.get('status') != 'success'
             or result.get('finite_q_spd_source_compatibility') != 'pass'
             or result.get('failure_reasons') != [] or result.get('selected_iq') != 22
             or result.get('compared_primitive_count') != 558
-            or result.get('full_source_primitive_count') != 1550
+            or full_count not in Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT
             or result.get('regenerated_hamiltonian_read') is not False
             or result.get('regenerated_hamiltonian_admitted') is not False
             or len(rows) != 64 or not all(r.get('pass_gate') is True for r in rows)
             or sorted(r['source_ik'] for r in rows) != list(range(1, 65))
             or sorted(r['target_ik'] for r in rows) != list(range(1, 65))):
         raise ValueError('complete accepted q2 source pilot required')
+    if full_count == 2400:
+        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                        source_primitive_count=1550,
+                        expanded_primitive_count=2400,
+                        expanded_spdf_primitive_count=1536)
+        expansion = result.get('primitive_expansion', {})
+        if not all(expansion.get(key) == value for key, value in expected.items()):
+            raise ValueError('expanded q2 source pilot contract mismatch')
     values = [(result['metric']['relative'], 1e-8), (result['auxiliary_map_unitarity'], 5e-6)]
     for row in rows:
-        values.extend([(row['source']['relative'], 1e-6), (row['overlap']['max_abs'], 1e-10),
+        overlap_limit = 2e-10 if full_count == 2400 else 1e-10
+        values.extend([(row['source']['relative'], 1e-6),
+            (row['overlap']['max_abs'], overlap_limit),
             (row['occupied']['relative'], 1e-6), (row['occupied']['unitarity'], 1e-6),
             (row['source_eigenvalue_ha']['max_abs'], 5e-7),
             (row['occupied_energy_commutator_ha'], 5e-7)])
+        if full_count == 2400:
+            values.append((row['overlap']['relative'], 1e-11))
     if any(not math.isfinite(v) or not 0 <= v <= limit for v, limit in values):
         raise ValueError('q2 source pilot numerical gate failed')
-    return dict(full_q_admitted=False, regenerated_hamiltonian_admitted=False)
+    return dict(full_q_admitted=False, regenerated_hamiltonian_admitted=False,
+                full_source_primitive_count=full_count)
 
 
 def source_extension_contract(iq, reference, reuse_path, gamma_path, pilot_path=None):
@@ -317,12 +343,19 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path, pilot_path=
         raise ValueError('source extension requires a canonical finite q')
     pilot_contract = {}
     if iq != 22 or pilot_path is not None:
-        if pilot_path is None or sha(pilot_path) != Q2_SOURCE_AUDIT_SHA:
+        if pilot_path is None:
             raise ValueError('remaining finite-q source extension requires locked q2 pilot')
+        pilot_digest = sha(pilot_path)
         pilot = json.loads(pilot_path.read_text())
-        validate_finite_q_pilot(pilot)
+        pilot_validation = validate_finite_q_pilot(pilot)
+        expected_digest = q2_source_audit_sha256(
+            pilot_validation['full_source_primitive_count'])
+        if pilot_digest != expected_digest:
+            raise ValueError('remaining finite-q source extension requires locked q2 pilot')
         pilot_contract = dict(source_extension_pilot_audit=str(pilot_path.resolve()),
-                              source_extension_pilot_sha256=Q2_SOURCE_AUDIT_SHA)
+                              source_extension_pilot_sha256=expected_digest,
+                              source_extension_pilot_full_source_primitive_count=
+                              pilot_validation['full_source_primitive_count'])
     if (reuse_path is None or gamma_path is None
             or sha(reuse_path) != REFERENCE_REUSE_SHA or sha(gamma_path) != GAMMA_SOURCE_AUDIT_SHA):
         raise ValueError('source extension requires the two locked independent audits')
@@ -383,6 +416,12 @@ def prepare(reference, build_root, output, iq=1, gamma_acceptance=None,
         values, expansion = configure_expanded_mother(
             values, radial_rows=bessel_radial_rows,
             bessel_nao_ecut=bessel_nao_ecut)
+    if 'source_extension_pilot_full_source_primitive_count' in q_contract:
+        expected_pilot_count = (expansion['expanded_primitive_count']
+                                if expansion is not None else 1550)
+        if (q_contract['source_extension_pilot_full_source_primitive_count']
+                != expected_pilot_count):
+            raise ValueError('q2 pilot and requested mother expansion differ')
     suffix = values['suffix']
     refout = reference/('OUT.' + suffix)
     manifest = refout/'STERNHEIMER_BASIS_OPT_V1/manifest.dat'

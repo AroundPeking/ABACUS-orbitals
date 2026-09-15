@@ -21,6 +21,21 @@ def pilot():
             occupied_energy_commutator_ha=1e-14) for k in range(1, 65)])
 
 
+def expanded_pilot():
+    value = pilot()
+    value['full_source_primitive_count'] = 2400
+    value['primitive_expansion'] = dict(
+        source_radial_rows=31,
+        expanded_radial_rows=48,
+        source_primitive_count=1550,
+        expanded_primitive_count=2400,
+        expanded_spdf_primitive_count=1536,
+    )
+    for row in value['per_k']:
+        row['overlap'].update(max_abs=1.4e-10, relative=5e-13)
+    return value
+
+
 class RemainingSourcesTest(unittest.TestCase):
     def test_pilot_admits_only_canonical_remaining_sources_not_physics(self):
         result = MODULE.validate_finite_q_pilot(pilot())
@@ -32,6 +47,26 @@ class RemainingSourcesTest(unittest.TestCase):
             self.assertEqual(len(digest), 64)
             self.assertGreater(multiplicity, 0)
             self.assertTrue(label.startswith('q'))
+
+    def test_expanded_pilot_locks_the_48_row_mother_contract(self):
+        result = MODULE.validate_finite_q_pilot(expanded_pilot())
+        self.assertEqual(result['full_source_primitive_count'], 2400)
+        self.assertEqual(
+            MODULE.q2_source_audit_sha256(2400),
+            '4feab1c2c36eee1e5ac8ab297c72b96851c53fe4d6c52be480c4c4095f2ae271')
+        with self.assertRaisesRegex(ValueError, 'expanded'):
+            value = expanded_pilot()
+            value['primitive_expansion']['expanded_radial_rows'] = 47
+            MODULE.validate_finite_q_pilot(value)
+
+    def test_expanded_overlap_requires_both_absolute_and_relative_gates(self):
+        for absolute, relative in ((2.1e-10, 5e-13), (1.4e-10, 1.1e-11)):
+            value = expanded_pilot()
+            value['per_k'][0]['overlap'].update(
+                max_abs=absolute, relative=relative)
+            with self.subTest(absolute=absolute, relative=relative), \
+                    self.assertRaisesRegex(ValueError, 'numerical'):
+                MODULE.validate_finite_q_pilot(value)
 
     def test_numerical_and_routing_failures_remain_rejected(self):
         for mutation in ('rank', 'q', 'missing', 'route', 'failure', 'new_H', 'source', 'nan'):
