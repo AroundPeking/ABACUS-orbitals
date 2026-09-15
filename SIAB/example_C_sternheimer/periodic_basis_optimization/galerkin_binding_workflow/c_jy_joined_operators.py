@@ -65,7 +65,8 @@ def anchor_nested_operator_record(expanded, baseline, prefix_indices):
 
 
 def join_operator_record(old, original_array, source_array, maps, indices, size,
-                         *, require_hamiltonian_subblock=True):
+                         *, require_overlap_subblock=True,
+                         require_hamiltonian_subblock=True):
     source, target = old['source_ik'], old['target_ik']
     s = original_array(1, target)
     h = .5*original_array(6, target)
@@ -82,12 +83,17 @@ def join_operator_record(old, original_array, source_array, maps, indices, size,
     checks = dict(overlap=difference(old['overlap'], s[np.ix_(indices,indices)]),
         hamiltonian_ha=difference(old['hamiltonian_ha'], h[np.ix_(indices,indices)]),
         occupied=o_check, source=difference(old['source'], d[:,:,indices]))
+    overlap_pass = checks['overlap']['max_abs'] <= 1e-10
     hamiltonian_pass = checks['hamiltonian_ha']['max_abs'] <= 1e-10
+    checks['overlap_subblock_gate'] = (
+        'required_and_pass' if require_overlap_subblock and overlap_pass
+        else 'required_and_fail' if require_overlap_subblock
+        else 'diagnostic_only_before_exact_anchor')
     checks['hamiltonian_subblock_gate'] = (
         'required_and_pass' if require_hamiltonian_subblock and hamiltonian_pass
         else 'required_and_fail' if require_hamiltonian_subblock
         else 'diagnostic_only_before_exact_anchor')
-    checks['pass_gate'] = (checks['overlap']['max_abs'] <= 1e-10
+    checks['pass_gate'] = ((overlap_pass or not require_overlap_subblock)
         and (hamiltonian_pass or not require_hamiltonian_subblock)
         and o_check['relative'] <= 1e-8 and o_check['unitarity'] <= 1e-8
         and checks['source']['relative'] <= 1e-6)
@@ -108,6 +114,7 @@ def join_nested_operator_record(
     expanded, expanded_checks = join_operator_record(
         old, expanded_original_array, expanded_source_array, expanded_maps,
         expanded_indices, expanded_size,
+        require_overlap_subblock=False,
         require_hamiltonian_subblock=False)
     anchored, anchor_checks = anchor_nested_operator_record(
         expanded, baseline, prefix_indices)

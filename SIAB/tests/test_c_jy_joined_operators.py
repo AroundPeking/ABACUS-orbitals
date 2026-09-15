@@ -87,6 +87,11 @@ class JoinedOperatorTest(unittest.TestCase):
                 lambda kind, ik: (2*h + 2e-7*np.eye(5)) if kind == 6
                 else original(kind, ik), new,
                 dict(occupied_at_k1=a, auxiliary_map=t), (0,1,2), 5)
+        with self.assertRaisesRegex(ValueError, 'subblock'):
+            module.join_operator_record(old,
+                lambda kind, ik: (s + 2e-10*np.eye(5)) if kind == 1
+                else original(kind, ik), new,
+                dict(occupied_at_k1=a, auxiliary_map=t), (0,1,2), 5)
 
     def test_nested_join_reproduces_baseline_on_all_old_primitive_columns(self):
         self.assertIsNotNone(module, 'joined operator adapter missing')
@@ -155,6 +160,7 @@ class JoinedOperatorTest(unittest.TestCase):
         on = np.zeros((2, new_size), dtype=complex)
         dn = np.zeros((2, 3, new_size), dtype=complex)
         sn[np.ix_(prefix, prefix)] = s
+        sn[prefix[2], prefix[2]] += 2e-10
         hn[np.ix_(prefix, prefix)] = h
         hn[prefix[1], prefix[1]] += 2e-7
         on[:, prefix] = o
@@ -185,10 +191,15 @@ class JoinedOperatorTest(unittest.TestCase):
             expanded_size=new_size)
         np.testing.assert_array_equal(
             result['hamiltonian_ha'][np.ix_(prefix, prefix)], h)
+        np.testing.assert_array_equal(
+            result['overlap'][np.ix_(prefix, prefix)], s)
         self.assertEqual(checks['baseline']['hamiltonian_subblock_gate'],
                          'required_and_pass')
+        self.assertEqual(checks['expanded']['overlap_subblock_gate'],
+                         'diagnostic_only_before_exact_anchor')
         self.assertEqual(checks['expanded']['hamiltonian_subblock_gate'],
                          'diagnostic_only_before_exact_anchor')
+        self.assertGreater(checks['expanded']['overlap']['max_abs'], 1e-10)
         self.assertGreater(checks['expanded']['hamiltonian_ha']['max_abs'],
                            1e-10)
         self.assertTrue(checks['expanded']['pass_gate'])
