@@ -211,6 +211,50 @@ class PrepareCjYCompressedRankLadderTest(unittest.TestCase):
                     expanded_q_audit_results=q_audits,
                     scope='compressed_shared_radial_full_q_energy_gradient')
 
+    def test_reuses_original_baseline_when_template_is_already_expanded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            templates, candidates = self.fixtures(root)
+            candidate = [candidates[1]]
+            gamma_run = self.accepted_run(root/'gamma-run')
+            gamma_audit = self.accepted_audit(
+                root/'gamma-audit', gamma_run, include_run=False)
+            q_audits = {}
+            baselines = {}
+            for slot in range(1, 8):
+                baseline = templates/('q%02d' % slot)/'old-audit.json'
+                self.write_baseline_audit(baseline, selected_iq=slot)
+                baselines[slot] = baseline
+                run = self.accepted_run(root/('q%d-run' % slot))
+                q_audits[slot] = self.accepted_audit(
+                    root/('q%d-audit' % slot), run)
+                contract_path = templates/('q%02d' % slot)/'RUNTIME_CONTRACT.json'
+                contract = json.loads(contract_path.read_text(encoding='ascii'))
+                contract['baseline_audit_result'] = str(baseline.resolve())
+                contract['audit_result'] = str(q_audits[slot].resolve())
+                contract_path.write_text(json.dumps(contract), encoding='ascii')
+            expansion = dict(source_radial_rows=31, expanded_radial_rows=48,
+                source_primitive_count=1550, expanded_primitive_count=2400,
+                expanded_spdf_primitive_count=1536,
+                source_prefix_indices_sha256='c'*64)
+
+            prepare.prepare_contracts(
+                templates, root/'next-expanded', candidate,
+                source_commit='b'*40, profiles=((4, 4, 3, 2, 0),),
+                radial_rows=48, primitive_expansion=expansion,
+                expanded_gamma_run=gamma_run,
+                expanded_gamma_audit_result=gamma_audit,
+                expanded_q_audit_results=q_audits)
+
+            for slot in range(1, 8):
+                contract = json.loads(
+                    (root/'next-expanded'/('q%02d' % slot)/'CONTRACT.json')
+                    .read_text(encoding='ascii'))
+                self.assertEqual(contract['baseline_audit_result'],
+                                 str(baselines[slot].resolve()))
+                self.assertEqual(contract['audit_result'],
+                                 str(q_audits[slot].resolve()))
+
     @staticmethod
     def accepted_run(path):
         path.mkdir()

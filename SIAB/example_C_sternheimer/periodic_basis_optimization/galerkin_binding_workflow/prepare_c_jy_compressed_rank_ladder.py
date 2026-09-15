@@ -191,9 +191,11 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
                 expanded_gamma_audit_result=str(expansion['gamma_audit_result']))
             artifact_inputs = list(expansion['gamma_inputs'])
             if slot:
-                if 'audit_result' not in template:
+                baseline_result = template.get(
+                    'baseline_audit_result', template.get('audit_result'))
+                if baseline_result is None:
                     raise ValueError('finite-q baseline audit is missing')
-                baseline = validate_baseline_audit(template['audit_result'])
+                baseline = validate_baseline_audit(baseline_result)
                 if not baseline.is_file():
                     raise ValueError('finite-q baseline audit file is missing')
                 contract['baseline_audit_result'] = str(baseline)
