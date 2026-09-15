@@ -101,7 +101,7 @@ class FullQGradientTest(unittest.TestCase):
             raw["C"].append(value)
         return dict(
             status="success",
-            scope="compressed_shared_radial_q_energy_gradient",
+            scope="compressed_shared_radial_full_q_energy_gradient",
             q_slot=slot,
             selected_iq=INDICES[slot],
             q_weight=MULTIPLICITIES[slot]/64,

@@ -19,6 +19,7 @@ PROFILE = (4, 4, 3, 2, 0)
 INDICES = (1, 22, 43, 6, 27, 23, 11, 55)
 MULTIPLICITIES = (1, 8, 4, 6, 24, 12, 3, 6)
 SCOPE = "compressed_shared_radial_q_energy_gradient"
+FULL_Q_SCOPE = "compressed_shared_radial_full_q_energy_gradient"
 
 
 def _finite(value, name):
@@ -175,7 +176,7 @@ def reduce_full_q_energy_gradients(
     for slot in range(8):
         artifact = by_slot[slot]
         expected = dict(
-            status="success", scope=SCOPE, q_slot=slot,
+            status="success", scope=FULL_Q_SCOPE, q_slot=slot,
             selected_iq=INDICES[slot], frequency_count=12,
             profile=list(PROFILE), ao_per_C=45, radial_rows=radial_rows,
             coefficients_sha256=coefficient_sha256,
