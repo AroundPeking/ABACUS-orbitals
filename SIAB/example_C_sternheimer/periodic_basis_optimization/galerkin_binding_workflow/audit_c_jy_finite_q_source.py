@@ -10,7 +10,8 @@ import sys
 import time
 import numpy as np
 
-from audit_c_jy_operator_restart import (OperatorFiles, difference, occupied_gauge,
+from audit_c_jy_operator_restart import (OperatorFiles, difference,
+                                        expanded_overlap_compatible, occupied_gauge,
                                         metric_signs, transform_source, sha,
                                         validate_nested_primitive_blocks)
 from audit_c_jy_reference_reuse import validate_reader_tree
@@ -48,6 +49,12 @@ def restore_and_compare_source(old, new, source_gauge, auxiliary_map):
     result = difference(old, restored)
     result['pass_gate'] = result['relative'] <= 1e-6
     return restored, result
+
+
+def finite_q_overlap_compatible(diagnostics, expanded_mother):
+    if expanded_mother:
+        return expanded_overlap_compatible(diagnostics)
+    return diagnostics['max_abs'] <= 1e-10
 
 
 def finite_q_dataset_position(datasets, iq):
@@ -184,7 +191,8 @@ def audit(run, bundle, reader_source, output, source_commit):
         energy = difference(energies[source], .5*new.eigenvalues[source])
         commutator = float(np.max(np.abs(.5*new.eigenvalues[target][:, None]*a
                                         -a*energies[target][None, :])))
-        passed = (overlap['max_abs'] <= 1e-10 and occupied['relative'] <= 1e-6
+        passed = (finite_q_overlap_compatible(overlap, expansion is not None)
+                  and occupied['relative'] <= 1e-6
                   and occupied['unitarity'] <= 1e-6 and energy['max_abs'] <= 5e-7
                   and commutator <= 5e-7)
         rows.append(dict(source_ik=source, target_ik=target, overlap=overlap, occupied=occupied,

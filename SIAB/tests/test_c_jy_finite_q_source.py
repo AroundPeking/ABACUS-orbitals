@@ -66,6 +66,16 @@ class FiniteQSourceTest(unittest.TestCase):
                 (0, 6), source_rows=3, target_rows=5,
                 source_primitive_count=6, target_primitive_count=10)
 
+    def test_expanded_finite_q_overlap_uses_the_nested_roundoff_gate(self):
+        measured = {'max_abs': 1.3164935808163136e-10,
+                    'relative': 1.6093233430541642e-13}
+        self.assertFalse(MODULE.finite_q_overlap_compatible(measured, False))
+        self.assertTrue(MODULE.finite_q_overlap_compatible(measured, True))
+        self.assertFalse(MODULE.finite_q_overlap_compatible(
+            dict(measured, max_abs=2.0000000001e-10), True))
+        self.assertFalse(MODULE.finite_q_overlap_compatible(
+            dict(measured, relative=1.0000000001e-11), True))
+
 
 if __name__ == '__main__':
     unittest.main()
