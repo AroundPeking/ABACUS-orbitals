@@ -55,6 +55,17 @@ class FiniteQSourceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.target_to_source({1: (2, None), 2: (2, None), 3: (1, None)}, 3)
 
+    def test_active_indices_are_remapped_blockwise_into_expanded_mother(self):
+        self.assertEqual(
+            MODULE.remap_nested_active_indices(
+                (0, 2, 3, 5), source_rows=3, target_rows=5,
+                source_primitive_count=6, target_primitive_count=10),
+            (0, 2, 5, 7))
+        with self.assertRaisesRegex(ValueError, 'nested active'):
+            MODULE.remap_nested_active_indices(
+                (0, 6), source_rows=3, target_rows=5,
+                source_primitive_count=6, target_primitive_count=10)
+
 
 if __name__ == '__main__':
     unittest.main()

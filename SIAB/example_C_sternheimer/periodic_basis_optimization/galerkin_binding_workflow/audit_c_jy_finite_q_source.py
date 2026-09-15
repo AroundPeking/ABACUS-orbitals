@@ -11,7 +11,8 @@ import time
 import numpy as np
 
 from audit_c_jy_operator_restart import (OperatorFiles, difference, occupied_gauge,
-                                        metric_signs, transform_source, sha)
+                                        metric_signs, transform_source, sha,
+                                        validate_nested_primitive_blocks)
 from audit_c_jy_reference_reuse import validate_reader_tree
 from prepare_c_jy_operator_restart import (REFERENCE_REUSE_SHA, GAMMA_SOURCE_AUDIT_SHA,
                                           validate_source_extension_evidence, FINITE_Q_SPECS,
@@ -23,6 +24,23 @@ def target_to_source(kpoints, count=64):
             or sorted(v[0] for v in kpoints.values()) != list(range(1, count+1))):
         raise ValueError('finite-q source/target routing is not bijective')
     return {target: source for source, (target, _) in kpoints.items()}
+
+
+def remap_nested_active_indices(indices, *, source_rows, target_rows,
+                                source_primitive_count,
+                                target_primitive_count):
+    if (source_primitive_count % source_rows
+            or target_primitive_count % target_rows
+            or source_primitive_count // source_rows
+               != target_primitive_count // target_rows):
+        raise ValueError('nested active primitive dimensions mismatch')
+    result = []
+    for index in indices:
+        if type(index) is not int or not 0 <= index < source_primitive_count:
+            raise ValueError('nested active primitive index is invalid')
+        block, row = divmod(index, source_rows)
+        result.append(block * target_rows + row)
+    return tuple(result)
 
 
 def restore_and_compare_source(old, new, source_gauge, auxiliary_map):
@@ -99,11 +117,38 @@ def audit(run, bundle, reader_source, output, source_commit):
     require(new.scalar['frozen_charge_sha256'] == contract['density_sha256']
             and new.scalar['executable_sha256'] == contract['binary_sha256']
             and new.scalar['abacus_commit'] == contract['source_commit'], 'native identity mismatch')
+    expansion = contract.get('primitive_expansion')
     for key in ('orbital_sha256', 'pseudopotential_sha256', 'auxiliary_basis_sha256',
-                'primitive_blocks_sha256', 'selected_iq', 'q_count',
+                'selected_iq', 'q_count',
                 'raw_auxiliary_dimension', 'whitened_auxiliary_rank'):
         require(new.scalar[key] == str(getattr(dataset, key)), 'source metadata mismatch: '+key)
-    require(new.scalar['kernel'] == 'full_coulomb' and new.scalar['primitive_count'] == '1550'
+    old_indices = tuple(dataset.active_primitive_reduction.source_indices)
+    require(old_indices == tuple(range(279))+tuple(range(775, 1054)),
+            'exact spd indices changed')
+    if expansion is None:
+        require(new.scalar['primitive_blocks_sha256'] == str(dataset.primitive_blocks_sha256),
+                'source metadata mismatch: primitive_blocks_sha256')
+        full_primitive_count = 1550
+        indices = old_indices
+    else:
+        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                        source_primitive_count=1550,
+                        expanded_primitive_count=2400,
+                        expanded_spdf_primitive_count=1536)
+        require(all(expansion.get(key) == value for key, value in expected.items()),
+                'unexpected expanded mother contract')
+        old_blocks = Path(contract['original_operator_directory'])/'primitive_blocks.dat'
+        new_blocks = new.directory/'primitive_blocks.dat'
+        full_prefix = validate_nested_primitive_blocks(
+            old_blocks.read_text(), new_blocks.read_text(), source_rows=31,
+            target_rows=48, lmax=4, natom=2)
+        require(len(full_prefix) == 1550, 'expanded primitive prefix is incomplete')
+        full_primitive_count = 2400
+        indices = remap_nested_active_indices(
+            old_indices, source_rows=31, target_rows=48,
+            source_primitive_count=1550, target_primitive_count=2400)
+    require(new.scalar['kernel'] == 'full_coulomb'
+            and new.scalar['primitive_count'] == str(full_primitive_count)
             and new.scalar['k_count'] == '64'
             and float(new.scalar['q_weight']) == dataset.q_weight
             and np.array_equal(np.array(new.scalar['qpoint'].split(), float), dataset.qpoint)
@@ -111,8 +156,6 @@ def audit(run, bundle, reader_source, output, source_commit):
             and np.array_equal(np.array(new.frequencies)[:, 1], dataset.frequency_weights_ha.numpy()),
             'source dimensions, q or twelve-frequency protocol changed')
     inverse_route = target_to_source(new.kpoints)
-    indices = tuple(dataset.active_primitive_reduction.source_indices)
-    require(indices == tuple(range(279))+tuple(range(775, 1054)), 'exact spd indices changed')
     v, w = dataset.coulomb_metric.numpy(), dataset.coulomb_whitening.numpy()
     vn, wn = new.array(4), new.array(5)
     signs = metric_signs(v, vn)
@@ -148,7 +191,7 @@ def audit(run, bundle, reader_source, output, source_commit):
             source_eigenvalue_ha=energy, occupied_energy_commutator_ha=commutator, pass_gate=passed))
     with (output/'PROGRESS.jsonl').open('x') as progress:
         for k, row in zip(dataset.kpoints, rows):
-            full = new.array(2, k.source_ik).reshape(4, len(t), 1550)
+            full = new.array(2, k.source_ik).reshape(4, len(t), full_primitive_count)
             # D carries the source occupied state, not the target occupied state.
             _, source_check = restore_and_compare_source(k.source.numpy(), full[:, :, indices],
                                                         gauges[k.source_ik], t)
@@ -165,7 +208,8 @@ def audit(run, bundle, reader_source, output, source_commit):
                  **{'occupied_at_k%d' % k: a for k, a in gauges.items()})
     result = dict(status='success', finite_q_spd_source_compatibility='pass' if not failures else 'hold',
         failure_reasons=failures, selected_iq=iq, compared_primitive_count=558,
-        full_source_primitive_count=1550, per_k=rows, metric=metric, auxiliary_map_unitarity=unitary,
+        full_source_primitive_count=full_primitive_count, per_k=rows,
+        primitive_expansion=expansion, metric=metric, auxiliary_map_unitarity=unitary,
         source_commit=source_commit, run=str(run), contract_sha256=sha(run/'CONTRACT.json'),
         bundle_sha256=BUNDLE_SHA, cache_sha256=record['complete_sha256'], cache_binding=record['binding'],
         reader_source=str(reader_source), reader_source_hashes=manifest['source_files'],
