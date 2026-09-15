@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -48,6 +49,18 @@ class CjYRankCapacityBoundRunnerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.aggregate_rank_bounds(bad, profiles=((1, 0, 0, 0, 0),),
                                          atoms_per_cell=1)
+
+    def test_aggregate_diagonalizes_each_sector_only_once(self):
+        sectors = [
+            dict(q_slot=0, occupied_rank=1, covariance=np.diag([9., 4., 1.])),
+            dict(q_slot=1, occupied_rank=1, covariance=np.diag([8., 2.])),
+        ]
+        profiles = ((1, 0, 0, 0, 0), (2, 0, 0, 0, 0))
+        original = np.linalg.eigvalsh
+        with mock.patch.object(np.linalg, 'eigvalsh', wraps=original) as eigvalsh:
+            runner.aggregate_rank_bounds(
+                sectors, profiles=profiles, atoms_per_cell=2)
+        self.assertEqual(eigvalsh.call_count, len(sectors))
 
     def test_runner_and_wrapper_are_diagnostic_only(self):
         source = RUNNER.read_text(encoding='ascii')

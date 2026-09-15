@@ -15,25 +15,30 @@ from periodic_galerkin_basis import build_primitive_to_candidate
 from response_metric import _hermitian
 
 
-def independent_sector_rank_lower_bound(covariance, available_virtual_rank):
-    """Return the best possible residual for one unconstrained sector subspace.
-
-    This Ky Fan bound lets every sector choose its own optimal subspace.  It is
-    therefore optimistic relative to any shared, atom-centred contraction and
-    diagnoses rank capacity only.
-    """
+def independent_sector_covariance_spectrum(covariance):
+    """Return the checked ascending spectrum used by rank-capacity bounds."""
     covariance = np.asarray(covariance, dtype=np.complex128)
     if (covariance.ndim != 2 or covariance.shape[0] != covariance.shape[1]
-            or not covariance.shape[0] or not np.isfinite(covariance).all()
-            or type(available_virtual_rank) is not int
-            or available_virtual_rank < 0):
-        raise ValueError('invalid covariance or available virtual rank')
+            or not covariance.shape[0] or not np.isfinite(covariance).all()):
+        raise ValueError('invalid covariance')
     covariance, _ = _hermitian(covariance)
     eigenvalues = np.linalg.eigvalsh(covariance).real
     scale = max(float(eigenvalues[-1]), 1e-300)
     if float(eigenvalues[0]) < -1e-10*scale:
         raise ValueError('response covariance is materially indefinite')
-    eigenvalues = np.maximum(eigenvalues, 0.)
+    return np.maximum(eigenvalues, 0.)
+
+
+def independent_sector_rank_lower_bound_from_spectrum(
+        eigenvalues, available_virtual_rank):
+    eigenvalues = np.asarray(eigenvalues, dtype=np.float64)
+    if (eigenvalues.ndim != 1 or not len(eigenvalues)
+            or not np.isfinite(eigenvalues).all()
+            or type(available_virtual_rank) is not int
+            or available_virtual_rank < 0):
+        raise ValueError('invalid covariance spectrum or available virtual rank')
+    if float(eigenvalues[0]) < 0:
+        raise ValueError('response covariance spectrum must be nonnegative')
     target = math.fsum(float(value) for value in eigenvalues)
     if not math.isfinite(target) or target <= 0:
         raise ValueError('response rank bound requires nonzero target norm')
@@ -46,6 +51,18 @@ def independent_sector_rank_lower_bound(covariance, available_virtual_rank):
         target_norm2=target, captured_norm2_upper_bound=captured,
         residual_norm2_lower_bound=residual,
         response_loss_lower_bound=residual/target)
+
+
+def independent_sector_rank_lower_bound(covariance, available_virtual_rank):
+    """Return the best possible residual for one unconstrained sector subspace.
+
+    This Ky Fan bound lets every sector choose its own optimal subspace.  It is
+    therefore optimistic relative to any shared, atom-centred contraction and
+    diagnoses rank capacity only.
+    """
+    return independent_sector_rank_lower_bound_from_spectrum(
+        independent_sector_covariance_spectrum(covariance),
+        available_virtual_rank)
 
 
 class ResponseFitSector:

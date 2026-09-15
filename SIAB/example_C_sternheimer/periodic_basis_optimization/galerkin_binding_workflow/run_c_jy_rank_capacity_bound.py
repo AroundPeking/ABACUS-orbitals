@@ -16,7 +16,8 @@ import numpy as np
 MODULES = Path(__file__).resolve().parents[3]/'opt_orb_pytorch_dpsi'
 sys.path.insert(0, str(MODULES))
 
-from response_radial_fit import independent_sector_rank_lower_bound
+from response_radial_fit import (independent_sector_covariance_spectrum,
+                                 independent_sector_rank_lower_bound_from_spectrum)
 
 
 PROFILES = ((3, 3, 2, 1, 0), (4, 4, 3, 2, 0),
@@ -75,17 +76,20 @@ def aggregate_rank_bounds(sectors, *, profiles, atoms_per_cell):
             raise ValueError('invalid rank-bound sector')
         checked.append(sector)
 
+    sector_spectra = [independent_sector_covariance_spectrum(
+        sector['covariance']) for sector in checked]
+
     profile_results = []
     for profile in profiles:
         ao_count = ao_per_element(profile)
         cell_ao = atoms_per_cell*ao_count
         reports = []
-        for sector in checked:
+        for sector, eigenvalues in zip(checked, sector_spectra):
             available = cell_ao-sector['occupied_rank']
             if available <= 0:
                 raise ValueError('candidate has no virtual rank after occupied space')
-            bound = independent_sector_rank_lower_bound(
-                sector['covariance'], available)
+            bound = independent_sector_rank_lower_bound_from_spectrum(
+                eigenvalues, available)
             reports.append(dict(q_slot=sector['q_slot'], **bound))
         target = math.fsum(row['target_norm2'] for row in reports)
         residual = math.fsum(row['residual_norm2_lower_bound'] for row in reports)
