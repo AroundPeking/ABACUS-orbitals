@@ -7,9 +7,11 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'opt_orb_pytorch_dpsi'))
 try:
-    from response_radial_fit import ResponseFitSector, shared_radial_fit_loss
+    from response_radial_fit import (ResponseFitSector,
+                                     independent_sector_rank_lower_bound,
+                                     shared_radial_fit_loss)
 except ImportError:
-    ResponseFitSector = shared_radial_fit_loss = None
+    ResponseFitSector = independent_sector_rank_lower_bound = shared_radial_fit_loss = None
 from periodic_galerkin_basis import build_primitive_to_candidate
 from periodic_galerkin_data import PeriodicGalerkinPrimitiveBlock
 
@@ -54,6 +56,26 @@ class RadialFitTests(unittest.TestCase):
         self.assertEqual(diagnostics['virtual_rank_signature'], [6, 6])
         self.assertEqual(diagnostics['augmented_total_rank_by_sector'], [10, 10])
         self.assertEqual(diagnostics['physical_release_gate'], 'hold')
+
+    def test_independent_sector_rank_bound_matches_covariance_eigenvalue_sum(self):
+        report = independent_sector_rank_lower_bound(np.diag([9., 4., 1.]), 1)
+        self.assertEqual(report['covariance_dimension'], 3)
+        self.assertEqual(report['available_virtual_rank'], 1)
+        self.assertAlmostEqual(report['target_norm2'], 14.)
+        self.assertAlmostEqual(report['captured_norm2_upper_bound'], 9.)
+        self.assertAlmostEqual(report['residual_norm2_lower_bound'], 5.)
+        self.assertAlmostEqual(report['response_loss_lower_bound'], 5./14.)
+        self.assertEqual(report['scope'], 'independent_sector_rank_only_lower_bound')
+
+    def test_independent_sector_rank_bound_clips_rank_and_rejects_bad_input(self):
+        full = independent_sector_rank_lower_bound(np.diag([3., 2.]), 7)
+        self.assertEqual(full['available_virtual_rank'], 2)
+        self.assertEqual(full['residual_norm2_lower_bound'], 0.)
+        for covariance, rank in ((np.diag([1., -1.]), 1),
+                                 (np.ones((2, 3)), 1),
+                                 (np.eye(2), -1)):
+            with self.subTest(rank=rank), self.assertRaises(ValueError):
+                independent_sector_rank_lower_bound(covariance, rank)
 
     def test_gradient_matches_finite_difference(self):
         coefficients, sectors, _ = self.case()

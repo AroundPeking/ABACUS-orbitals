@@ -60,6 +60,17 @@ Evaluate the nested all-channel profiles `3s3p2d1f`, `4s4p3d2f`,
 only when the smaller profile cannot meet the response, occupied, PBE, and RPA
 gates.  No `g` channel is added before the `spdf` contraction limit is measured.
 
+Before interpreting a failed compact profile as insufficient rank, compute the
+independent-sector Ky Fan lower bound.  For each `(q,k)` covariance, reserve its
+occupied rank and allow the remaining AO columns to span that sector's leading
+response eigenvectors independently.  The discarded eigenvalue sum is a strict,
+optimistic lower bound on the snapshot residual at that AO count.  If this bound
+is already large, the AO rank is insufficient for the stored target.  If it is
+small while the shared contraction remains inaccurate, the failure belongs to
+the common atom-centred subspace, its parameterization, or its optimization.
+Because different sectors are allowed different subspaces, this diagnostic
+cannot itself produce an orbital file or establish RPA accuracy.
+
 ## Gates
 
 1. Target integrity: 512 sectors, immutable hashes, finite covariance, exact
@@ -68,13 +79,16 @@ gates.  No `g` channel is added before the `spdf` contraction limit is measured.
 2. Contraction: all requested radial columns are free, response loss decreases,
    occupied capture stays above its floor, overlap remains finite, and the final
    coefficients equal the best accepted checkpoint.
-3. PBE: the compact candidate must not materially damage the accepted diamond
+3. Rank diagnosis: report the independent-sector residual lower bound separately
+   from the achieved shared-contraction residual.  Never call the optimistic
+   bound a realizable compact basis.
+4. PBE: the compact candidate must not materially damage the accepted diamond
    PBE occupied manifold; the existing 10 meV comparison remains a diagnostic
    gate rather than a frozen-orbital constraint.
-4. RPA refinement: all q stars and all 12 frequencies use the same response
+5. RPA refinement: all q stars and all 12 frequencies use the same response
    definition as the mother target; per-sector mismatches are retained so total
    energy cancellation cannot hide a bad channel.
-5. Physical acceptance: ordinary all-band LCAO SOS RPA with PCA `1e-6` and qavg
+6. Physical acceptance: ordinary all-band LCAO SOS RPA with PCA `1e-6` and qavg
    head/wing differs from Delta-ST by less than `0.1 eV/C`.
 
 ## Evidence Boundary

@@ -15,6 +15,39 @@ from periodic_galerkin_basis import build_primitive_to_candidate
 from response_metric import _hermitian
 
 
+def independent_sector_rank_lower_bound(covariance, available_virtual_rank):
+    """Return the best possible residual for one unconstrained sector subspace.
+
+    This Ky Fan bound lets every sector choose its own optimal subspace.  It is
+    therefore optimistic relative to any shared, atom-centred contraction and
+    diagnoses rank capacity only.
+    """
+    covariance = np.asarray(covariance, dtype=np.complex128)
+    if (covariance.ndim != 2 or covariance.shape[0] != covariance.shape[1]
+            or not covariance.shape[0] or not np.isfinite(covariance).all()
+            or type(available_virtual_rank) is not int
+            or available_virtual_rank < 0):
+        raise ValueError('invalid covariance or available virtual rank')
+    covariance, _ = _hermitian(covariance)
+    eigenvalues = np.linalg.eigvalsh(covariance).real
+    scale = max(float(eigenvalues[-1]), 1e-300)
+    if float(eigenvalues[0]) < -1e-10*scale:
+        raise ValueError('response covariance is materially indefinite')
+    eigenvalues = np.maximum(eigenvalues, 0.)
+    target = math.fsum(float(value) for value in eigenvalues)
+    if not math.isfinite(target) or target <= 0:
+        raise ValueError('response rank bound requires nonzero target norm')
+    rank = min(available_virtual_rank, len(eigenvalues))
+    discarded = eigenvalues[:len(eigenvalues)-rank]
+    residual = math.fsum(float(value) for value in discarded)
+    captured = target-residual
+    return dict(scope='independent_sector_rank_only_lower_bound',
+        covariance_dimension=len(eigenvalues), available_virtual_rank=rank,
+        target_norm2=target, captured_norm2_upper_bound=captured,
+        residual_norm2_lower_bound=residual,
+        response_loss_lower_bound=residual/target)
+
+
 class ResponseFitSector:
     def __init__(self, label, primitive_blocks, virtual_embedding, covariance, *,
                  occupied_rank, occupied_embedding=None):
