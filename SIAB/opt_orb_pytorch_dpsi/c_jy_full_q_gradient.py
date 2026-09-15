@@ -14,7 +14,9 @@ from periodic_galerkin_radial_diagnostics import (
 
 
 PROFILE = (4, 4, 3, 2, 0)
-INDICES = (1, 2, 3, 6, 7, 8, 11, 28)
+# Flattened selected_iq values in the frozen 4x4x4 cache.  These are not the
+# human-facing q-star labels (1, 2, 3, 6, 7, 8, 11, 28).
+INDICES = (1, 22, 43, 6, 27, 23, 11, 55)
 MULTIPLICITIES = (1, 8, 4, 6, 24, 12, 3, 6)
 SCOPE = "compressed_shared_radial_q_energy_gradient"
 

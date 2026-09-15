@@ -10,7 +10,7 @@ from periodic_galerkin_radial_diagnostics import radial_gradient_report
 
 
 PROFILE = (4, 4, 3, 2, 0)
-INDICES = (1, 2, 3, 6, 7, 8, 11, 28)
+INDICES = (1, 22, 43, 6, 27, 23, 11, 55)
 MULTIPLICITIES = (1, 8, 4, 6, 24, 12, 3, 6)
 
 
@@ -35,7 +35,7 @@ class FullQGradientTest(unittest.TestCase):
             q_weight: float
 
         dataset = Dataset(torch.arange(1, 13, dtype=torch.float64),
-                          ("blocks",), ("k1", "k2"), 2, 8/64)
+                          ("blocks",), ("k1", "k2"), 22, 8/64)
         spec = dict(profile=list(PROFILE), ao_per_C=45,
                     coefficients_path="/tmp/c", coefficients_sha256="a"*64)
         prepared = []
@@ -80,7 +80,7 @@ class FullQGradientTest(unittest.TestCase):
             radial_gradient_report=radial_gradient_report,
             prepare_block_cache=prepare)
         self.assertEqual(prepared, ["k1", "k2"])
-        self.assertEqual(result["selected_iq"], 2)
+        self.assertEqual(result["selected_iq"], 22)
         self.assertEqual(result["q_weight"], 8/64)
         self.assertEqual(result["frequency_count"], 12)
         self.assertEqual(result["radial_rows"], 48)
