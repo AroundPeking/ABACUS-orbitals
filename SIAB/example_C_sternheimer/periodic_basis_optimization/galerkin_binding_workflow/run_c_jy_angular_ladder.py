@@ -20,6 +20,7 @@ from periodic_available_mother import available_mother_response
 from c_jy_compressed_evaluation import (
     evaluate_compressed_profiles, validate_profile_input_hashes,
     validate_profile_specs)
+from c_jy_full_q_gradient import evaluate_q_energy_gradient
 from periodic_galerkin_basis import (
     prepare_periodic_block_contraction_record,
     read_periodic_optimizer_coefficients,
@@ -30,6 +31,7 @@ from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficien
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 from periodic_galerkin_rpa import periodic_rpa_objective
+from periodic_galerkin_radial_diagnostics import radial_gradient_report
 from audit_c_jy_operator_restart import (OperatorFiles,
                                          validate_nested_primitive_blocks)
 from c_jy_joined_operators import map_and_anchor_expanded_gamma_record
@@ -170,8 +172,12 @@ def expanded_gamma_dataset(dataset, contract):
 
 def run(contract_path, output):
     contract = json.loads(contract_path.read_text())
-    compressed = (contract.get('scope') ==
-                  'compressed_shared_radial_full_q_body_RPA')
+    scope = contract.get('scope')
+    gradient_mode = (
+        scope == 'compressed_shared_radial_full_q_energy_gradient')
+    compressed = scope in (
+        'compressed_shared_radial_full_q_body_RPA',
+        'compressed_shared_radial_full_q_energy_gradient')
     if (os.environ.get('C_EXECUTION_HOST') != 'df_iopcas_ghj'
             or os.environ.get('SLURM_JOB_NUM_NODES') != '1'
             or os.environ.get('SLURM_JOB_ID') != contract['job_id']):
@@ -190,6 +196,10 @@ def run(contract_path, output):
         validate_profile_input_hashes(contract['candidate_profiles'],
                                       contract.get('inputs'),
                                       profiles=requested_profiles)
+        if (gradient_mode
+                and (requested_profiles != ((4, 4, 3, 2, 0),)
+                     or radial_rows != 48)):
+            raise ValueError('energy gradient requires one expanded 45-AO profile')
     for name, expected in contract['inputs'].items():
         if sha(name) != expected:
             raise ValueError('input hash mismatch: '+name)
@@ -225,6 +235,25 @@ def run(contract_path, output):
             stage = output/('lmax%d' % lmax)
             stage.mkdir()
             if compressed:
+                if gradient_mode:
+                    profile = evaluate_q_energy_gradient(
+                        view, contract['candidate_profiles'][0],
+                        read_coefficients=read_periodic_optimizer_coefficients,
+                        evaluate_response=evaluate_periodic_galerkin_coefficient_response,
+                        evaluate_objective=periodic_rpa_objective,
+                        radial_gradient_report=radial_gradient_report,
+                        prepare_block_cache=prepare_periodic_block_contraction_record,
+                        relative_rank_tolerance=contract['relative_rank_tolerance'],
+                        occupied_capture_floor=contract['occupied_capture_floor'],
+                        radial_rows=radial_rows)
+                    profile.update(lmax=lmax, label=1, multiplicity=1,
+                        source_commit=contract['source_commit'],
+                        primitive_count=view.primitive_count, k_record_count=64)
+                    write(stage/'profile-045-gradient.json', profile)
+                    write(stage/'RESULT.json', profile)
+                    rows.append(profile)
+                    del view, profile
+                    continue
                 def checkpoint_profile(profile):
                     write(stage/('profile-%03d.json' % profile['ao_per_C']), dict(
                         status='success', q_slot=0, selected_iq=1,
@@ -331,7 +360,10 @@ def run(contract_path, output):
             rows.append(summary)
             del view, response, detail
         if compressed:
-            final = dict(rows[0], scope='compressed_shared_radial_full_q_body_RPA',
+            final = dict(rows[0], scope=(
+                'compressed_shared_radial_full_q_energy_gradient'
+                if gradient_mode else
+                'compressed_shared_radial_full_q_body_RPA'),
                 elapsed_seconds=time.perf_counter()-start, load_seconds=load_seconds,
                 max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                 expansion_checks=expansion_checks)

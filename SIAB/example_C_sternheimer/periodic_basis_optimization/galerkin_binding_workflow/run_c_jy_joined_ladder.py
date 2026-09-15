@@ -55,6 +55,15 @@ def load_current_periodic_optimization(repo):
     return module
 
 
+def load_current_periodic_module(repo, name):
+    path = Path(repo)/'SIAB/opt_orb_pytorch_dpsi'/f'{name}.py'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def occupied_embedding_from_record(record, relative_rank_tolerance):
     """Rebuild the occupied rows missing from the frozen cache adapter.
 
@@ -112,8 +121,12 @@ def consume_compatible_target(args, consume_current_target, records_by_source_ik
 
 def run(contract_path, output):
     c = json.loads(contract_path.read_text())
-    compressed = (c.get('scope') ==
-                  'compressed_shared_radial_full_q_body_RPA')
+    scope = c.get('scope')
+    gradient_mode = (
+        scope == 'compressed_shared_radial_full_q_energy_gradient')
+    compressed = scope in (
+        'compressed_shared_radial_full_q_body_RPA',
+        'compressed_shared_radial_full_q_energy_gradient')
     require(os.environ.get('C_EXECUTION_HOST') == 'df_iopcas_ghj'
         and os.environ.get('SLURM_JOB_ID') == c['job_id']
         and os.environ.get('SLURM_JOB_NUM_NODES') == '1', 'registered DF job required')
@@ -147,6 +160,12 @@ def run(contract_path, output):
         current_basis.read_periodic_optimizer_coefficients)
     evaluate_periodic_galerkin_coefficient_response = (
         current_optimization.evaluate_periodic_galerkin_coefficient_response)
+    current_optimizer_path = str(repo/'SIAB/opt_orb_pytorch_dpsi')
+    if current_optimizer_path not in sys.path:
+        sys.path.insert(0, current_optimizer_path)
+    current_rpa = load_current_periodic_module(repo, 'periodic_galerkin_rpa')
+    current_radial = load_current_periodic_module(
+        repo, 'periodic_galerkin_radial_diagnostics')
     from run_c_jy_angular_ladder import candidate_evaluation_view, energy_summary
     from periodic_available_mother import available_mother_response
     compressed_spec = importlib.util.spec_from_file_location(
@@ -154,9 +173,12 @@ def run(contract_path, output):
         repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_compressed_evaluation.py')
     compressed_module = importlib.util.module_from_spec(compressed_spec)
     compressed_spec.loader.exec_module(compressed_module)
+    sys.modules['c_jy_compressed_evaluation'] = compressed_module
     evaluate_compressed_profiles = compressed_module.evaluate_compressed_profiles
     validate_profile_input_hashes = compressed_module.validate_profile_input_hashes
     validate_profile_specs = compressed_module.validate_profile_specs
+    gradient_module = load_current_periodic_module(repo, 'c_jy_full_q_gradient')
+    evaluate_q_energy_gradient = gradient_module.evaluate_q_energy_gradient
     if compressed:
         requested_profiles = tuple(
             tuple(row['profile']) for row in c.get('candidate_profiles', ()))
@@ -165,6 +187,10 @@ def run(contract_path, output):
                                profiles=requested_profiles)
         validate_profile_input_hashes(c['candidate_profiles'], c.get('inputs'),
                                       profiles=requested_profiles)
+        if (gradient_mode
+                and (requested_profiles != ((4, 4, 3, 2, 0),)
+                     or radial_rows != 48)):
+            raise ValueError('energy gradient requires one expanded 45-AO profile')
     spec = importlib.util.spec_from_file_location(
         '_c_jy_response_targets_contract', repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
     target_module = importlib.util.module_from_spec(spec)
@@ -323,6 +349,25 @@ def run(contract_path, output):
             stage = output/('lmax%d'%lmax)
             stage.mkdir()
             if compressed:
+                if gradient_mode:
+                    profile = evaluate_q_energy_gradient(
+                        view, c['candidate_profiles'][0],
+                        read_coefficients=read_periodic_optimizer_coefficients,
+                        evaluate_response=evaluate_periodic_galerkin_coefficient_response,
+                        evaluate_objective=current_rpa.periodic_rpa_objective,
+                        radial_gradient_report=current_radial.radial_gradient_report,
+                        prepare_block_cache=prepare_periodic_block_contraction_record,
+                        relative_rank_tolerance=c['relative_rank_tolerance'],
+                        occupied_capture_floor=c['occupied_capture_floor'],
+                        radial_rows=radial_rows)
+                    profile.update(lmax=lmax, label=item['label'],
+                        multiplicity=MULT[slot], source_commit=c['source_commit'],
+                        primitive_count=view.primitive_count, k_record_count=64)
+                    write(stage/'profile-045-gradient.json', profile)
+                    write(stage/'RESULT.json', profile)
+                    rows.append(profile)
+                    del view, profile
+                    continue
                 def checkpoint_profile(profile):
                     write(stage/('profile-%03d.json' % profile['ao_per_C']), dict(
                         status='success', q_slot=slot,
@@ -438,7 +483,9 @@ def run(contract_path, output):
             del view, pi, detail
         if compressed:
             final = dict(rows[0], q_slot=slot,
-                scope='compressed_shared_radial_full_q_body_RPA',
+                scope=('compressed_shared_radial_full_q_energy_gradient'
+                       if gradient_mode else
+                       'compressed_shared_radial_full_q_body_RPA'),
                 elapsed_seconds=time.perf_counter()-start,
                 max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         else:

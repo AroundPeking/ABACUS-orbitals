@@ -9,6 +9,8 @@ from pathlib import Path
 
 PROFILES = ((3, 3, 2, 1, 0), (4, 4, 3, 2, 0),
             (5, 5, 4, 3, 0), (6, 6, 5, 4, 0))
+EVALUATION_SCOPE = 'compressed_shared_radial_full_q_body_RPA'
+GRADIENT_SCOPE = 'compressed_shared_radial_full_q_energy_gradient'
 
 
 def sha(path):
@@ -123,7 +125,8 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
                       profiles=PROFILES, radial_rows=31,
                       primitive_expansion=None, expanded_gamma_run=None,
                       expanded_gamma_audit_result=None,
-                      expanded_q_audit_results=None):
+                      expanded_q_audit_results=None,
+                      scope=EVALUATION_SCOPE):
     if (not isinstance(source_commit, str) or len(source_commit) != 40
             or any(character not in '0123456789abcdef' for character in source_commit)):
         raise ValueError('full lowercase source commit required')
@@ -132,6 +135,11 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
     if output_root.exists():
         raise FileExistsError(output_root)
     profiles = normalize_profiles(profiles)
+    if scope not in (EVALUATION_SCOPE, GRADIENT_SCOPE):
+        raise ValueError('invalid compressed full-q scope')
+    if scope == GRADIENT_SCOPE and (profiles != ((4, 4, 3, 2, 0),)
+                                    or radial_rows != 48):
+        raise ValueError('energy gradients require one expanded 45-AO profile')
     if type(radial_rows) is not int or radial_rows <= 0:
         raise ValueError('radial_rows must be a positive integer')
     candidates = normalize_candidates(candidates, profiles=profiles)
@@ -149,7 +157,7 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
             raise ValueError('template q slot mismatch')
         contract = copy.deepcopy(template)
         contract.update(job_id='__RUNTIME_JOB_ID__', source_commit=source_commit,
-            scope='compressed_shared_radial_full_q_body_RPA', q_slot=slot,
+            scope=scope, q_slot=slot,
             lmax_values=[3], relative_rank_tolerance=1e-10,
             occupied_capture_floor=.99999,
             radial_rows=radial_rows,
@@ -186,7 +194,7 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
         write_new(path, contract)
         contract_hashes[str(path)] = sha(path)
     result = dict(status='success',
-        scope='compressed_shared_radial_full_q_body_RPA',
+        scope=scope,
         source_commit=source_commit, q_slots=list(range(8)),
         profiles=[list(row) for row in profiles],
         ao_per_C=[ao_per_element(row) for row in profiles],
@@ -230,6 +238,7 @@ def main(argv=None):
     parser.add_argument('--expanded-gamma-run', type=Path)
     parser.add_argument('--expanded-gamma-audit-result', type=Path)
     parser.add_argument('--expanded-q-audit', action='append', type=parse_slot_path)
+    parser.add_argument('--energy-gradient', action='store_true')
     args = parser.parse_args(argv)
     profiles = tuple(tuple(row['profile']) for row in args.candidate)
     expansion = None
@@ -245,7 +254,9 @@ def main(argv=None):
                       primitive_expansion=expansion,
                       expanded_gamma_run=args.expanded_gamma_run,
                       expanded_gamma_audit_result=args.expanded_gamma_audit_result,
-                      expanded_q_audit_results=q_audits)
+                      expanded_q_audit_results=q_audits,
+                      scope=(GRADIENT_SCOPE if args.energy_gradient
+                             else EVALUATION_SCOPE))
 
 
 if __name__ == '__main__':

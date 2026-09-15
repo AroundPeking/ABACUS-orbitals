@@ -71,6 +71,14 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
             self.assertIn('profile_callback=checkpoint_profile', runner)
             self.assertIn("['lmax_values'] == [3]", runner)
 
+    def test_q_runners_support_direct_expanded_coefficient_energy_gradients(self):
+        for name in ('run_c_jy_angular_ladder.py', 'run_c_jy_joined_ladder.py'):
+            runner = (SCRIPT.parent / name).read_text()
+            self.assertIn(
+                'compressed_shared_radial_full_q_energy_gradient', runner)
+            self.assertIn('evaluate_q_energy_gradient(', runner)
+            self.assertIn('profile-045-gradient.json', runner)
+
     def test_expanded_mother_runners_require_exact_old_space_anchors(self):
         gamma = (SCRIPT.parent / 'run_c_jy_angular_ladder.py').read_text()
         finite_q = (SCRIPT.parent / 'run_c_jy_joined_ladder.py').read_text()

@@ -135,6 +135,50 @@ class PrepareCjYCompressedRankLadderTest(unittest.TestCase):
                 for path, digest in contract['inputs'].items():
                     self.assertEqual(prepare.sha(path), digest)
 
+    def test_expanded_fixed_rank_can_request_direct_q_energy_gradients(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            templates, candidates = self.fixtures(root)
+            candidate = [candidates[1]]
+            for slot in range(1, 8):
+                old_audit = templates/('q%02d' % slot)/'old-audit.json'
+                old_audit.write_text('{"status":"success"}\n', encoding='ascii')
+                contract_path = templates/('q%02d' % slot)/'RUNTIME_CONTRACT.json'
+                contract = json.loads(contract_path.read_text(encoding='ascii'))
+                contract['audit_result'] = str(old_audit.resolve())
+                contract_path.write_text(json.dumps(contract), encoding='ascii')
+            gamma_run = self.accepted_run(root/'gamma-run')
+            gamma_audit = self.accepted_audit(
+                root/'gamma-audit', gamma_run, include_run=False)
+            q_audits = {}
+            for slot in range(1, 8):
+                run = self.accepted_run(root/('q%d-run' % slot))
+                q_audits[slot] = self.accepted_audit(
+                    root/('q%d-audit' % slot), run)
+            expansion = dict(source_radial_rows=31, expanded_radial_rows=48,
+                source_primitive_count=1550, expanded_primitive_count=2400,
+                expanded_spdf_primitive_count=1536,
+                source_prefix_indices_sha256='c'*64)
+
+            result = prepare.prepare_contracts(
+                templates, root/'gradient', candidate, source_commit='b'*40,
+                profiles=((4, 4, 3, 2, 0),), radial_rows=48,
+                primitive_expansion=expansion,
+                expanded_gamma_run=gamma_run,
+                expanded_gamma_audit_result=gamma_audit,
+                expanded_q_audit_results=q_audits,
+                scope='compressed_shared_radial_full_q_energy_gradient')
+
+            self.assertEqual(
+                result['scope'],
+                'compressed_shared_radial_full_q_energy_gradient')
+            for slot in range(8):
+                contract = json.loads((root/'gradient'/('q%02d' % slot)/
+                                       'CONTRACT.json').read_text())
+                self.assertEqual(
+                    contract['scope'],
+                    'compressed_shared_radial_full_q_energy_gradient')
+
     @staticmethod
     def accepted_run(path):
         path.mkdir()
