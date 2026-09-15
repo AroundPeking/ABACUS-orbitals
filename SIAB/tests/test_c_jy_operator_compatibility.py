@@ -90,6 +90,15 @@ class OperatorCompatibilityTest(unittest.TestCase):
         np.testing.assert_array_equal(
             MODULE.nested_column_prefix(columns, indices), columns[:, indices])
 
+    def test_expanded_overlap_gate_covers_measured_roundoff_but_not_drift(self):
+        measured = {'max_abs': 1.3164935808163136e-10,
+                    'relative': 1.6093233430541642e-13}
+        self.assertTrue(MODULE.expanded_overlap_compatible(measured))
+        self.assertFalse(MODULE.expanded_overlap_compatible(
+            dict(measured, max_abs=2.0000000001e-10)))
+        self.assertFalse(MODULE.expanded_overlap_compatible(
+            dict(measured, relative=1.0000000001e-11)))
+
 
 if __name__ == '__main__':
     unittest.main()

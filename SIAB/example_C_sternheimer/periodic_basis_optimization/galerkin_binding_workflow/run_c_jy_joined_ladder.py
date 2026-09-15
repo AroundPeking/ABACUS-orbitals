@@ -17,7 +17,11 @@ import numpy as np
 
 from audit_c_jy_operator_restart import OperatorFiles, sha
 from audit_c_jy_reference_reuse import validate_reader_tree, validate_reference_archive
-from c_jy_joined_operators import join_operator_record, validate_source_audit
+from c_jy_joined_operators import (join_nested_operator_record,
+                                   join_operator_record,
+                                   validate_source_audit)
+from audit_c_jy_finite_q_source import remap_nested_active_indices
+from audit_c_jy_operator_restart import validate_nested_primitive_blocks
 from c_portable_frozen_replay import (FREEZE_SHA, INDEX_SHA, INDICES, MULT,
     hashed, require, within, validate_cache_contract)
 from prepare_c_jy_operator_restart import REFERENCE_REUSE_SHA
@@ -185,7 +189,12 @@ def run(contract_path, output):
             and old.frequency_ha.numel() == 12, 'canonical old q data required')
         audit_path = Path(c['audit_result'])
         audit = json.loads(audit_path.read_text())
-        validate_source_audit(audit,old.selected_iq)
+        expansion = c.get('primitive_expansion')
+        full_primitive_count = (expansion.get('expanded_primitive_count')
+                                if expansion is not None else 1550)
+        validate_source_audit(
+            audit, old.selected_iq,
+            full_source_primitive_count=full_primitive_count)
         require(audit['cache_sha256'] == record['complete_sha256'], 'different audited cache')
         maps_path = audit_path.parent/'GAUGE_MAPS.npz'
         hashed(maps_path,audit['gauge_maps_sha256'])
@@ -204,30 +213,102 @@ def run(contract_path, output):
         source = OperatorFiles(source_run/('OUT.'+sc['suffix'])/'STERNHEIMER_BASIS_OPERATORS_V1',True)
         require(source.hashes['manifest.dat'] == audit['native_hashes']['manifest.dat'],
             'audited source manifest changed')
-        blocks = _read_primitive_blocks(str(gamma.directory),old.primitive_blocks_sha256,1550)
         indices = tuple(old.active_primitive_reduction.source_indices)
         require(indices == tuple(range(279))+tuple(range(775,1054)), 'unexpected spd embedding')
         joined, checks = [], []
-        with np.load(maps_path,allow_pickle=False) as maps:
-            for k in old.kpoints:
-                values, check = join_operator_record(dict(source_ik=k.source_ik,target_ik=k.target_ik,
-                    **{n:getattr(k,n).numpy() for n in
-                       ('overlap','hamiltonian_ha','occupied_projection','source')}),
-                    gamma.array,source.array,maps,indices,1550)
-                joined.append(replace(k,**{n:torch.from_numpy(v) for n,v in values.items()},
-                    reference_projection=torch.empty(0,dtype=torch.complex128),block_contraction_cache=None))
-                checks.append(dict(source_ik=k.source_ik,target_ik=k.target_ik,**check))
-                print(json.dumps(dict(stage='join',k=k.source_ik,seconds=time.perf_counter()-start)),flush=True)
+        join_hashes = dict(original=gamma.hashes, source=source.hashes)
+        expanded_mother_anchor_gate = 'not_applicable'
+        if expansion is None:
+            blocks = _read_primitive_blocks(
+                str(gamma.directory), old.primitive_blocks_sha256, 1550)
+            with np.load(maps_path,allow_pickle=False) as maps:
+                for k in old.kpoints:
+                    values, check = join_operator_record(dict(source_ik=k.source_ik,target_ik=k.target_ik,
+                        **{n:getattr(k,n).numpy() for n in
+                           ('overlap','hamiltonian_ha','occupied_projection','source')}),
+                        gamma.array,source.array,maps,indices,1550)
+                    joined.append(replace(k,**{n:torch.from_numpy(v) for n,v in values.items()},
+                        reference_projection=torch.empty(0,dtype=torch.complex128),block_contraction_cache=None))
+                    checks.append(dict(source_ik=k.source_ik,target_ik=k.target_ik,**check))
+                    print(json.dumps(dict(stage='join',k=k.source_ik,seconds=time.perf_counter()-start)),flush=True)
+        else:
+            expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                            source_primitive_count=1550,
+                            expanded_primitive_count=2400,
+                            expanded_spdf_primitive_count=1536)
+            require(all(expansion.get(key) == value for key, value in expected.items()),
+                    'unexpected expanded mother contract')
+            baseline_audit_path = Path(c['baseline_audit_result'])
+            baseline_audit = json.loads(baseline_audit_path.read_text())
+            validate_source_audit(baseline_audit, old.selected_iq)
+            require(baseline_audit['cache_sha256'] == record['complete_sha256'],
+                    'expanded and baseline audits use different cache')
+            baseline_maps_path = baseline_audit_path.parent/'GAUGE_MAPS.npz'
+            hashed(baseline_maps_path, baseline_audit['gauge_maps_sha256'])
+            baseline_run = Path(baseline_audit['run'])
+            baseline_contract = json.loads(hashed(
+                baseline_run/'CONTRACT.json', baseline_audit['contract_sha256']))
+            baseline_source = OperatorFiles(
+                baseline_run/('OUT.'+baseline_contract['suffix'])/
+                'STERNHEIMER_BASIS_OPERATORS_V1', True)
+            expanded_gamma_audit_path = Path(c['expanded_gamma_audit_result'])
+            expanded_gamma_audit = json.loads(expanded_gamma_audit_path.read_text())
+            require(expanded_gamma_audit.get('status') == 'success'
+                    and expanded_gamma_audit.get('expanded_mother_prefix_gate') == 'pass'
+                    and expanded_gamma_audit.get('failure_reasons') == []
+                    and expanded_gamma_audit.get('primitive_expansion') == expansion,
+                    'expanded Gamma prefix audit required')
+            expanded_gamma_run = Path(c['expanded_gamma_run'])
+            expanded_gamma_contract = json.loads(hashed(
+                expanded_gamma_run/'CONTRACT.json',
+                expanded_gamma_audit['hashes']['contract']))
+            expanded_gamma = OperatorFiles(
+                expanded_gamma_run/('OUT.'+expanded_gamma_contract['suffix'])/
+                'STERNHEIMER_BASIS_OPERATORS_V1', True)
+            prefix = validate_nested_primitive_blocks(
+                (gamma.directory/'primitive_blocks.dat').read_text(),
+                (expanded_gamma.directory/'primitive_blocks.dat').read_text(),
+                source_rows=31, target_rows=48, lmax=4, natom=2)
+            expanded_indices = remap_nested_active_indices(
+                indices, source_rows=31, target_rows=48,
+                source_primitive_count=1550, target_primitive_count=2400)
+            blocks = _read_primitive_blocks(
+                str(expanded_gamma.directory),
+                expanded_gamma.scalar['primitive_blocks_sha256'], 2400)
+            with np.load(baseline_maps_path,allow_pickle=False) as baseline_maps, \
+                    np.load(maps_path,allow_pickle=False) as expanded_maps:
+                for k in old.kpoints:
+                    cache = dict(source_ik=k.source_ik,target_ik=k.target_ik,
+                        **{n:getattr(k,n).numpy() for n in
+                           ('overlap','hamiltonian_ha','occupied_projection','source')})
+                    values, check = join_nested_operator_record(
+                        cache, gamma.array, baseline_source.array, baseline_maps,
+                        expanded_gamma.array, source.array, expanded_maps,
+                        baseline_indices=indices, expanded_indices=expanded_indices,
+                        prefix_indices=prefix, baseline_size=1550,
+                        expanded_size=2400)
+                    joined.append(replace(k,**{n:torch.from_numpy(v) for n,v in values.items()},
+                        reference_projection=torch.empty(0,dtype=torch.complex128),block_contraction_cache=None))
+                    checks.append(dict(source_ik=k.source_ik,target_ik=k.target_ik,**check))
+                    print(json.dumps(dict(stage='join_expanded',k=k.source_ik,
+                        seconds=time.perf_counter()-start)),flush=True)
+            join_hashes.update(baseline_source=baseline_source.hashes,
+                               expanded_gamma=expanded_gamma.hashes,
+                               baseline_audit_sha256=sha(baseline_audit_path),
+                               expanded_gamma_audit_sha256=sha(expanded_gamma_audit_path))
+            expanded_mother_anchor_gate='pass'
         require(all(reuse['reference_hashes'].get(n) == d for n,d in gamma.hashes.items()),
             'original operator payload differs from reuse audit')
         require(all(audit['native_hashes'].get(n) == d for n,d in source.hashes.items()),
             'source payload differs from audit')
-        full = replace(old,primitive_count=1550,primitive_blocks=blocks,
+        full = replace(old,primitive_count=full_primitive_count,primitive_blocks=blocks,
             active_primitive_reduction=None,kpoints=tuple(joined))
         del joined, old
         write(output/'JOIN.json',dict(status='success',per_k=checks,
             original_hashes=gamma.hashes,source_hashes=source.hashes,
-            gauge_maps_sha256=sha(maps_path),regenerated_hamiltonian_read=False))
+            joined_hashes=join_hashes,
+            gauge_maps_sha256=sha(maps_path),regenerated_hamiltonian_read=False,
+            expanded_mother_anchor_gate=expanded_mother_anchor_gate))
         baseline = None
         if not compressed:
             baseline = json.loads(Path(c['baseline_result']).read_text())
@@ -267,7 +348,8 @@ def run(contract_path, output):
                     relative_rank_tolerance=c['relative_rank_tolerance'],
                     primitive_count=view.primitive_count, k_record_count=64,
                     source_commit=c['source_commit'], per_profile=profiles,
-                    full_q_admitted=False, physical_release_gate='hold')
+                    full_q_admitted=False, physical_release_gate='hold',
+                    expanded_mother_anchor_gate=expanded_mother_anchor_gate)
                 write(stage/'RESULT.json', row)
                 rows.append(row)
                 del view, profiles

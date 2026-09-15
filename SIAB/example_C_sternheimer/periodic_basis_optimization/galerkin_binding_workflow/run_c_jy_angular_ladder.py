@@ -1,7 +1,7 @@
 """Frozen Gamma jY angular ladder; cached matrix algebra, never full-q admission."""
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import importlib.util
 import json
@@ -24,11 +24,15 @@ from periodic_galerkin_basis import (
     prepare_periodic_block_contraction_record,
     read_periodic_optimizer_coefficients,
 )
-from periodic_galerkin_data import read_periodic_galerkin_dataset
+from periodic_galerkin_data import (_read_primitive_blocks,
+                                    read_periodic_galerkin_dataset)
 from periodic_galerkin_optimization import evaluate_periodic_galerkin_coefficient_response
 from periodic_galerkin_reduction import reduce_periodic_active_primitives
 from periodic_galerkin_sternheimer import prepare_periodic_occupied_reference
 from periodic_galerkin_rpa import periodic_rpa_objective
+from audit_c_jy_operator_restart import (OperatorFiles,
+                                         validate_nested_primitive_blocks)
+from c_jy_joined_operators import map_and_anchor_expanded_gamma_record
 
 _target_spec = importlib.util.spec_from_file_location(
     '_c_jy_response_targets_contract', REPO/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
@@ -93,6 +97,77 @@ def energy_summary(dataset, response):
         full_q_admitted=False, physical_release_gate='hold')
 
 
+def expanded_gamma_dataset(dataset, contract):
+    expansion = contract.get('primitive_expansion')
+    if expansion is None:
+        return dataset, None
+    expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+                    source_primitive_count=1550,
+                    expanded_primitive_count=2400,
+                    expanded_spdf_primitive_count=1536)
+    if any(expansion.get(key) != value for key, value in expected.items()):
+        raise ValueError('unexpected expanded mother contract')
+    audit_path = Path(contract['expanded_gamma_audit_result'])
+    audit = json.loads(audit_path.read_text())
+    if (audit.get('status') != 'success'
+            or audit.get('gamma_operator_compatibility_gate') != 'pass'
+            or audit.get('expanded_mother_prefix_gate') != 'pass'
+            or audit.get('failure_reasons') != []
+            or audit.get('primitive_expansion') != expansion
+            or audit.get('prefix_index_count') != 1550
+            or audit.get('anchored_old_subblock_required') is not True):
+        raise ValueError('expanded Gamma prefix audit required')
+    maps_path = audit_path.parent/'GAUGE_MAPS.npz'
+    if sha(maps_path) != audit.get('gauge_maps_sha256'):
+        raise ValueError('expanded Gamma gauge maps changed')
+    run = Path(contract['expanded_gamma_run'])
+    native_contract = json.loads((run/'CONTRACT.json').read_text())
+    if (sha(run/'CONTRACT.json') != audit['hashes']['contract']
+            or native_contract.get('primitive_expansion') != expansion):
+        raise ValueError('expanded Gamma run contract changed')
+    native = OperatorFiles(
+        run/('OUT.'+native_contract['suffix'])/'STERNHEIMER_BASIS_OPERATORS_V1',
+        True)
+    if any(audit['hashes']['operators'].get(name) != digest
+           for name, digest in native.hashes.items()):
+        raise ValueError('expanded Gamma operator payload changed')
+    old_directory = Path(contract['raw_directory'])
+    prefix = validate_nested_primitive_blocks(
+        (old_directory/'primitive_blocks.dat').read_text(),
+        (native.directory/'primitive_blocks.dat').read_text(),
+        source_rows=31, target_rows=48, lmax=4, natom=2)
+    blocks = _read_primitive_blocks(
+        str(native.directory), native.scalar['primitive_blocks_sha256'], 2400)
+    joined, checks = [], []
+    with np.load(maps_path, allow_pickle=False) as maps:
+        auxiliary = maps['auxiliary_map']
+        for record in dataset.kpoints:
+            ik = record.source_ik
+            values, check = map_and_anchor_expanded_gamma_record(
+                dict(overlap=native.array(1, ik),
+                     hamiltonian_ha=.5*native.array(6, ik),
+                     occupied_projection=native.array(7, ik),
+                     source=native.array(2, ik).reshape(
+                         record.source.shape[0], auxiliary.shape[0], 2400)),
+                {name: getattr(record, name).numpy() for name in
+                 ('overlap', 'hamiltonian_ha', 'occupied_projection', 'source')},
+                occupied_map=maps['occupied_at_k%d' % ik],
+                auxiliary_map=auxiliary, prefix_indices=prefix)
+            joined.append(replace(
+                record, **{name: torch.from_numpy(value)
+                           for name, value in values.items()},
+                block_contraction_cache=None))
+            checks.append(dict(ik=ik, **check))
+    result = replace(dataset, primitive_count=2400,
+                     primitive_blocks_sha256=native.scalar['primitive_blocks_sha256'],
+                     primitive_blocks=blocks, kpoints=tuple(joined),
+                     active_primitive_reduction=None)
+    return result, dict(expanded_mother_anchor_gate='pass', per_k=checks,
+                        gamma_audit_sha256=sha(audit_path),
+                        gauge_maps_sha256=sha(maps_path),
+                        operator_hashes=native.hashes)
+
+
 def run(contract_path, output):
     contract = json.loads(contract_path.read_text())
     compressed = (contract.get('scope') ==
@@ -107,9 +182,14 @@ def run(contract_path, output):
             compressed_contract or ladder_contract):
         raise ValueError('frozen cutoff and nested angular ladder required')
     if compressed:
-        validate_profile_specs(contract.get('candidate_profiles'))
+        requested_profiles = tuple(
+            tuple(row['profile']) for row in contract.get('candidate_profiles', ()))
+        radial_rows = contract.get('radial_rows', 31)
+        validate_profile_specs(contract.get('candidate_profiles'),
+                               profiles=requested_profiles)
         validate_profile_input_hashes(contract['candidate_profiles'],
-                                      contract.get('inputs'))
+                                      contract.get('inputs'),
+                                      profiles=requested_profiles)
     for name, expected in contract['inputs'].items():
         if sha(name) != expected:
             raise ValueError('input hash mismatch: '+name)
@@ -133,6 +213,7 @@ def run(contract_path, output):
                 or dataset.primitive_count != 1550 or len(dataset.kpoints) != 64
                 or dataset.frequency_ha.numel() != 12):
             raise ValueError('complete frozen Gamma contract mismatch')
+        dataset, expansion_checks = expanded_gamma_dataset(dataset, contract)
         dataset = prepare_periodic_occupied_reference(dataset)
         load_seconds = time.perf_counter()-start
         print(json.dumps(dict(stage='loaded', seconds=load_seconds)), flush=True)
@@ -158,7 +239,8 @@ def run(contract_path, output):
                     relative_rank_tolerance=contract['relative_rank_tolerance'],
                     occupied_capture_floor=contract['occupied_capture_floor'],
                     prepare_block_cache=prepare_periodic_block_contraction_record,
-                    profile_callback=checkpoint_profile)
+                    profile_callback=checkpoint_profile,
+                    profiles=requested_profiles, radial_rows=radial_rows)
                 row = dict(status='success', q_slot=0, label=1, selected_iq=1,
                     multiplicity=1, q_weight=dataset.q_weight, lmax=lmax,
                     frequencies=dataset.frequency_ha.tolist(),
@@ -166,7 +248,9 @@ def run(contract_path, output):
                     relative_rank_tolerance=contract['relative_rank_tolerance'],
                     primitive_count=view.primitive_count, k_record_count=64,
                     source_commit=contract['source_commit'], per_profile=profiles,
-                    full_q_admitted=False, physical_release_gate='hold')
+                    full_q_admitted=False, physical_release_gate='hold',
+                    expanded_mother_anchor_gate=(
+                        'pass' if expansion_checks is not None else 'not_applicable'))
                 write(stage/'RESULT.json', row)
                 rows.append(row)
                 del view, profiles
@@ -249,7 +333,8 @@ def run(contract_path, output):
         if compressed:
             final = dict(rows[0], scope='compressed_shared_radial_full_q_body_RPA',
                 elapsed_seconds=time.perf_counter()-start, load_seconds=load_seconds,
-                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                max_rss_kb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                expansion_checks=expansion_checks)
         else:
             final = dict(status='success', scope='Gamma_only_angular_diagnostic',
                 full_q_admitted=False, physical_release_gate='hold', per_lmax=rows,

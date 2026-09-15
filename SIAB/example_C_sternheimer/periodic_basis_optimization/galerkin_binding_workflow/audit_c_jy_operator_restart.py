@@ -89,6 +89,12 @@ def nested_column_prefix(array, indices):
     return array[..., indices]
 
 
+def expanded_overlap_compatible(diagnostics):
+    """Bound observed quadrature roundoff by both absolute and relative error."""
+    return (diagnostics['max_abs'] <= 2e-10
+            and diagnostics['relative'] <= 1e-11)
+
+
 def metric_signs(old, new):
     if old.shape != new.shape or old.ndim != 2 or old.shape[0] != old.shape[1]:
         raise ValueError('square matched Coulomb metrics required')
@@ -260,7 +266,9 @@ def audit(run, output):
             source_new = nested_column_prefix(source_new, prefix)
         d = difference(source_new, transform_source(source_old, a, t))
         h_tolerance = 5e-6 if prefix is not None else 1e-6
-        passed = (s['max_abs'] <= 1e-10 and h['max_abs'] <= h_tolerance
+        overlap_pass = (expanded_overlap_compatible(s) if prefix is not None
+                        else s['max_abs'] <= 1e-10)
+        passed = (overlap_pass and h['max_abs'] <= h_tolerance
             and energies['max_abs'] <= 1e-6 and commutator <= 1e-6
             and occupied['relative'] <= 1e-6 and occupied['unitarity'] <= 1e-6
             and d['relative'] <= 1e-6)

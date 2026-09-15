@@ -71,6 +71,14 @@ class CjyResponseTargetSlurmTest(unittest.TestCase):
             self.assertIn('profile_callback=checkpoint_profile', runner)
             self.assertIn("['lmax_values'] == [3]", runner)
 
+    def test_expanded_mother_runners_require_exact_old_space_anchors(self):
+        gamma = (SCRIPT.parent / 'run_c_jy_angular_ladder.py').read_text()
+        finite_q = (SCRIPT.parent / 'run_c_jy_joined_ladder.py').read_text()
+        self.assertIn('map_and_anchor_expanded_gamma_record(', gamma)
+        self.assertIn('join_nested_operator_record(', finite_q)
+        self.assertIn("expanded_mother_anchor_gate='pass'", gamma)
+        self.assertIn("expanded_mother_anchor_gate='pass'", finite_q)
+
     def test_finite_q_callback_accepts_current_five_argument_contract(self):
         import sys
 
