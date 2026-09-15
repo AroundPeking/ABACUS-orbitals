@@ -12,11 +12,20 @@ def _ao_per_element(profile):
     return sum((2*l+1)*count for l, count in enumerate(profile))
 
 
-def validate_profile_specs(specs):
-    if not isinstance(specs, list) or len(specs) != len(PROFILES):
-        raise ValueError('complete fixed compressed rank ladder required')
+def validate_profile_specs(specs, *, profiles=PROFILES):
+    try:
+        profiles = tuple(tuple(profile) for profile in profiles)
+    except TypeError as error:
+        raise ValueError('compressed profiles must be a sequence') from error
+    if (not profiles or len(set(profiles)) != len(profiles)
+            or any(len(profile) != 5 or any(type(count) is not int or count < 0
+                                           for count in profile)
+                   for profile in profiles)):
+        raise ValueError('compressed profiles are invalid')
+    if not isinstance(specs, list) or len(specs) != len(profiles):
+        raise ValueError('complete requested compressed profile set required')
     result = []
-    for row, expected in zip(specs, PROFILES):
+    for row, expected in zip(specs, profiles):
         if not isinstance(row, dict) or tuple(row.get('profile', ())) != expected:
             raise ValueError('compressed profile order or rank mismatch')
         path = row.get('coefficients_path')
@@ -34,8 +43,8 @@ def validate_profile_specs(specs):
     return result
 
 
-def validate_profile_input_hashes(specs, inputs):
-    specs = validate_profile_specs(specs)
+def validate_profile_input_hashes(specs, inputs, *, profiles=PROFILES):
+    specs = validate_profile_specs(specs, profiles=profiles)
     if not isinstance(inputs, dict):
         raise ValueError('input hash map is required')
     for row in specs:
@@ -48,7 +57,7 @@ def evaluate_compressed_profiles(
         dataset, specs, *, read_coefficients, evaluate_response,
         summarize_energy, relative_rank_tolerance=1e-10,
         occupied_capture_floor=.999999, prepare_block_cache=None,
-        profile_callback=None):
+        profile_callback=None, profiles=PROFILES, radial_rows=31):
     """Evaluate each compact rank in the same q dataset and RPA functional."""
     if (not math.isfinite(relative_rank_tolerance)
             or relative_rank_tolerance <= 0
@@ -57,7 +66,9 @@ def evaluate_compressed_profiles(
         raise ValueError('invalid compressed evaluation controls')
     if profile_callback is not None and not callable(profile_callback):
         raise ValueError('profile callback must be callable')
-    specs = validate_profile_specs(specs)
+    if type(radial_rows) is not int or radial_rows <= 0:
+        raise ValueError('positive radial row count required')
+    specs = validate_profile_specs(specs, profiles=profiles)
     frequency_count = int(dataset.frequency_ha.numel())
     if frequency_count != 12:
         raise ValueError('fixed 12-frequency evaluation required')
@@ -66,7 +77,7 @@ def evaluate_compressed_profiles(
     for spec in specs:
         profile = tuple(spec['profile'])
         loaded.append((spec, read_coefficients(
-            spec['coefficients_path'], element='C', radial_rows=31,
+            spec['coefficients_path'], element='C', radial_rows=radial_rows,
             expected_nu=profile)))
     if prepare_block_cache is not None:
         dataset = replace(dataset, kpoints=tuple(

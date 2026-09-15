@@ -154,8 +154,13 @@ def run(contract_path, output):
     validate_profile_input_hashes = compressed_module.validate_profile_input_hashes
     validate_profile_specs = compressed_module.validate_profile_specs
     if compressed:
-        validate_profile_specs(c.get('candidate_profiles'))
-        validate_profile_input_hashes(c['candidate_profiles'], c.get('inputs'))
+        requested_profiles = tuple(
+            tuple(row['profile']) for row in c.get('candidate_profiles', ()))
+        radial_rows = c.get('radial_rows', 31)
+        validate_profile_specs(c.get('candidate_profiles'),
+                               profiles=requested_profiles)
+        validate_profile_input_hashes(c['candidate_profiles'], c.get('inputs'),
+                                      profiles=requested_profiles)
     spec = importlib.util.spec_from_file_location(
         '_c_jy_response_targets_contract', repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
     target_module = importlib.util.module_from_spec(spec)
@@ -252,7 +257,8 @@ def run(contract_path, output):
                     relative_rank_tolerance=c['relative_rank_tolerance'],
                     occupied_capture_floor=c['occupied_capture_floor'],
                     prepare_block_cache=prepare_periodic_block_contraction_record,
-                    profile_callback=checkpoint_profile)
+                    profile_callback=checkpoint_profile,
+                    profiles=requested_profiles, radial_rows=radial_rows)
                 row = dict(status='success', lmax=lmax,
                     selected_iq=full.selected_iq, label=item['label'],
                     multiplicity=MULT[slot], q_weight=full.q_weight,

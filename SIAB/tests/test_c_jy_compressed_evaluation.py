@@ -129,6 +129,30 @@ class CompressedEvaluationTest(unittest.TestCase):
         self.assertEqual(len(rows), 4)
         self.assertEqual(prepared, ['k1', 'k2'])
 
+    def test_one_fixed_rank_can_use_an_expanded_radial_mother(self):
+        profile = ((4, 4, 3, 2, 0),)
+        specs = [self.specs()[1]]
+        dataset = types.SimpleNamespace(frequency_ha=torch.arange(12))
+        reads = []
+
+        def read(path, *, element, radial_rows, expected_nu):
+            reads.append((element, radial_rows, expected_nu))
+            return dict(path=path)
+
+        response = types.SimpleNamespace(
+            response=torch.ones((1, 1, 1)),
+            minimum_occupied_capture=.9999999,
+            maximum_overlap_condition=4., minimum_candidate_rank=90)
+        rows = evaluation.evaluate_compressed_profiles(
+            dataset, specs, profiles=profile, radial_rows=48,
+            read_coefficients=read,
+            evaluate_response=lambda *args, **kwargs: response,
+            summarize_energy=lambda *args: dict(
+                candidate_energy_ha=-.46, reference_energy_ha=-.51,
+                q_weight=.125))
+        self.assertEqual(reads, [('C', 48, profile[0])])
+        self.assertEqual([row['ao_per_C'] for row in rows], [45])
+
 
 if __name__ == '__main__':
     unittest.main()
