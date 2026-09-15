@@ -88,6 +88,24 @@ def accepted_artifact_files(audit_result, *, expected_run=None):
     return run, tuple(path.resolve() for path in paths)
 
 
+def validate_baseline_audit(audit_result):
+    audit_result = Path(audit_result).resolve()
+    audit = json.loads(audit_result.read_text(encoding='ascii'))
+    rows = audit.get('per_k', [])
+    if not (audit.get('status') == 'success'
+            and audit.get('finite_q_spd_source_compatibility') == 'pass'
+            and audit.get('failure_reasons') == []
+            and audit.get('regenerated_hamiltonian_read') is False
+            and audit.get('regenerated_hamiltonian_admitted') is False
+            and audit.get('full_source_primitive_count') == 1550
+            and audit.get('compared_primitive_count') == 558
+            and len(rows) == 64 and all(row.get('pass_gate') for row in rows)
+            and sorted(row.get('source_ik') for row in rows) == list(range(1, 65))
+            and sorted(row.get('target_ik') for row in rows) == list(range(1, 65))):
+        raise ValueError('complete 1550-row finite-q baseline audit required')
+    return audit_result
+
+
 def normalize_expansion(radial_rows, primitive_expansion,
                         expanded_gamma_run, expanded_gamma_audit_result,
                         expanded_q_audit_results):
@@ -175,7 +193,7 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
             if slot:
                 if 'audit_result' not in template:
                     raise ValueError('finite-q baseline audit is missing')
-                baseline = Path(template['audit_result']).resolve()
+                baseline = validate_baseline_audit(template['audit_result'])
                 if not baseline.is_file():
                     raise ValueError('finite-q baseline audit file is missing')
                 contract['baseline_audit_result'] = str(baseline)
