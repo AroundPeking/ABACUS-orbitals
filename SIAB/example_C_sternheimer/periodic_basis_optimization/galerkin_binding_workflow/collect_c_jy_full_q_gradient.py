@@ -147,7 +147,9 @@ def run(contract_path, output):
     try:
         reduced = reduce_full_q_energy_gradients(
             artifacts, coefficients, coefficient_sha256=coefficient_sha256,
-            source_radial_rows=31, radial_rows=radial_rows)
+            source_radial_rows=31, radial_rows=radial_rows,
+            radial_row_boundaries=contract.get(
+                "gradient_row_boundaries", [31]))
         baseline = validate_baseline_reproduction(
             reduced,
             expected_candidate_energy_ha=contract[

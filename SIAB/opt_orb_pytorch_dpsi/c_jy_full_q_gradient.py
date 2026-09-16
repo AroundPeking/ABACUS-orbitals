@@ -151,9 +151,39 @@ def _artifact_raw_gradient(artifact, coefficients):
     return raw
 
 
+def row_range_gradient_squared_fractions(
+        report, *, radial_rows, boundaries):
+    """Partition a horizontal-gradient norm into one-based row ranges."""
+    if (type(radial_rows) is not int or radial_rows <= 0
+            or not isinstance(boundaries, (list, tuple))):
+        raise ValueError("radial row ranges require valid dimensions")
+    boundaries = tuple(boundaries)
+    if (any(type(value) is not int for value in boundaries)
+            or tuple(sorted(set(boundaries))) != boundaries
+            or any(value <= 0 or value >= radial_rows for value in boundaries)):
+        raise ValueError("radial row boundaries must be unique and increasing")
+    squared = [0.] * (len(boundaries) + 1)
+    stops = boundaries + (radial_rows,)
+    starts = (0,) + boundaries
+    for row in report.get("channels", ()):
+        value = torch.tensor(row.get("horizontal_gradient"),
+                             dtype=torch.float64)
+        if value.ndim < 1 or value.shape[0] != radial_rows:
+            raise ValueError("gradient radial row count mismatch")
+        for index, (start, stop) in enumerate(zip(starts, stops)):
+            squared[index] += float((value[start:stop]**2).sum())
+    total = sum(squared)
+    if not math.isfinite(total) or total <= 1e-28:
+        raise ValueError("horizontal gradient norm is unresolved")
+    return [dict(start_row=start + 1, stop_row=stop,
+                 squared_norm=value, squared_fraction=value/total)
+            for start, stop, value in zip(starts, stops, squared)]
+
+
 def reduce_full_q_energy_gradients(
         artifacts, coefficients, *, coefficient_sha256,
-        source_radial_rows=31, radial_rows=48):
+        source_radial_rows=31, radial_rows=48,
+        radial_row_boundaries=None):
     """Sum eight star-weighted Ec derivatives in one coefficient frame."""
     coefficient_sha256 = _coefficient_sha256(coefficient_sha256)
     if (not isinstance(artifacts, (list, tuple)) or len(artifacts) != 8
@@ -213,6 +243,11 @@ def reduce_full_q_energy_gradients(
                           candidate_energy_ha=candidate[-1],
                           reference_energy_ha=reference[-1]))
     report = radial_gradient_report(coefficients, total_raw)
+    if radial_row_boundaries is None:
+        radial_row_boundaries = (source_radial_rows,)
+    row_ranges = row_range_gradient_squared_fractions(
+        report, radial_rows=radial_rows,
+        boundaries=radial_row_boundaries)
     total_squared = report["horizontal_gradient_norm"]**2
     if not math.isfinite(total_squared) or total_squared <= 1e-28:
         raise ValueError("full-q horizontal Ec gradient is unresolved")
@@ -246,6 +281,7 @@ def reduce_full_q_energy_gradients(
         minimum_candidate_rank=minimum_rank,
         energy_gradient=report,
         new_row_horizontal_gradient_squared_fraction=new_squared/total_squared,
+        radial_row_gradient_squared_fractions=row_ranges,
         per_channel_new_row_gradient=per_channel,
         physical_release_gate="hold")
 

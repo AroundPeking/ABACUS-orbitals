@@ -25,6 +25,23 @@ def coefficients(radial_rows=48):
 
 
 class FullQGradientTest(unittest.TestCase):
+    def test_row_range_gradient_fractions_separate_legacy_and_new_blocks(self):
+        report = {"channels": [
+            {"horizontal_gradient": [1.] * 31 + [2.] * 17 + [3.] * 52},
+            {"horizontal_gradient": [0.] * 100},
+        ]}
+
+        result = gradient.row_range_gradient_squared_fractions(
+            report, radial_rows=100, boundaries=(31, 48))
+
+        total = 31 * 1.**2 + 17 * 2.**2 + 52 * 3.**2
+        self.assertEqual(
+            [(row["start_row"], row["stop_row"]) for row in result],
+            [(1, 31), (32, 48), (49, 100)])
+        self.assertAlmostEqual(result[0]["squared_fraction"], 31 / total)
+        self.assertAlmostEqual(result[1]["squared_fraction"], 68 / total)
+        self.assertAlmostEqual(result[2]["squared_fraction"], 468 / total)
+
     def test_one_q_uses_the_actual_weighted_energy_gradient(self):
         @dataclass(frozen=True)
         class Dataset:
