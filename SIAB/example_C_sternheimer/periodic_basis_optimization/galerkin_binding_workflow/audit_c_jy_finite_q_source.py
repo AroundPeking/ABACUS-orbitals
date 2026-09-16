@@ -52,9 +52,10 @@ def restore_and_compare_source(old, new, source_gauge, auxiliary_map):
     return restored, result
 
 
-def finite_q_overlap_compatible(diagnostics, expanded_mother):
+def finite_q_overlap_compatible(diagnostics, expanded_mother,
+                                reference_max_abs=0.0):
     if expanded_mother:
-        return expanded_overlap_compatible(diagnostics)
+        return expanded_overlap_compatible(diagnostics, reference_max_abs)
     return diagnostics['max_abs'] <= 1e-10
 
 
@@ -200,17 +201,22 @@ def audit(run, bundle, reader_source, output, source_commit):
                 and np.array_equal(meta[6:9], k.reciprocal_shift)
                 and meta[9] == k.k_weight == .03125 and meta[10] == 4
                 and np.array_equal(meta[11:], k.occupation.numpy()), 'k/occupation metadata mismatch')
-        overlap = difference(k.overlap.numpy(), new.array(1, source)[np.ix_(indices, indices)])
+        reference_overlap = k.overlap.numpy()
+        overlap = difference(reference_overlap,
+                             new.array(1, source)[np.ix_(indices, indices)])
+        reference_overlap_max_abs = float(np.max(np.abs(reference_overlap)))
         a, occupied = occupied_gauge(k.occupied_projection.numpy(), new.array(7, source)[:, indices])
         gauges[target] = a
         energy = difference(energies[source], .5*new.eigenvalues[source])
         commutator = float(np.max(np.abs(.5*new.eigenvalues[target][:, None]*a
                                         -a*energies[target][None, :])))
-        passed = (finite_q_overlap_compatible(overlap, expansion is not None)
+        passed = (finite_q_overlap_compatible(
+                      overlap, expansion is not None, reference_overlap_max_abs)
                   and occupied['relative'] <= 1e-6
                   and occupied['unitarity'] <= 1e-6 and energy['max_abs'] <= 5e-7
                   and commutator <= 5e-7)
-        rows.append(dict(source_ik=source, target_ik=target, overlap=overlap, occupied=occupied,
+        rows.append(dict(source_ik=source, target_ik=target, overlap=overlap,
+            reference_overlap_max_abs=reference_overlap_max_abs, occupied=occupied,
             source_eigenvalue_ha=energy, occupied_energy_commutator_ha=commutator, pass_gate=passed))
     with (output/'PROGRESS.jsonl').open('x') as progress:
         for k, row in zip(dataset.kpoints, rows):

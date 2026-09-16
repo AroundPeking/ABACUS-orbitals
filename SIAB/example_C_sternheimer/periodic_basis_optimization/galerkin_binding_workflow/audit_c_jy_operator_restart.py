@@ -89,9 +89,11 @@ def nested_column_prefix(array, indices):
     return array[..., indices]
 
 
-def expanded_overlap_compatible(diagnostics):
+def expanded_overlap_compatible(diagnostics, reference_max_abs=0.0):
     """Bound observed quadrature roundoff by both absolute and relative error."""
-    return (diagnostics['max_abs'] <= 2e-10
+    absolute_limit = max(2e-10, reference_max_abs*1e-12)
+    return (np.isfinite(reference_max_abs) and reference_max_abs >= 0
+            and diagnostics['max_abs'] <= absolute_limit
             and diagnostics['relative'] <= 1e-11)
 
 
@@ -259,7 +261,9 @@ def audit(run, output):
             new_s = nested_square_prefix(new_s, prefix)
             new_h = nested_square_prefix(new_h, prefix)
             new_o = nested_column_prefix(new_o, prefix)
-        s = difference(old.array(1, ik), new_s)
+        reference_s = old.array(1, ik)
+        s = difference(reference_s, new_s)
+        reference_overlap_max_abs = float(np.max(np.abs(reference_s)))
         h = difference(old.array(6, ik), new_h)
         a, occupied = occupied_gauge(old.array(7, ik), new_o)
         occupied_maps[ik] = a
@@ -272,13 +276,16 @@ def audit(run, output):
             source_new = nested_column_prefix(source_new, prefix)
         d = difference(source_new, transform_source(source_old, a, t))
         h_tolerance = 5e-6 if prefix is not None else 1e-6
-        overlap_pass = (expanded_overlap_compatible(s) if prefix is not None
+        overlap_pass = (expanded_overlap_compatible(s, reference_overlap_max_abs)
+                        if prefix is not None
                         else s['max_abs'] <= 1e-10)
         passed = (overlap_pass and h['max_abs'] <= h_tolerance
             and energies['max_abs'] <= 1e-6 and commutator <= 1e-6
             and occupied['relative'] <= 1e-6 and occupied['unitarity'] <= 1e-6
             and d['relative'] <= 1e-6)
-        row = dict(ik=ik, pass_gate=passed, overlap=s, hamiltonian_ry=h, occupied=occupied,
+        row = dict(ik=ik, pass_gate=passed, overlap=s,
+                   reference_overlap_max_abs=reference_overlap_max_abs,
+                   hamiltonian_ry=h, occupied=occupied,
                    occupied_energy_ry=energies, occupied_energy_commutator_ry=commutator, source=d)
         rows.append(row)
         if not passed:

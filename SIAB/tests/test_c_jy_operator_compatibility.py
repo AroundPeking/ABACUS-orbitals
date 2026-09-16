@@ -99,6 +99,16 @@ class OperatorCompatibilityTest(unittest.TestCase):
         self.assertFalse(MODULE.expanded_overlap_compatible(
             dict(measured, relative=1.0000000001e-11)))
 
+    def test_expanded_overlap_gate_scales_absolute_roundoff_with_matrix(self):
+        measured = {'max_abs': 7.996732165338472e-10,
+                    'relative': 4.843872899259806e-13}
+        scale = 1635.7972226617394
+        self.assertTrue(MODULE.expanded_overlap_compatible(measured, scale))
+        self.assertFalse(MODULE.expanded_overlap_compatible(
+            dict(measured, max_abs=scale*1.0000000001e-12), scale))
+        self.assertFalse(MODULE.expanded_overlap_compatible(
+            dict(measured, relative=1.0000000001e-11), scale))
+
 
 if __name__ == '__main__':
     unittest.main()

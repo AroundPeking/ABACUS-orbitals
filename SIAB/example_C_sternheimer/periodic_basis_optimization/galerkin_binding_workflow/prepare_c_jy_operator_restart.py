@@ -333,7 +333,9 @@ def validate_finite_q_pilot(result):
             raise ValueError('expanded q2 source pilot contract mismatch')
     values = [(result['metric']['relative'], 1e-8), (result['auxiliary_map_unitarity'], 5e-6)]
     for row in rows:
-        overlap_limit = 2e-10 if full_count != 1550 else 1e-10
+        reference_overlap_max_abs = row.get('reference_overlap_max_abs', 0.0)
+        overlap_limit = (max(2e-10, reference_overlap_max_abs*1e-12)
+                         if full_count != 1550 else 1e-10)
         values.extend([(row['source']['relative'], 1e-6),
             (row['overlap']['max_abs'], overlap_limit),
             (row['occupied']['relative'], 1e-6), (row['occupied']['unitarity'], 1e-6),

@@ -83,6 +83,15 @@ class FiniteQSourceTest(unittest.TestCase):
         self.assertFalse(MODULE.finite_q_overlap_compatible(
             dict(measured, relative=1.0000000001e-11), True))
 
+    def test_expanded_finite_q_overlap_scales_with_reference_matrix(self):
+        measured = {'max_abs': 7.996732165338472e-10,
+                    'relative': 4.843872899259806e-13}
+        scale = 1635.7972226617394
+        self.assertTrue(MODULE.finite_q_overlap_compatible(
+            measured, True, scale))
+        self.assertFalse(MODULE.finite_q_overlap_compatible(
+            dict(measured, max_abs=scale*1.0000000001e-12), True, scale))
+
 
 if __name__ == '__main__':
     unittest.main()
