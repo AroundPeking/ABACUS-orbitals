@@ -189,7 +189,7 @@ def run(contract_path, output):
                                       profiles=requested_profiles)
         if (gradient_mode
                 and (requested_profiles != ((4, 4, 3, 2, 0),)
-                     or radial_rows != 48)):
+                     or radial_rows <= 31)):
             raise ValueError('energy gradient requires one expanded 45-AO profile')
     spec = importlib.util.spec_from_file_location(
         '_c_jy_response_targets_contract', repo/'SIAB/opt_orb_pytorch_dpsi/c_jy_response_targets.py')
@@ -258,10 +258,16 @@ def run(contract_path, output):
                     checks.append(dict(source_ik=k.source_ik,target_ik=k.target_ik,**check))
                     print(json.dumps(dict(stage='join',k=k.source_ik,seconds=time.perf_counter()-start)),flush=True)
         else:
-            expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+            target_rows = expansion.get('expanded_radial_rows')
+            expanded_count = expansion.get('expanded_primitive_count')
+            require(type(target_rows) is int and target_rows > 31
+                    and expanded_count == target_rows * 25 * 2,
+                    'unexpected expanded mother dimensions')
+            expected = dict(source_radial_rows=31,
+                            expanded_radial_rows=target_rows,
                             source_primitive_count=1550,
-                            expanded_primitive_count=2400,
-                            expanded_spdf_primitive_count=1536)
+                            expanded_primitive_count=expanded_count,
+                            expanded_spdf_primitive_count=target_rows * 16 * 2)
             require(all(expansion.get(key) == value for key, value in expected.items()),
                     'unexpected expanded mother contract')
             baseline_audit_path = Path(c['baseline_audit_result'])
@@ -294,13 +300,13 @@ def run(contract_path, output):
             prefix = validate_nested_primitive_blocks(
                 (gamma.directory/'primitive_blocks.dat').read_text(),
                 (expanded_gamma.directory/'primitive_blocks.dat').read_text(),
-                source_rows=31, target_rows=48, lmax=4, natom=2)
+                source_rows=31, target_rows=target_rows, lmax=4, natom=2)
             expanded_indices = remap_nested_active_indices(
-                indices, source_rows=31, target_rows=48,
-                source_primitive_count=1550, target_primitive_count=2400)
+                indices, source_rows=31, target_rows=target_rows,
+                source_primitive_count=1550, target_primitive_count=expanded_count)
             blocks = _read_primitive_blocks(
                 str(expanded_gamma.directory),
-                expanded_gamma.scalar['primitive_blocks_sha256'], 2400)
+                expanded_gamma.scalar['primitive_blocks_sha256'], expanded_count)
             with np.load(baseline_maps_path,allow_pickle=False) as baseline_maps, \
                     np.load(maps_path,allow_pickle=False) as expanded_maps:
                 for k in old.kpoints:
@@ -312,7 +318,7 @@ def run(contract_path, output):
                         expanded_gamma.array, source.array, expanded_maps,
                         baseline_indices=indices, expanded_indices=expanded_indices,
                         prefix_indices=prefix, baseline_size=1550,
-                        expanded_size=2400)
+                        expanded_size=expanded_count)
                     joined.append(replace(k,**{n:torch.from_numpy(v) for n,v in values.items()},
                         reference_projection=torch.empty(0,dtype=torch.complex128),block_contraction_cache=None))
                     checks.append(dict(source_ik=k.source_ik,target_ik=k.target_ik,**check))

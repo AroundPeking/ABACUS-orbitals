@@ -19,6 +19,7 @@ class ExpandedMotherTest(unittest.TestCase):
         self.assertEqual(expanded.primitive_count(48, 3, 2), 1536)
         self.assertEqual(expanded.primitive_count(48, 4, 2), 2400)
         expanded.validate_bessel_contract(48, 230.0, 10.0)
+        expanded.validate_bessel_contract(100, 1000.0, 10.0)
         with self.assertRaisesRegex(ValueError, 'does not produce'):
             expanded.validate_bessel_contract(48, 225.0, 10.0)
 
@@ -34,6 +35,22 @@ class ExpandedMotherTest(unittest.TestCase):
             coefficients, source_rows=31, target_rows=48)
         self.assertEqual([tuple(value.shape) for value in result['C']],
                          [(48, 4), (48, 4), (48, 3), (48, 2), (48, 0)])
+        for old, new in zip(coefficients['C'], result['C']):
+            np.testing.assert_array_equal(new[:31], old)
+            self.assertEqual(np.count_nonzero(new[31:]), 0)
+
+    def test_zero_padding_to_hundred_rows_preserves_the_source_prefix(self):
+        coefficients = {
+            'C': [
+                np.arange(31 * count, dtype=np.float64).reshape(31, count)
+                for count in (4, 4, 3, 2, 0)
+            ]
+        }
+        coefficients['C'][-1] = np.empty((31, 0), dtype=np.float64)
+        result = expanded.zero_pad_radial_coefficients(
+            coefficients, source_rows=31, target_rows=100)
+        self.assertEqual([tuple(value.shape) for value in result['C']],
+                         [(100, 4), (100, 4), (100, 3), (100, 2), (100, 0)])
         for old, new in zip(coefficients['C'], result['C']):
             np.testing.assert_array_equal(new[:31], old)
             self.assertEqual(np.count_nonzero(new[31:]), 0)

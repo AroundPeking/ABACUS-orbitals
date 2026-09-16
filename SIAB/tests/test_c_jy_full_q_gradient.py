@@ -14,10 +14,10 @@ INDICES = (1, 22, 43, 6, 27, 23, 11, 55)
 MULTIPLICITIES = (1, 8, 4, 6, 24, 12, 3, 6)
 
 
-def coefficients():
+def coefficients(radial_rows=48):
     result = []
     for count in PROFILE:
-        value = torch.zeros((48, count), dtype=torch.float64)
+        value = torch.zeros((radial_rows, count), dtype=torch.float64)
         if count:
             value[:count, :] = torch.eye(count, dtype=torch.float64)
         result.append(value)
@@ -91,6 +91,44 @@ class FullQGradientTest(unittest.TestCase):
         torch.testing.assert_close(raw[:31], torch.zeros_like(raw[:31]))
         torch.testing.assert_close(raw[31:],
                                    torch.full_like(raw[31:], 8/64))
+
+    def test_one_q_accepts_a_hundred_row_mother_at_fixed_output_rank(self):
+        dataset = types.SimpleNamespace(
+            frequency_ha=torch.arange(1, 13, dtype=torch.float64),
+            primitive_blocks=("blocks",), kpoints=("k1",),
+            selected_iq=1, q_weight=1/64)
+        spec = dict(profile=list(PROFILE), ao_per_C=45,
+                    coefficients_path="/tmp/c", coefficients_sha256="a"*64)
+
+        def evaluate(current_dataset, current, **controls):
+            value = sum(channel[31:, :].sum()
+                        for channel in current["C"] if channel.shape[1])
+            return types.SimpleNamespace(
+                response=value.reshape(1, 1, 1),
+                minimum_occupied_capture=.999999,
+                maximum_overlap_condition=17., minimum_candidate_rank=90)
+
+        def objective(datasets, responses, **weights):
+            energy = datasets[0].q_weight * responses[0].sum()
+            record = types.SimpleNamespace(
+                candidate_contributions_ha=energy.repeat(12)/12,
+                reference_contributions_ha=torch.full(
+                    (12,), -.2/12, dtype=torch.float64))
+            return types.SimpleNamespace(
+                candidate_energy_ha=energy,
+                reference_energy_ha=torch.tensor(-.2, dtype=torch.float64),
+                q_records=(record,))
+
+        result = gradient.evaluate_q_energy_gradient(
+            dataset, spec,
+            read_coefficients=lambda *args, **kwargs: coefficients(100),
+            evaluate_response=evaluate, evaluate_objective=objective,
+            radial_gradient_report=radial_gradient_report,
+            radial_rows=100)
+
+        self.assertEqual(result["radial_rows"], 100)
+        self.assertEqual(
+            result["energy_gradient"]["channels"][0]["shape"], [100, 4])
 
     def artifact(self, slot, scale=1.):
         raw = {"C": []}

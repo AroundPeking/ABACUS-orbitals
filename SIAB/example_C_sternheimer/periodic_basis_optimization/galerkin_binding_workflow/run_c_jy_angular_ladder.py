@@ -103,10 +103,16 @@ def expanded_gamma_dataset(dataset, contract):
     expansion = contract.get('primitive_expansion')
     if expansion is None:
         return dataset, None
-    expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+    target_rows = expansion.get('expanded_radial_rows')
+    full_count = expansion.get('expanded_primitive_count')
+    if (type(target_rows) is not int or target_rows <= 31
+            or full_count != target_rows * 25 * 2):
+        raise ValueError('unexpected expanded mother dimensions')
+    expected = dict(source_radial_rows=31,
+                    expanded_radial_rows=target_rows,
                     source_primitive_count=1550,
-                    expanded_primitive_count=2400,
-                    expanded_spdf_primitive_count=1536)
+                    expanded_primitive_count=full_count,
+                    expanded_spdf_primitive_count=target_rows * 16 * 2)
     if any(expansion.get(key) != value for key, value in expected.items()):
         raise ValueError('unexpected expanded mother contract')
     audit_path = Path(contract['expanded_gamma_audit_result'])
@@ -137,9 +143,9 @@ def expanded_gamma_dataset(dataset, contract):
     prefix = validate_nested_primitive_blocks(
         (old_directory/'primitive_blocks.dat').read_text(),
         (native.directory/'primitive_blocks.dat').read_text(),
-        source_rows=31, target_rows=48, lmax=4, natom=2)
+        source_rows=31, target_rows=target_rows, lmax=4, natom=2)
     blocks = _read_primitive_blocks(
-        str(native.directory), native.scalar['primitive_blocks_sha256'], 2400)
+        str(native.directory), native.scalar['primitive_blocks_sha256'], full_count)
     joined, checks = [], []
     with np.load(maps_path, allow_pickle=False) as maps:
         auxiliary = maps['auxiliary_map']
@@ -150,7 +156,7 @@ def expanded_gamma_dataset(dataset, contract):
                      hamiltonian_ha=.5*native.array(6, ik),
                      occupied_projection=native.array(7, ik),
                      source=native.array(2, ik).reshape(
-                         record.source.shape[0], auxiliary.shape[0], 2400)),
+                         record.source.shape[0], auxiliary.shape[0], full_count)),
                 {name: getattr(record, name).numpy() for name in
                  ('overlap', 'hamiltonian_ha', 'occupied_projection', 'source')},
                 occupied_map=maps['occupied_at_k%d' % ik],
@@ -160,7 +166,7 @@ def expanded_gamma_dataset(dataset, contract):
                            for name, value in values.items()},
                 block_contraction_cache=None))
             checks.append(dict(ik=ik, **check))
-    result = replace(dataset, primitive_count=2400,
+    result = replace(dataset, primitive_count=full_count,
                      primitive_blocks_sha256=native.scalar['primitive_blocks_sha256'],
                      primitive_blocks=blocks, kpoints=tuple(joined),
                      active_primitive_reduction=None)
@@ -198,7 +204,7 @@ def run(contract_path, output):
                                       profiles=requested_profiles)
         if (gradient_mode
                 and (requested_profiles != ((4, 4, 3, 2, 0),)
-                     or radial_rows != 48)):
+                     or radial_rows <= 31)):
             raise ValueError('energy gradient requires one expanded 45-AO profile')
     for name, expected in contract['inputs'].items():
         if sha(name) != expected:

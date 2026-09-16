@@ -136,15 +136,18 @@ def run(contract_path, output):
         contract["coefficient_sha256"], "input coefficient")
     if sha(coefficient_path) != coefficient_sha256:
         raise ValueError("input coefficient hash mismatch")
+    radial_rows = int(contract.get("radial_rows", 48))
+    if radial_rows <= 31:
+        raise ValueError("expanded full-q gradient requires radial rows above source size")
     coefficients = read_periodic_optimizer_coefficients(
-        coefficient_path, element="C", radial_rows=48,
+        coefficient_path, element="C", radial_rows=radial_rows,
         expected_nu=PROFILE)
 
     output.mkdir()
     try:
         reduced = reduce_full_q_energy_gradients(
             artifacts, coefficients, coefficient_sha256=coefficient_sha256,
-            source_radial_rows=31, radial_rows=48)
+            source_radial_rows=31, radial_rows=radial_rows)
         baseline = validate_baseline_reproduction(
             reduced,
             expected_candidate_energy_ha=contract[

@@ -117,13 +117,17 @@ def normalize_expansion(radial_rows, primitive_expansion,
         return None
     if any(value is None for value in values):
         raise ValueError('complete expanded mother inputs required')
-    expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+    target_rows = primitive_expansion.get('expanded_radial_rows')
+    full_count = primitive_expansion.get('expanded_primitive_count')
+    if (type(target_rows) is not int or target_rows != radial_rows
+            or radial_rows <= 31 or full_count != radial_rows * 25 * 2):
+        raise ValueError('unexpected expanded mother dimensions')
+    expected = dict(source_radial_rows=31, expanded_radial_rows=target_rows,
                     source_primitive_count=1550,
-                    expanded_primitive_count=2400,
-                    expanded_spdf_primitive_count=1536)
-    if (radial_rows != 48
-            or any(primitive_expansion.get(key) != value
-                   for key, value in expected.items())):
+                    expanded_primitive_count=full_count,
+                    expanded_spdf_primitive_count=target_rows * 16 * 2)
+    if any(primitive_expansion.get(key) != value
+           for key, value in expected.items()):
         raise ValueError('unexpected expanded mother contract')
     if set(expanded_q_audit_results) != set(range(1, 8)):
         raise ValueError('all seven finite-q expanded audits are required')
@@ -156,7 +160,7 @@ def prepare_contracts(template_root, output_root, candidates, *, source_commit,
     if scope not in (EVALUATION_SCOPE, GRADIENT_SCOPE):
         raise ValueError('invalid compressed full-q scope')
     if scope == GRADIENT_SCOPE and (profiles != ((4, 4, 3, 2, 0),)
-                                    or radial_rows != 48):
+                                    or radial_rows <= 31):
         raise ValueError('energy gradients require one expanded 45-AO profile')
     if type(radial_rows) is not int or radial_rows <= 0:
         raise ValueError('radial_rows must be a positive integer')

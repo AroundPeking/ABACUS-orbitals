@@ -36,6 +36,21 @@ def expanded_pilot():
     return value
 
 
+def hundred_row_pilot():
+    value = pilot()
+    value['full_source_primitive_count'] = 5000
+    value['primitive_expansion'] = dict(
+        source_radial_rows=31,
+        expanded_radial_rows=100,
+        source_primitive_count=1550,
+        expanded_primitive_count=5000,
+        expanded_spdf_primitive_count=3200,
+    )
+    for row in value['per_k']:
+        row['overlap'].update(max_abs=1.4e-10, relative=5e-13)
+    return value
+
+
 class RemainingSourcesTest(unittest.TestCase):
     def test_pilot_admits_only_canonical_remaining_sources_not_physics(self):
         result = MODULE.validate_finite_q_pilot(pilot())
@@ -65,8 +80,15 @@ class RemainingSourcesTest(unittest.TestCase):
             value['per_k'][0]['overlap'].update(
                 max_abs=absolute, relative=relative)
             with self.subTest(absolute=absolute, relative=relative), \
-                    self.assertRaisesRegex(ValueError, 'numerical'):
+                self.assertRaisesRegex(ValueError, 'numerical'):
                 MODULE.validate_finite_q_pilot(value)
+
+    def test_hundred_row_pilot_uses_the_same_nested_source_contract(self):
+        result = MODULE.validate_finite_q_pilot(hundred_row_pilot())
+        self.assertEqual(result['full_source_primitive_count'], 5000)
+        self.assertIsNone(MODULE.q2_source_audit_sha256(5000))
+        with self.assertRaisesRegex(ValueError, 'mother size'):
+            MODULE.q2_source_audit_sha256(4999)
 
     def test_numerical_and_routing_failures_remain_rejected(self):
         for mutation in ('rank', 'q', 'missing', 'route', 'failure', 'new_H', 'source', 'nan'):

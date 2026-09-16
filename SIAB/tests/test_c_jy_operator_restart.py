@@ -81,6 +81,19 @@ class OperatorRestartTest(unittest.TestCase):
             MODULE.configure_expanded_mother(
                 values, radial_rows=48, bessel_nao_ecut=225.0)
 
+    def test_hundred_row_mother_has_the_expected_contract(self):
+        values = dict(bessel_nao_ecut='100', bessel_nao_rcut='10',
+                      sternheimer_siab_lmax='4', unrelated='fixed')
+        configured, contract = MODULE.configure_expanded_mother(
+            values, radial_rows=100, bessel_nao_ecut=1000.0)
+        self.assertEqual(configured['bessel_nao_ecut'], '1000')
+        self.assertEqual(contract['source_radial_rows'], 31)
+        self.assertEqual(contract['expanded_radial_rows'], 100)
+        self.assertEqual(contract['source_primitive_count'], 1550)
+        self.assertEqual(contract['expanded_primitive_count'], 5000)
+        self.assertEqual(contract['expanded_spdf_primitive_count'], 3200)
+        self.assertEqual(len(MODULE.primitive_prefix_indices(31, 100, 4, 2)), 1550)
+
 
 if __name__ == '__main__':
     unittest.main()

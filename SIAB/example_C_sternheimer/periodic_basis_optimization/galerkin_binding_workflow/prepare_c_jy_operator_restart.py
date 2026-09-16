@@ -294,10 +294,13 @@ def validate_source_extension_evidence(reuse, gamma):
 
 
 def q2_source_audit_sha256(full_source_primitive_count):
-    try:
+    if full_source_primitive_count in Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT:
         return Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT[full_source_primitive_count]
-    except KeyError as error:
-        raise ValueError('unsupported q2 source pilot mother size') from error
+    if (type(full_source_primitive_count) is not int
+            or full_source_primitive_count <= 1550
+            or full_source_primitive_count % (25 * 2)):
+        raise ValueError('unsupported q2 source pilot mother size')
+    return None
 
 
 def validate_finite_q_pilot(result):
@@ -307,30 +310,36 @@ def validate_finite_q_pilot(result):
             or result.get('finite_q_spd_source_compatibility') != 'pass'
             or result.get('failure_reasons') != [] or result.get('selected_iq') != 22
             or result.get('compared_primitive_count') != 558
-            or full_count not in Q2_SOURCE_AUDIT_SHA_BY_PRIMITIVE_COUNT
+            or type(full_count) is not int
+            or (full_count != 1550
+                and (full_count <= 1550 or full_count % (25 * 2)))
             or result.get('regenerated_hamiltonian_read') is not False
             or result.get('regenerated_hamiltonian_admitted') is not False
             or len(rows) != 64 or not all(r.get('pass_gate') is True for r in rows)
             or sorted(r['source_ik'] for r in rows) != list(range(1, 65))
             or sorted(r['target_ik'] for r in rows) != list(range(1, 65))):
         raise ValueError('complete accepted q2 source pilot required')
-    if full_count == 2400:
-        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+    if full_count != 1550:
+        if full_count % (25 * 2) != 0:
+            raise ValueError('expanded q2 source pilot has invalid mother size')
+        expanded_rows = full_count // (25 * 2)
+        expected = dict(source_radial_rows=31,
+                        expanded_radial_rows=expanded_rows,
                         source_primitive_count=1550,
-                        expanded_primitive_count=2400,
-                        expanded_spdf_primitive_count=1536)
+                        expanded_primitive_count=full_count,
+                        expanded_spdf_primitive_count=expanded_rows * 16 * 2)
         expansion = result.get('primitive_expansion', {})
         if not all(expansion.get(key) == value for key, value in expected.items()):
             raise ValueError('expanded q2 source pilot contract mismatch')
     values = [(result['metric']['relative'], 1e-8), (result['auxiliary_map_unitarity'], 5e-6)]
     for row in rows:
-        overlap_limit = 2e-10 if full_count == 2400 else 1e-10
+        overlap_limit = 2e-10 if full_count != 1550 else 1e-10
         values.extend([(row['source']['relative'], 1e-6),
             (row['overlap']['max_abs'], overlap_limit),
             (row['occupied']['relative'], 1e-6), (row['occupied']['unitarity'], 1e-6),
             (row['source_eigenvalue_ha']['max_abs'], 5e-7),
             (row['occupied_energy_commutator_ha'], 5e-7)])
-        if full_count == 2400:
+        if full_count != 1550:
             values.append((row['overlap']['relative'], 1e-11))
     if any(not math.isfinite(v) or not 0 <= v <= limit for v, limit in values):
         raise ValueError('q2 source pilot numerical gate failed')
@@ -350,10 +359,10 @@ def source_extension_contract(iq, reference, reuse_path, gamma_path, pilot_path=
         pilot_validation = validate_finite_q_pilot(pilot)
         expected_digest = q2_source_audit_sha256(
             pilot_validation['full_source_primitive_count'])
-        if pilot_digest != expected_digest:
+        if expected_digest is not None and pilot_digest != expected_digest:
             raise ValueError('remaining finite-q source extension requires locked q2 pilot')
         pilot_contract = dict(source_extension_pilot_audit=str(pilot_path.resolve()),
-                              source_extension_pilot_sha256=expected_digest,
+                              source_extension_pilot_sha256=pilot_digest,
                               source_extension_pilot_full_source_primitive_count=
                               pilot_validation['full_source_primitive_count'])
     if (reuse_path is None or gamma_path is None

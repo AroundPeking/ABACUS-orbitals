@@ -89,9 +89,12 @@ def audit(run, bundle, reader_source, output, source_commit):
         pilot_path = Path(contract['source_extension_pilot_audit'])
         pilot = json.loads(pilot_path.read_text())
         pilot_validation = validate_finite_q_pilot(pilot)
-        pilot_sha = q2_source_audit_sha256(
+        pilot_expected_sha = q2_source_audit_sha256(
             pilot_validation['full_source_primitive_count'])
-        hashed(pilot_path, pilot_sha)
+        pilot_sha = sha(pilot_path)
+        if pilot_expected_sha is not None:
+            require(pilot_sha == pilot_expected_sha,
+                    'known q2 source pilot hash changed')
         require(contract['source_extension_pilot_sha256'] == pilot_sha
                 and contract['source_extension_pilot_full_source_primitive_count']
                     == pilot_validation['full_source_primitive_count']
@@ -145,22 +148,27 @@ def audit(run, bundle, reader_source, output, source_commit):
         full_primitive_count = 1550
         indices = old_indices
     else:
-        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+        expanded_rows = expansion.get('expanded_radial_rows')
+        full_primitive_count = expansion.get('expanded_primitive_count')
+        require(type(expanded_rows) is int and expanded_rows > 31
+                and full_primitive_count == expanded_rows * 25 * 2,
+                'unexpected expanded mother dimensions')
+        expected = dict(source_radial_rows=31,
+                        expanded_radial_rows=expanded_rows,
                         source_primitive_count=1550,
-                        expanded_primitive_count=2400,
-                        expanded_spdf_primitive_count=1536)
+                        expanded_primitive_count=full_primitive_count,
+                        expanded_spdf_primitive_count=expanded_rows * 16 * 2)
         require(all(expansion.get(key) == value for key, value in expected.items()),
                 'unexpected expanded mother contract')
         old_blocks = Path(contract['original_operator_directory'])/'primitive_blocks.dat'
         new_blocks = new.directory/'primitive_blocks.dat'
         full_prefix = validate_nested_primitive_blocks(
             old_blocks.read_text(), new_blocks.read_text(), source_rows=31,
-            target_rows=48, lmax=4, natom=2)
+            target_rows=expanded_rows, lmax=4, natom=2)
         require(len(full_prefix) == 1550, 'expanded primitive prefix is incomplete')
-        full_primitive_count = 2400
         indices = remap_nested_active_indices(
-            old_indices, source_rows=31, target_rows=48,
-            source_primitive_count=1550, target_primitive_count=2400)
+            old_indices, source_rows=31, target_rows=expanded_rows,
+            source_primitive_count=1550, target_primitive_count=full_primitive_count)
     require(new.scalar['kernel'] == 'full_coulomb'
             and new.scalar['primitive_count'] == str(full_primitive_count)
             and new.scalar['k_count'] == '64'

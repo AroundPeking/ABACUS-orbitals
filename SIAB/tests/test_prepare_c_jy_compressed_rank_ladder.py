@@ -179,6 +179,33 @@ class PrepareCjYCompressedRankLadderTest(unittest.TestCase):
                     contract['scope'],
                     'compressed_shared_radial_full_q_energy_gradient')
 
+    def test_hundred_row_expansion_uses_the_same_fixed_rank_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gamma_run = self.accepted_run(root/'gamma-run')
+            gamma_audit = self.accepted_audit(
+                root/'gamma-audit', gamma_run, include_run=False)
+            q_audits = {}
+            for slot in range(1, 8):
+                run = self.accepted_run(root/('q%d-run' % slot))
+                q_audits[slot] = self.accepted_audit(
+                    root/('q%d-audit' % slot), run)
+            expansion = dict(source_radial_rows=31, expanded_radial_rows=100,
+                source_primitive_count=1550, expanded_primitive_count=5000,
+                expanded_spdf_primitive_count=3200,
+                source_prefix_indices_sha256='d'*64)
+
+            result = prepare.normalize_expansion(
+                100, expansion, gamma_run, gamma_audit, q_audits)
+
+            self.assertEqual(result['primitive_expansion'], expansion)
+            self.assertEqual(result['gamma_run'], gamma_run.resolve())
+            self.assertEqual(set(result['finite_q']), set(range(1, 8)))
+            malformed = dict(expansion, expanded_primitive_count=4999)
+            with self.assertRaisesRegex(ValueError, 'expanded mother'):
+                prepare.normalize_expansion(
+                    100, malformed, gamma_run, gamma_audit, q_audits)
+
     def test_rejects_expanded_audit_as_finite_q_baseline(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -65,6 +65,13 @@ class FiniteQSourceTest(unittest.TestCase):
             MODULE.remap_nested_active_indices(
                 (0, 6), source_rows=3, target_rows=5,
                 source_primitive_count=6, target_primitive_count=10)
+        mapped = MODULE.remap_nested_active_indices(
+            tuple(range(279)) + tuple(range(775, 1054)),
+            source_rows=31, target_rows=100,
+            source_primitive_count=1550, target_primitive_count=5000)
+        self.assertEqual(len(mapped), 558)
+        self.assertEqual(mapped[:3], (0, 1, 2))
+        self.assertEqual(mapped[279:282], (2500, 2501, 2502))
 
     def test_expanded_finite_q_overlap_uses_the_nested_roundoff_gate(self):
         measured = {'max_abs': 1.3164935808163136e-10,

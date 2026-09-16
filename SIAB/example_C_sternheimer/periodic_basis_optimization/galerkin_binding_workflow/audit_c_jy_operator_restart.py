@@ -197,16 +197,22 @@ def audit(run, output):
     expansion = contract.get('primitive_expansion')
     prefix = None
     if expansion is not None:
-        expected = dict(source_radial_rows=31, expanded_radial_rows=48,
+        target_rows = expansion.get('expanded_radial_rows')
+        full_count = expansion.get('expanded_primitive_count')
+        if (type(target_rows) is not int or target_rows <= 31
+                or full_count != target_rows * 25 * 2):
+            raise ValueError('unexpected expanded mother dimensions')
+        expected = dict(source_radial_rows=31,
+                        expanded_radial_rows=target_rows,
                         source_primitive_count=1550,
-                        expanded_primitive_count=2400,
-                        expanded_spdf_primitive_count=1536)
+                        expanded_primitive_count=full_count,
+                        expanded_spdf_primitive_count=target_rows * 16 * 2)
         if any(expansion.get(key) != value for key, value in expected.items()):
             raise ValueError('unexpected expanded mother contract')
         prefix = validate_nested_primitive_blocks(
             (old.directory/'primitive_blocks.dat').read_text(),
             (new.directory/'primitive_blocks.dat').read_text(),
-            source_rows=31, target_rows=48, lmax=4, natom=2)
+            source_rows=31, target_rows=target_rows, lmax=4, natom=2)
         if len(prefix) != 1550 or len(set(prefix)) != 1550:
             raise ValueError('expanded primitive prefix mapping is incomplete')
         prefix_sha = hashlib.sha256(
@@ -229,7 +235,7 @@ def audit(run, output):
             if old.scalar[key] != new.scalar[key]:
                 raise ValueError('incompatible operator metadata: '+key)
     elif (old.scalar['primitive_count'] != '1550'
-          or new.scalar['primitive_count'] != '2400'):
+          or new.scalar['primitive_count'] != str(expansion['expanded_primitive_count'])):
         raise ValueError('expanded primitive count mismatch')
     if (new.scalar['selected_iq'] != '1' or new.scalar['k_count'] != '64'
             or len(new.frequencies) != 12 or new.frequencies != old.frequencies):

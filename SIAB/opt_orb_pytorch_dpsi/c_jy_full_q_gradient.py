@@ -50,11 +50,11 @@ def evaluate_q_energy_gradient(
         occupied_capture_floor=.99999, radial_rows=48):
     """Evaluate one star-weighted q contribution and its raw Ec gradient."""
     spec = validate_profile_specs([spec], profiles=(PROFILE,))[0]
-    if (type(radial_rows) is not int or radial_rows != 48
+    if (type(radial_rows) is not int or radial_rows <= 31
             or int(dataset.frequency_ha.numel()) != 12
             or not math.isfinite(occupied_capture_floor)
             or not 0 < occupied_capture_floor <= 1):
-        raise ValueError("expanded 48-row, 12-frequency controls required")
+        raise ValueError("expanded mother and 12-frequency controls required")
     coefficients = read_coefficients(
         spec["coefficients_path"], element="C", radial_rows=radial_rows,
         expected_nu=PROFILE)
